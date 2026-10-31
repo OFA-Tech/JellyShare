@@ -15,10 +15,18 @@ public class FederationControllerPingTests
         public string ServerName => name;
     }
 
+    private static FederationController NewController(string name)
+    {
+        var identity = new FakeServerIdentity(name);
+        var config = new FakeConfig();
+        var source = new FakeSource();
+        return new FederationController(identity, new CatalogBuilder(source, identity, config), source, config, new ShareTokenService());
+    }
+
     [Fact]
     public void Ping_ReturnsProtocolVersionAndServerName()
     {
-        var controller = new FederationController(new FakeServerIdentity("Alice"));
+        var controller = NewController("Alice");
 
         var result = controller.Ping();
 
@@ -30,7 +38,7 @@ public class FederationControllerPingTests
     [Fact]
     public void Ping_SerializesToCamelCaseWireShape()
     {
-        var controller = new FederationController(new FakeServerIdentity("Alice"));
+        var controller = NewController("Alice");
 
         var json = JsonSerializer.Serialize(controller.Ping().Value);
 

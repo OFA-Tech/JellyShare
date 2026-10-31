@@ -6,3 +6,4 @@ obj/
 harness/media/
 harness/config/
 __pycache__/
+harness/.secrets/

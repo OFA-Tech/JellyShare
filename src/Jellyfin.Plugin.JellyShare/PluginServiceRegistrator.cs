@@ -14,5 +14,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         serviceCollection.AddSingleton<IServerIdentity, ServerIdentity>();
+        serviceCollection.AddSingleton<IConfigProvider, PluginConfigProvider>();
+        serviceCollection.AddSingleton<ShareTokenService>();
+        serviceCollection.AddSingleton<ILocalItemSource, JellyfinLocalItemSource>();
+        serviceCollection.AddSingleton<CatalogBuilder>(sp => new CatalogBuilder(
+            sp.GetRequiredService<ILocalItemSource>(),
+            sp.GetRequiredService<IServerIdentity>(),
+            sp.GetRequiredService<IConfigProvider>()));
     }
 }

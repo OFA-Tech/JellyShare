@@ -20,6 +20,23 @@ public sealed record PingResponse(
     [property: JsonPropertyName("protocolVersion")] string ProtocolVersion,
     [property: JsonPropertyName("serverName")] string ServerName);
 
+/// <summary>Short JSON error body of the federation endpoints.</summary>
+/// <param name="Error">A short, fixed error description.</param>
+public sealed record ErrorResponse([property: JsonPropertyName("error")] string Error);
+
+/// <summary>
+/// Response of <c>GET /JellyShare/v1/catalog</c>.
+/// </summary>
+/// <param name="ProtocolVersion">The protocol version the server speaks.</param>
+/// <param name="ServerName">The friendly name of the Jellyfin server.</param>
+/// <param name="Etag">Opaque hash of the catalog content (also sent as the <c>ETag</c> header).</param>
+/// <param name="Items">The shared movies and episodes.</param>
+public sealed record CatalogResponse(
+    [property: JsonPropertyName("protocolVersion")] string ProtocolVersion,
+    [property: JsonPropertyName("serverName")] string ServerName,
+    [property: JsonPropertyName("etag")] string Etag,
+    [property: JsonPropertyName("items")] IReadOnlyList<CatalogItem> Items);
+
 /// <summary>An audio track of a catalog item.</summary>
 /// <param name="Language">ISO language code, if known.</param>
 /// <param name="Codec">The audio codec.</param>
