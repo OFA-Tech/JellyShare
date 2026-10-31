@@ -33,8 +33,19 @@ public class CatalogBuilderTests
             modified ?? Modified,
             seriesId);
 
-    private static LocalItem Local(Guid id, string? path, string type = "Movie", DateTime? modified = null, string? seriesId = null)
-        => new(id, type, path, Item(id, type, modified, seriesId));
+    private int _materialized;
+
+    private LocalItem Local(Guid id, string? path, string type = "Movie", DateTime? modified = null, string? seriesId = null)
+        => new(
+            id,
+            type,
+            path,
+            seriesId is null ? null : Guid.Parse(seriesId),
+            () =>
+            {
+                Interlocked.Increment(ref _materialized);
+                return Item(id, type, modified, seriesId);
+            });
 
     private static Guid G(int n) => new(n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
@@ -208,5 +219,69 @@ public class CatalogBuilderTests
         Assert.True(builder.IsExposed(share, seriesId));
         Assert.False(builder.IsExposed(share, G(3)));
         Assert.False(builder.IsExposed(share, Guid.NewGuid()));
+    }
+
+    [Fact]
+    public void Build_DoesNotMaterializeExcludedItems()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((LibA, Local(G(2), MoviesRoot + "/B/B.mkv")));
+        source.Items.Add((LibA, Local(G(3), "/media/Movies/C/C.strm")));
+        source.Items.Add((LibA, Local(G(4), null)));
+        source.Items.Add((LibA, Local(G(5), "/media/Movies/missing/M.mkv")));
+
+        var catalog = Builder(source, p => !p.Contains("/missing/")).Build(Share(LibA));
+
+        Assert.Single(catalog.Items);
+        Assert.Equal(1, _materialized);
+    }
+
+    [Fact]
+    public void IsExposed_NeverMaterializesCatalogItems()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((LibA, Local(G(2), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
+
+        var builder = Builder(source);
+
+        Assert.True(builder.IsExposed(Share(LibA), G(1)));
+        Assert.True(builder.IsExposed(Share(LibA), G(99)));
+        Assert.Equal(0, _materialized);
+    }
+
+    [Fact]
+    public void IsExposed_SeriesWhoseEpisodesArePlaceholdersOrUnshared_IsNotExposed()
+    {
+        var onlyPlaceholders = G(90);
+        var otherLibrary = G(91);
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), ShowsRoot + "/P/Season 01/P.strm", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
+        source.Items.Add((LibA, Local(G(2), ShowsRoot + "/P/Season 01/P2.mkv", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
+        source.Items.Add((LibB, Local(G(3), "/media/Other/S/Season 01/S.mkv", "Episode", seriesId: otherLibrary.ToString("N"))));
+        var builder = Builder(source);
+
+        Assert.False(builder.IsExposed(Share(LibA), onlyPlaceholders));
+        Assert.False(builder.IsExposed(Share(LibA), otherLibrary));
+    }
+
+    [Fact]
+    public async Task IsExposed_ConcurrentCallsAfterExpiry_RebuildOnce()
+    {
+        var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var source = new FakeSource { GetItemsDelay = TimeSpan.FromMilliseconds(150) };
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        var builder = new CatalogBuilder(source, new FakeIdentity(), new FakeConfig(), _ => true, () => now);
+        var share = Share(LibA);
+        Assert.True(builder.IsExposed(share, G(1)));
+        Assert.Equal(1, source.GetItemsCalls);
+
+        now = now.AddMinutes(1);
+        var results = await Task.WhenAll(Enumerable.Range(0, 16)
+            .Select(_ => Task.Run(() => builder.IsExposed(share, G(1)))));
+
+        Assert.All(results, Assert.True);
+        Assert.Equal(2, source.GetItemsCalls);
     }
 }

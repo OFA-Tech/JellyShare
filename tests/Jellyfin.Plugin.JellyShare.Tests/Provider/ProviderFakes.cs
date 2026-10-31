@@ -27,8 +27,22 @@ internal sealed class FakeSource : ILocalItemSource
 
     public Dictionary<(Guid, string), string> Images { get; } = new();
 
+    public TimeSpan GetItemsDelay { get; set; }
+
+    public int GetItemsCalls => _calls;
+
+    private int _calls;
+
     public IEnumerable<LocalItem> GetItems(IReadOnlyCollection<Guid> libraryIds)
-        => Items.Where(i => libraryIds.Contains(i.Library)).Select(i => i.Item);
+    {
+        Interlocked.Increment(ref _calls);
+        if (GetItemsDelay > TimeSpan.Zero)
+        {
+            Thread.Sleep(GetItemsDelay);
+        }
+
+        return Items.Where(i => libraryIds.Contains(i.Library)).Select(i => i.Item).ToList();
+    }
 
     public string? GetImagePath(Guid itemId, string imageType)
         => Images.TryGetValue((itemId, imageType), out var p) ? p : null;

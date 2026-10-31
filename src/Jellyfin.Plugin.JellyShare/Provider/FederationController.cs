@@ -106,7 +106,7 @@ public class FederationController : ControllerBase
         }
 
         var path = _source.GetImagePath(id, canonicalType);
-        if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+        if (string.IsNullOrEmpty(path) || !IsReadable(path))
         {
             return NotFound();
         }
@@ -117,6 +117,19 @@ public class FederationController : ControllerBase
         }
 
         return PhysicalFile(path, contentType);
+    }
+
+    private static bool IsReadable(string path)
+    {
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 
     private PeerShare? Authenticate()

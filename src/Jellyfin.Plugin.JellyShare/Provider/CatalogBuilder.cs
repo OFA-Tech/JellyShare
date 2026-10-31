@@ -12,8 +12,14 @@ namespace Jellyfin.Plugin.JellyShare.Provider;
 /// <param name="Id">The item id.</param>
 /// <param name="Type"><c>Movie</c> or <c>Episode</c>.</param>
 /// <param name="Path">The file path of the item.</param>
-/// <param name="Item">The catalog entry for the item.</param>
-public sealed record LocalItem(Guid Id, string Type, string? Path, CatalogItem Item);
+/// <param name="SeriesId">For episodes, the id of the owning series.</param>
+/// <param name="Factory">Creates the catalog entry. Only called for items that pass the share filters.</param>
+public sealed record LocalItem(Guid Id, string Type, string? Path, Guid? SeriesId, Func<CatalogItem> Factory)
+{
+    /// <summary>Creates the catalog entry for the item (may query the library; call only for included items).</summary>
+    /// <returns>The catalog entry.</returns>
+    public CatalogItem CreateItem() => Factory();
+}
 
 /// <summary>Reads local library content, abstracted so the catalog logic stays unit-testable.</summary>
 public interface ILocalItemSource
@@ -53,19 +59,24 @@ public class CatalogBuilder
     private readonly IServerIdentity _identity;
     private readonly IConfigProvider _config;
     private readonly Func<string, bool> _fileExists;
+    private readonly Func<DateTime> _utcNow;
     private readonly ConcurrentDictionary<Guid, (string Key, DateTime Expires, HashSet<Guid> Ids)> _index = new();
+    private readonly ConcurrentDictionary<Guid, object> _locks = new();
 
     /// <summary>Initializes a new instance of the <see cref="CatalogBuilder"/> class.</summary>
     /// <param name="source">The local item source.</param>
     /// <param name="identity">The local server identity.</param>
     /// <param name="config">The configuration provider.</param>
     /// <param name="fileExists">Existence check for item files; defaults to <see cref="File.Exists(string)"/>.</param>
+    /// <param name="utcNow">Clock used for the index cache; defaults to <see cref="DateTime.UtcNow"/>.</param>
     public CatalogBuilder(
         ILocalItemSource source,
         IServerIdentity identity,
         IConfigProvider config,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        Func<DateTime>? utcNow = null)
     {
+        _utcNow = utcNow ?? (() => DateTime.UtcNow);
         _source = source;
         _identity = identity;
         _config = config;
@@ -78,7 +89,8 @@ public class CatalogBuilder
     public CatalogResponse Build(PeerShare share)
     {
         ArgumentNullException.ThrowIfNull(share);
-        var items = Collect(share);
+        var items = Included(share).Select(l => l.CreateItem()).ToList();
+        items.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
         return new CatalogResponse(ProtocolInfo.Version, _identity.ServerName, ComputeEtag(items), items);
     }
 
@@ -93,39 +105,54 @@ public class CatalogBuilder
     {
         ArgumentNullException.ThrowIfNull(share);
         var key = string.Join(',', share.LibraryIds.OrderBy(i => i));
-        var now = DateTime.UtcNow;
-        if (_index.TryGetValue(share.Id, out var cached) && cached.Key == key && cached.Expires > now)
+        if (TryGetIndex(share.Id, key, out var ids))
         {
-            return cached.Ids.Contains(itemId);
+            return ids.Contains(itemId);
         }
 
-        var ids = new HashSet<Guid>();
-        foreach (var item in Collect(share))
+        // Single-flight: concurrent callers for the same share wait for one rebuild instead of each running a full query.
+        lock (_locks.GetOrAdd(share.Id, _ => new object()))
         {
-            if (Guid.TryParse(item.Id, out var id))
+            if (TryGetIndex(share.Id, key, out ids))
             {
-                ids.Add(id);
+                return ids.Contains(itemId);
             }
 
-            if (item.SeriesId is not null && Guid.TryParse(item.SeriesId, out var seriesId))
+            ids = new HashSet<Guid>();
+            foreach (var local in Included(share))
             {
-                ids.Add(seriesId);
+                ids.Add(local.Id);
+                if (local.SeriesId is { } seriesId && seriesId != Guid.Empty)
+                {
+                    ids.Add(seriesId);
+                }
             }
+
+            _index[share.Id] = (key, _utcNow() + IndexTtl, ids);
+            return ids.Contains(itemId);
         }
-
-        _index[share.Id] = (key, now + IndexTtl, ids);
-        return ids.Contains(itemId);
     }
 
-    private List<CatalogItem> Collect(PeerShare share)
+    private bool TryGetIndex(Guid shareId, string key, out HashSet<Guid> ids)
+    {
+        if (_index.TryGetValue(shareId, out var cached) && cached.Key == key && cached.Expires > _utcNow())
+        {
+            ids = cached.Ids;
+            return true;
+        }
+
+        ids = null!;
+        return false;
+    }
+
+    private IEnumerable<LocalItem> Included(PeerShare share)
     {
         if (share.LibraryIds.Count == 0)
         {
-            return new List<CatalogItem>();
+            yield break;
         }
 
         var cfg = _config.Current;
-        var result = new List<CatalogItem>();
         foreach (var local in _source.GetItems(share.LibraryIds.ToArray()))
         {
             var path = local.Path;
@@ -137,13 +164,9 @@ public class CatalogBuilder
                 continue;
             }
 
-            result.Add(local.Item);
+            yield return local;
         }
-
-        result.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
-        return result;
     }
-
     private static string ComputeEtag(IReadOnlyList<CatalogItem> items)
     {
         var sb = new StringBuilder();

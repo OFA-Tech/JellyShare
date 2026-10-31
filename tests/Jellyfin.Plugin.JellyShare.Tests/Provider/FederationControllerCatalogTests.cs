@@ -52,10 +52,10 @@ public sealed class FederationControllerCatalogTests : IDisposable
     }
 
     private static LocalItem Movie(Guid id, string path)
-        => new(id, "Movie", path, Make(id, "Movie", null));
+        => new(id, "Movie", path, null, () => Make(id, "Movie", null));
 
     private static LocalItem Episode(Guid id, Guid seriesId, string path)
-        => new(id, "Episode", path, Make(id, "Episode", seriesId.ToString("N")));
+        => new(id, "Episode", path, seriesId, () => Make(id, "Episode", seriesId.ToString("N")));
 
     private static CatalogItem Make(Guid id, string type, string? seriesId)
         => new(
@@ -203,6 +203,19 @@ public sealed class FederationControllerCatalogTests : IDisposable
     public void Image_ItemWithoutThatImage_Returns404()
     {
         var result = Controller(_token).Image(MovieId.ToString("N"), "Logo");
+
+        Assert.IsType<NotFoundResult>(result);
+    }
+
+    [Fact]
+    public void Image_UnreadableFile_Returns404()
+    {
+        var file = Path.Combine(_tempDir, "locked.jpg");
+        File.WriteAllBytes(file, new byte[] { 1 });
+        _source.Images[(MovieId, "Primary")] = file;
+        using var exclusive = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        var result = Controller(_token).Image(MovieId.ToString("N"), "Primary");
 
         Assert.IsType<NotFoundResult>(result);
     }

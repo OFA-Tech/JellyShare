@@ -41,15 +41,18 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             Recursive = true,
         });
 
-        var seriesIds = items.OfType<Episode>()
-            .Select(e => e.SeriesId)
-            .Where(id => id != Guid.Empty)
-            .Distinct()
-            .ToArray();
-        var series = seriesIds.Length == 0
-            ? new Dictionary<Guid, BaseItem>()
-            : _libraryManager.GetItemList(new InternalItemsQuery { ItemIds = seriesIds })
-                .ToDictionary(s => s.Id);
+        // Series and media streams are only looked up for items that pass the share filters (see LocalItem.Factory).
+        var series = new Lazy<Dictionary<Guid, BaseItem>>(() =>
+        {
+            var seriesIds = items.OfType<Episode>()
+                .Select(e => e.SeriesId)
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToArray();
+            return seriesIds.Length == 0
+                ? new Dictionary<Guid, BaseItem>()
+                : _libraryManager.GetItemList(new InternalItemsQuery { ItemIds = seriesIds }).ToDictionary(s => s.Id);
+        });
 
         var result = new List<LocalItem>(items.Count);
         foreach (var item in items)
@@ -57,18 +60,26 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             switch (item)
             {
                 case Movie movie:
-                    result.Add(new LocalItem(movie.Id, "Movie", movie.Path, ToCatalogItem(movie, "Movie", null)));
+                    result.Add(new LocalItem(movie.Id, "Movie", movie.Path, null, () => ToCatalogItem(movie, "Movie", null)));
                     break;
                 case Episode episode:
-                    series.TryGetValue(episode.SeriesId, out var parent);
-                    result.Add(new LocalItem(episode.Id, "Episode", episode.Path, ToCatalogItem(episode, "Episode", parent)));
+                    var seriesId = episode.SeriesId == Guid.Empty ? (Guid?)null : episode.SeriesId;
+                    result.Add(new LocalItem(
+                        episode.Id,
+                        "Episode",
+                        episode.Path,
+                        seriesId,
+                        () =>
+                        {
+                            series.Value.TryGetValue(episode.SeriesId, out var parent);
+                            return ToCatalogItem(episode, "Episode", parent);
+                        }));
                     break;
             }
         }
 
         return result;
     }
-
     /// <inheritdoc />
     public string? GetImagePath(Guid itemId, string imageType)
     {
