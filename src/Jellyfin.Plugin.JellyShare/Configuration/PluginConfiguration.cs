@@ -12,6 +12,12 @@ public class PluginConfiguration : BasePluginConfiguration
 
     /// <summary>Gets or sets the remote servers this server consumes (consumer side).</summary>
     public List<RemotePeer> Peers { get; set; } = new();
+
+    /// <summary>Gets or sets the plugin-owned folder holding movie placeholders.</summary>
+    public string MoviesPlaceholderPath { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the plugin-owned folder holding show placeholders.</summary>
+    public string ShowsPlaceholderPath { get; set; } = string.Empty;
 }
 
 /// <summary>A share offered to one peer. Fields are added by later tasks.</summary>
