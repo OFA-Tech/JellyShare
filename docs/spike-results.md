@@ -140,6 +140,17 @@ h264 1080p + aac, 120 s). Evidence (`harness/spike/step3_play.py`, ffprobe in th
   gets a transcode (`ContainerBitrateExceedsLimit`). The brief's "set user max bitrate 1 Mbps"
   check therefore cannot pass for `.strm`; a transcode only happens when the client cannot play
   the format (proved with an HLS-only profile above).
+- **Fix proven (review follow-up, `harness/spike/bitrate_test.py`, `web_play_capped.js`):** if the
+  `PlaybackInfo` **request** carries `EnableDirectPlay=false` and `EnableDirectStream=false`
+  (what a request-side filter sets when `MaxStreamingBitrate` < source bitrate, here 1 000 000 <
+  1 312 543), Jellyfin returns `SupportsDirectPlay/DirectStream: false` and a working
+  `TranscodingUrl` (`master.m3u8?...VideoBitrate=808000&AudioBitrate=192000...`). Fetching 4 HLS
+  segments: HTTP 200, ffprobe h264 1280x720 + aac, 12.0 s, **978 kbps**. In headless Chromium
+  (request rewritten the same way, `Path` hidden) jellyfin-web played via HLS (`currentTime 13.8`),
+  ffmpeg ran `libx264 ... -maxrate 808000`, and no browser request went to 127.0.0.1. Clearing
+  the flags only in the **response** does not work: the default response has
+  `TranscodingUrl: null` (computed before), so the filter must change the request before the
+  action runs.
 
 Request headers seen by the test server (relay must accept all of these):
 
@@ -175,12 +186,16 @@ No auth headers can be added (a `.strm` holds only a URL); the source IP was `12
   (no GUI/device). Inferred from `PlaybackInfo`: any client that direct-plays `Path` for remote
   HTTP sources has the same problem; with the filter they only see server URLs. **The owner must
   confirm with a real phone/TV app** (Task 14).
-- Signed relay URLs (the spec's fallback) do not solve this: the `.strm` URL is static and
-  `127.0.0.1` is unreachable from clients anyway; exposing a public relay URL would bypass the
-  "all playback through the consumer's server" rule.
+- Signed relay URLs (the spec's fallback) do not fit: a `.strm` is a static file and cannot
+  carry short-lived signatures, so the URL would have to be rewritten per request in
+  `PlaybackInfo` anyway (the same hook as the filter). The relay would also have to accept
+  non-loopback requests (giving up the loopback-only rule) and need a stable public host that
+  every client can reach (LAN IP, public domain, sub-path vary per client).
 
-**Decision (needs controller/owner sign-off):** keep the loopback-only relay and `.strm` with no
-secrets; add a server-side `PlaybackInfo` result filter in the plugin (see Plan corrections 9).
+**Decision (accepted by the controller; signed URLs rejected):** keep the loopback-only relay and
+`.strm` with no secrets; add a server-side `PlaybackInfo` filter in the plugin that hides the URL,
+disables direct play, and forces a transcode when the client's max bitrate is below the source
+bitrate (see Plan corrections 9).
 
 ### Step 5 — missing-file behaviour and the hook
 
@@ -206,14 +221,24 @@ secrets; add a server-side `PlaybackInfo` result filter in the plugin (see Plan 
   after startup and after a full scan **all items are kept** as `LocationType: FileSystem`
   (nothing removed, nothing marked missing, no `ItemRemoved` storm), because an inaccessible or
   empty library root is skipped. After remounting, everything was unchanged.
+  In the same offline state a stat of the owner's file inside the container
+  (`docker exec jellyshare-alice test -f "/media/Movies/Sintel (2010) [tmdbid-45745]/Sintel (2010).mkv"`)
+  reports **MISSING**, and **EXISTS** again after remounting. .NET `File.Exists` uses the same
+  `stat`, so it returns false here (assumed, not run from .NET). Caveat: on a hung network mount
+  (NFS hard mount, stale SMB) `stat` can block instead of failing, so the sweep must run off the
+  request path, with a per-pass time budget.
 - `ILibraryMonitor.ReportFileSystemChanged(path)` has no `EnableRealtimeMonitor` check (source):
   it debounces `LibraryMonitorDelay` (60 s) and refreshes that path. Not exercised from plugin code
   yet (needs Task 8).
 
 **Decision for Task 10:** subscribe to `ILibraryManager.ItemRemoved` / `ItemAdded`, filter
 `Movie`/`Episode` (ignore `Folder`/`Series`/`Season` and items under the placeholder roots).
-Expect removals only after a scan or ~60 s with realtime monitoring; offline drives do not
-produce events, so a provider must not assume "item in DB" = "file present" (see corrections).
+Expect removals only after a scan or ~60 s with realtime monitoring. Offline drives produce **no**
+events and keep every item, so events alone cannot meet the spec's goal "drive offline → peer
+copy appears". Both sides therefore check the file itself: the provider skips missing files
+(catalog/stream), and the consumer counts an item as "local" only if its file exists
+(`LocalIndex`). Task 10's watcher also runs a periodic **presence sweep** that writes placeholders
+for local files that are gone and removes them when the files come back (see corrections 11/12).
 
 ### Step 6 — user data carry-over: **free**
 
@@ -277,20 +302,44 @@ From the Task 2 spike (details above):
    the folder tag must not add an id the owner's series lacks (use `[imdbid-…]` if that is the
    owner's top id; Tmdb-only series merge only by name, so then use the owner's series name).
    New tests: `Nfo_Series_WritesAllUniqueIds`, `Nfo_Series_UsesLocalSeriesIdsAndTitle`.
-9. **Task 9 (relay) — clients DO open `.strm` URLs.** Add `Consumer/PlaybackInfoFilter.cs`: an
-   MVC result filter (registered in `IPluginServiceRegistrator` via
+9. **Task 9 (relay) — clients DO open `.strm` URLs; PlaybackInfo filter (accepted; signed URLs
+   rejected).** Add `Consumer/PlaybackInfoFilter.cs`, an MVC **action** filter
+   (`IAsyncActionFilter`, registered in `IPluginServiceRegistrator` via
    `services.Configure<MvcOptions>(o => o.Filters.Add<PlaybackInfoFilter>())` or `IStartupFilter`)
-   on `GET/POST /Items/{id}/PlaybackInfo` that, for every `MediaSourceInfo` whose `Path` starts
-   with the relay base: `SupportsDirectPlay = false`, `Path = ""` (keep `SupportsDirectStream`
-   / `SupportsTranscoding`), so clients use `/Videos/{id}/stream.{container}?Static=true` and
-   Jellyfin proxies the relay. Keep the loopback-only relay check (signed URLs are not needed and
-   would not help). Relay must handle `bytes=N-` open-ended ranges, no Range at all, and the
-   `Icy-MetaData`/`Connection: close` headers ffmpeg sends. Harness check: replay
-   `harness/spike/web_play.js` (without the rewrite) and assert no browser request to 127.0.0.1
-   and no libx264 in the FFmpeg log. Task 14 must test one native phone/TV app.
-   The "forced transcode at 1 Mbps" check in Task 9 Step 5 cannot work via user/client max
-   bitrate (ignored for remote sources); test transcode with a client/profile that cannot play
-   the format, or rely on the provider-side cap (Task 12).
+   on `GET /Items/{id}/PlaybackInfo` and `POST /Items/{id}/PlaybackInfo`, applied only when the
+   item is a JellyShare placeholder (path under a placeholder root / `.strm` starting with the relay base):
+   - **Before the action (request):** when the effective max bitrate (`MaxStreamingBitrate` from
+     query/body, else `DeviceProfile.MaxStreamingBitrate`, else the user's remote/LAN limit) is
+     below the source bitrate (stored media info, or the catalog bitrate from the peer), set
+     `EnableDirectPlay=false` **and** `EnableDirectStream=false` in the request so Jellyfin builds a
+     transcode at that bitrate. Spike proof: 1 Mbps request on a 1.31 Mbps `.strm` →
+     `TranscodingUrl` with `VideoBitrate=808000`, HLS output 978 kbps 720p, and jellyfin-web played it
+     (Step 3). Changing only the response does not work (`TranscodingUrl` would be null).
+   - **After the action (response):** for every `MediaSourceInfo` whose `Path` starts with the
+     relay base: `SupportsDirectPlay = false`, `Path = ""` (keep `SupportsDirectStream` /
+     `SupportsTranscoding` unless cleared above). Clients then use
+     `/Videos/{id}/stream.{container}?Static=true` (Jellyfin proxies the relay) or the transcode URL.
+   - Also hide `Path` in item DTOs: `MediaSources` returned by `/Items`, `/Items/{id}`,
+     `/Users/{u}/Items/{id}` with `Fields=MediaSources` (same filter on those actions, or a DTO hook).
+   - **Task 9 gate (new step):** in the harness prove (a) the filter is registered and runs on
+     **both** GET and POST PlaybackInfo, (b) `Fields=MediaSources` item responses contain no relay
+     URL, (c) `web_play.js` without the client-side rewrite → no browser request to 127.0.0.1 and
+     no libx264 in the FFmpeg log, (d) a 1 Mbps request gives a `TranscodingUrl` and ffprobe of the
+     output ≈ 1 Mbps. Tests: `Filter_HidesRelayPathAndDisablesDirectPlay`,
+     `Filter_LowMaxBitrate_DisablesDirectStream`, `Filter_HighMaxBitrate_KeepsDirectStream`,
+     `Filter_IgnoresNonPlaceholderItems`, `Filter_RunsOnGetAndPostPlaybackInfo`.
+   - Relay: keep loopback-only (`RemoteIpAddress` loopback) **and** reject (403) any request
+     carrying `X-Forwarded-For`, `X-Real-IP` or `Forwarded` (a reverse proxy on the same host would
+     otherwise look like loopback). Handle `bytes=N-` open-ended ranges, no Range, and the
+     `Icy-MetaData`/`Connection: close` headers ffmpeg sends.
+   - Stream slots: the first `PlaybackInfo` ffprobe of a `.strm` (`Lavf`, `Range: bytes=0-`) goes
+     through the relay to the peer. It belongs to the same playback (probe, then
+     playback/transcode requests, and HLS seeks reopen the URL), so per-peer limits must not count
+     each relay request as a new stream. Count a stream per (consumer, item) with a short grace
+     window (e.g. 30 s after the last request), not per HTTP request (Task 7 limit + Task 9 relay).
+   - Task 9 Step 5 "forced transcode at 1 Mbps" is done through the request-side rule above (set
+     the client's quality to 1 Mbps). The provider-side cap (Task 12) stays as the provider's own
+     control. Task 14 must test one native phone/TV app.
 10. **Task 8 (writer) — keep a marker file.** An empty placeholder root is skipped by scans, so the
     last removed placeholder would never disappear. `PlaceholderWriter` creates `.jellyshare` in
     each root and never deletes it ("remove empty dirs" stops at the root). Movie placeholders are
@@ -303,12 +352,33 @@ From the Task 2 spike (details above):
     `LibraryMonitorDelay`) notices the change; with `EnableRealtimeMonitor=false` or on mounts
     without inotify (the harness, NFS/SMB) only at the next scan. Ignore `Folder` items. Task 10
     Step 5 in the harness must `POST /Library/Refresh` after deleting the file instead of waiting
-    "~1 min". Drive-offline does **not** produce a removal storm (items are kept); keep the
-    >500 batch rule only as a safety net.
-12. **Task 6/7 (provider) — offline files stay in the DB.** With the media drive offline Jellyfin
-    keeps every item as present, so the catalog must skip items whose `Path` does not exist
-    (`File.Exists`, cheap) and the stream endpoint must answer **503** (not 500) when the file
-    cannot be opened, so the consumer fails over to the next peer.
+    "~1 min". Drive-offline does **not** produce events (items are kept), so events alone cannot
+    meet spec goal 3. **Add a presence sweep** to `LocalItemWatcher`: every **60 s** (configurable),
+    run off the request path, stat (`File.Exists`) the files of local (non-placeholder)
+    Movie/Episode items **whose keys appear in the merged index**, i.e. only titles a peer could
+    replace (bounded set). Local file missing → write that entry's placeholder (same path as the
+    event path) and scan its dir. File back → delete the placeholder and scan. Keep per-key state
+    so each title is written/removed once. The 15 s batching and the >500 storm rule apply (a
+    whole drive offline → hand to a full `SyncService.RunAsync`, which uses the same
+    `LocalIndex` rule below). Cap each pass by a time budget (e.g. 10 s) and continue next pass,
+    because `stat` on a hung network mount can block. While the drive is offline the owner's stale
+    item stays in the library next to the placeholder (two entries for movies; one series for
+    shows); accepted, the placeholder plays.
+    Tests: `Sweep_LocalFileMissing_WritesPlaceholder`, `Sweep_FileBack_RemovesPlaceholder`,
+    `Sweep_OnlyChecksKeysInMergedIndex`, `Sweep_ManyMissing_DelegatesToFullSync`,
+    `Sweep_RespectsTimeBudget`. Harness check: start alice with
+    `spike/docker-compose.offline.yml` → within ~1–2 min placeholders appear for titles a peer has;
+    remount → they are removed.
+12. **Offline files stay in the DB: "local" must mean the file exists (Tasks 6/7 and 8).**
+    With the media drive offline Jellyfin keeps every item as present (stat of the file in the
+    container says missing; .NET `File.Exists` assumed to agree).
+    - Provider (Task 6/7): the catalog skips items whose `Path` does not exist, and the stream
+      endpoint answers **503** (not 500) when the file cannot be opened, so the consumer fails
+      over to the next peer.
+    - Consumer (Task 8): `LocalIndex.GetLocalKeys` counts an item as local **only if its file
+      exists** (non-placeholder and `File.Exists(path)`), so a sync during an outage writes
+      placeholders for the missing titles. Tests: `LocalIndex_MissingFile_NotLocal`,
+      `LocalIndex_ExistingFile_IsLocal`, `Sync_LocalFileMissing_WritesPlaceholder`.
 13. **Task 10 user data:** watched/resume/favourite carry over automatically between a local item
     and a placeholder with the same provider id (movie key = provider id, episode key = series key
     + season/episode numbers). No plugin code; Task 10 Step 5 just records it.

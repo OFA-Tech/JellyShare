@@ -1,9 +1,13 @@
 # JellyShare (Jellyfin federation plugin) Implementation Plan
 
 > **Spike results change later tasks.** Before starting Tasks 4, 6–12 and 14 read
-> `docs/spike-results.md` → "Plan corrections" (items 8–13 from the Task 2 spike): series NFO ids,
-> a `PlaybackInfo` filter because jellyfin-web opens `.strm` URLs itself, a marker file in each
-> placeholder root, scan-driven `ItemRemoved` timing, offline files staying in the DB.
+> `docs/spike-results.md` → "Plan corrections" (items 8–13 from the Task 2 spike): series NFO ids
+> (Task 4); a `PlaybackInfo` filter (Task 9, accepted, signed URLs rejected) that hides the relay
+> URL, disables direct play and forces a transcode when the client's max bitrate is below the
+> source; relay rejects forwarded headers; stream slots per playback, not per request (Tasks 7/9);
+> a marker file in each placeholder root (Task 8); scan-driven `ItemRemoved` timing plus a 60 s
+> presence sweep for offline drives (Task 10); "local" = file exists in `LocalIndex` (Task 8) and in
+> the provider catalog (Task 6/7).
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
