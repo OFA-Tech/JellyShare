@@ -1,5 +1,10 @@
 # JellyShare (Jellyfin federation plugin) Implementation Plan
 
+> **Spike results change later tasks.** Before starting Tasks 4, 6–12 and 14 read
+> `docs/spike-results.md` → "Plan corrections" (items 8–13 from the Task 2 spike): series NFO ids,
+> a `PlaybackInfo` filter because jellyfin-web opens `.strm` URLs itself, a marker file in each
+> placeholder root, scan-driven `ItemRemoved` timing, offline files staying in the DB.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A Jellyfin 12 plugin that lets several independent Jellyfin servers share movies and

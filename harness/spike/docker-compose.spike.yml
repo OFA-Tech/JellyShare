@@ -1,0 +1,19 @@
+# Spike-only override (Task 2). Use from harness/:
+#   docker compose -f docker-compose.yml -f spike/docker-compose.spike.yml up -d
+# Paths are relative to harness/ (the first compose file's directory).
+# - alice gets a harness-owned placeholder folder at /placeholders (never inside /media).
+# - spike-http shares alice's network namespace, so http://127.0.0.1:8900/... inside alice
+#   reaches it (like the plugin's loopback relay). It logs request headers to spike/logs/.
+services:
+  alice:
+    volumes:
+      - ./media/alice-placeholders:/placeholders
+
+  spike-http:
+    image: python:3.13-alpine
+    container_name: jellyshare-spike-http
+    network_mode: "service:alice"
+    volumes:
+      - ./spike:/spike
+      - ./media:/srv:ro
+    command: ["python", "/spike/rangeserver.py", "/srv", "8900", "/spike/logs/requests.jsonl"]
