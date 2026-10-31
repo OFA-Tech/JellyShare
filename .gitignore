@@ -1,0 +1,8 @@
+bin/
+obj/
+.superpowers/
+.vs/
+*.user
+harness/media/
+harness/config/
+__pycache__/
