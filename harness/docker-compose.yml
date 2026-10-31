@@ -1,0 +1,31 @@
+# Two Jellyfin 12 servers for developing/testing JellyShare.
+#   alice: http://localhost:8101
+#   bob:   http://localhost:8102/jellyfin   (server BaseUrl is set to /jellyfin by setup.py)
+# The plugin is deployed from the Release build output (dotnet build -c Release).
+# jellyfin/jellyfin:12.4.0 does not exist on Docker Hub; 12.4 is the 12.4.x line.
+x-jellyfin: &jellyfin
+  image: jellyfin/jellyfin:12.4
+  restart: unless-stopped
+  environment:
+    - TZ=UTC
+
+services:
+  alice:
+    <<: *jellyfin
+    container_name: jellyshare-alice
+    ports:
+      - "8101:8096"
+    volumes:
+      - ./config/alice:/config
+      - ./media/alice:/media
+      - ../src/Jellyfin.Plugin.JellyShare/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
+
+  bob:
+    <<: *jellyfin
+    container_name: jellyshare-bob
+    ports:
+      - "8102:8096"
+    volumes:
+      - ./config/bob:/config
+      - ./media/bob:/media
+      - ../src/Jellyfin.Plugin.JellyShare/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
