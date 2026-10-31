@@ -24,6 +24,8 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
         : base(applicationPaths, xmlSerializer)
     {
         Instance = this;
+        ApplyPlaceholderDefaults();
+        ConfigurationChanged += (_, _) => ApplyPlaceholderDefaults();
     }
 
     /// <summary>Gets the current plugin instance.</summary>
@@ -34,6 +36,9 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 
     /// <inheritdoc />
     public override Guid Id => PluginId;
+
+    private void ApplyPlaceholderDefaults()
+        => PluginConfiguration.ResolvePlaceholderRoots(Configuration, DataFolderPath);
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
