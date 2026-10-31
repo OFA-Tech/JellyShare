@@ -20,18 +20,32 @@ public sealed class MergeIndex
 
     private readonly Dictionary<string, MergedEntry> _byKey;
 
-    private MergeIndex(IReadOnlyList<MergedEntry> entries, Dictionary<string, MergedEntry> byKey, int unmatchedCount)
+    private MergeIndex(
+        IReadOnlyList<MergedEntry> entries,
+        Dictionary<string, MergedEntry> byKey,
+        int unmatchedCount,
+        int conflictCount)
     {
         Entries = entries;
         _byKey = byKey;
         UnmatchedCount = unmatchedCount;
+        ConflictCount = conflictCount;
     }
 
     /// <summary>Gets the merged entries, ordered by canonical key (ordinal).</summary>
     public IReadOnlyList<MergedEntry> Entries { get; }
 
-    /// <summary>Gets the number of items without usable provider ids, which belong to no entry.</summary>
+    /// <summary>
+    /// Gets the number of items that belong to no entry: items without usable provider ids,
+    /// plus items dropped because their ids conflict (see <see cref="ConflictCount"/>).
+    /// </summary>
     public int UnmatchedCount { get; }
+
+    /// <summary>
+    /// Gets the number of items dropped because their connected keys contain more than one id of the
+    /// same kind (for example two different tmdb ids bridged by a shared imdb id). Included in <see cref="UnmatchedCount"/>.
+    /// </summary>
+    public int ConflictCount { get; }
 
     /// <summary>Builds the index.</summary>
     /// <param name="items">The peer items.</param>
@@ -69,7 +83,7 @@ public sealed class MergeIndex
             StringComparer.Ordinal);
         foreach (var key in parent.Keys)
         {
-            var root = Find(parent, key);
+            var root = FindRoot(parent, key);
             if (!groups.TryGetValue(root, out var group))
             {
                 group = ([], []);
@@ -81,13 +95,20 @@ public sealed class MergeIndex
 
         foreach (var (source, keys) in matched)
         {
-            groups[Find(parent, keys[0])].Sources.Add(source);
+            groups[FindRoot(parent, keys[0])].Sources.Add(source);
         }
 
         var entries = new List<MergedEntry>(groups.Count);
+        var conflicts = 0;
         foreach (var (groupKeys, sources) in groups.Values)
         {
             groupKeys.Sort(StringComparer.Ordinal);
+            if (HasConflictingIds(groupKeys))
+            {
+                conflicts += sources.Count;
+                continue;
+            }
+
             entries.Add(new MergedEntry(PickCanonical(groupKeys), groupKeys, sources));
         }
 
@@ -102,7 +123,21 @@ public sealed class MergeIndex
             }
         }
 
-        return new MergeIndex(entries, byKey, unmatched);
+        return new MergeIndex(entries, byKey, unmatched + conflicts, conflicts);
+    }
+
+    private static bool HasConflictingIds(List<string> keys)
+    {
+        var kinds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var key in keys)
+        {
+            if (!kinds.Add(MediaKey.KindOf(key)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>Finds the entry containing a key.</summary>
@@ -127,7 +162,7 @@ public sealed class MergeIndex
         return sortedKeys[0];
     }
 
-    private static string Find(Dictionary<string, string> parent, string key)
+    private static string FindRoot(Dictionary<string, string> parent, string key)
     {
         var root = key;
         while (!string.Equals(parent[root], root, StringComparison.Ordinal))
@@ -147,8 +182,8 @@ public sealed class MergeIndex
 
     private static void Union(Dictionary<string, string> parent, string a, string b)
     {
-        var rootA = Find(parent, a);
-        var rootB = Find(parent, b);
+        var rootA = FindRoot(parent, a);
+        var rootB = FindRoot(parent, b);
         if (!string.Equals(rootA, rootB, StringComparison.Ordinal))
         {
             parent[rootB] = rootA;
