@@ -113,6 +113,22 @@ public class PathNamingTests
         Assert.Equal("Owner Show/Season 01", PathNaming.ForEntry(Entry(item), nameOnly).RelativeDir);
     }
 
+    [Fact]
+    public void Episode_Path_LocalSeriesWithInvalidIds_AddsNoTagFromThem()
+    {
+        var item = TestItems.Episode("Show", new() { ["Tmdb"] = "77" }, 1, 1);
+        var local = new LocalSeries("Owner", new Dictionary<string, string> { ["Tvdb"] = "1]/../../x", ["Imdb"] = "a:b" });
+        Assert.Equal("Owner/Season 01", PathNaming.ForEntry(Entry(item), local).RelativeDir);
+    }
+
+    [Fact]
+    public void Movie_Path_IgnoresInvalidIdsInHandBuiltEntry()
+    {
+        var item = TestItems.Movie("Evil", tmdb: "1]/../../x") with { Year = null };
+        var entry = new MergedEntry("movie:tmdb:1]/../../x", ["movie:tmdb:1]/../../x", "movie:imdb:a:b"], [(TestItems.PeerA, item)]);
+        Assert.Equal("Evil", PathNaming.ForEntry(entry).RelativeDir);
+    }
+
     internal static MergedEntry Entry(CatalogItem item)
     {
         var keys = MediaKey.For(item);

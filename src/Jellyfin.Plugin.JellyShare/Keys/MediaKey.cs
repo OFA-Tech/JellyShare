@@ -34,6 +34,36 @@ public static class MediaKey
         return keys;
     }
 
+    /// <summary>
+    /// Trims and lowercases a provider id and validates it against <c>^[a-z0-9_-]{1,32}$</c>. Provider ids come from
+    /// untrusted peers and end up in keys and file names, so anything else is treated as absent.
+    /// </summary>
+    /// <param name="id">The raw provider id.</param>
+    /// <returns>The normalized id, or <c>null</c> if it is blank or invalid.</returns>
+    public static string? NormalizeId(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            return null;
+        }
+
+        var normalized = id.Trim().ToLowerInvariant();
+        if (normalized.Length is 0 or > 32)
+        {
+            return null;
+        }
+
+        foreach (var c in normalized)
+        {
+            if (c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-'))
+            {
+                return null;
+            }
+        }
+
+        return normalized;
+    }
+
     /// <summary>Returns the provider kind (<c>tmdb</c>, <c>imdb</c>, <c>tvdb</c>) of a key.</summary>
     /// <param name="key">A key produced by <see cref="For"/>.</param>
     /// <returns>The provider kind, or an empty string if the key is malformed.</returns>
@@ -75,9 +105,9 @@ public static class MediaKey
     {
         foreach (var (name, value) in providerIds)
         {
-            if (string.Equals(name, kind, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+            if (string.Equals(name, kind, StringComparison.OrdinalIgnoreCase) && NormalizeId(value) is { } id)
             {
-                return value.Trim().ToLowerInvariant();
+                return id;
             }
         }
 

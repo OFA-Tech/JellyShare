@@ -31,6 +31,38 @@ public class MediaKeyTests
         Assert.Contains("movie:imdb:tt1727587", keys);
     }
 
+    [Theory]
+    [InlineData("1]/../../x")]
+    [InlineData("a:b")]
+    [InlineData("x\\y")]
+    [InlineData("a?b")]
+    [InlineData("a b")]
+    [InlineData("ééé")]
+    [InlineData("123456789012345678901234567890123")]
+    public void MediaKey_InvalidIds_AreIgnored(string bad)
+    {
+        Assert.Null(MediaKey.NormalizeId(bad));
+        Assert.Empty(MediaKey.For(Movie("X", tmdb: bad)));
+        Assert.Empty(MediaKey.For(Movie("X", imdb: bad)));
+
+        var onlyImdbSurvives = MediaKey.For(Movie("X", tmdb: bad, imdb: "tt1"));
+        Assert.Equal(["movie:imdb:tt1"], onlyImdbSurvives);
+
+        Assert.Empty(MediaKey.For(Episode("S", new() { ["Tvdb"] = bad, ["Tmdb"] = bad }, 1, 1)));
+        Assert.Equal(["ep:tmdb:7:s1e1"], MediaKey.For(Episode("S", new() { ["Tvdb"] = bad, ["Tmdb"] = "7" }, 1, 1)));
+    }
+
+    [Theory]
+    [InlineData(" TT1727587 ", "tt1727587")]
+    [InlineData("45745", "45745")]
+    [InlineData("a_b-c", "a_b-c")]
+    [InlineData("12345678901234567890123456789012", "12345678901234567890123456789012")]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, null)]
+    public void NormalizeId_TrimsLowercasesAndValidates(string? input, string? expected)
+        => Assert.Equal(expected, MediaKey.NormalizeId(input));
+
     [Fact]
     public void Movie_BlankIds_AreIgnored()
     {

@@ -13,10 +13,12 @@ public sealed record FileWrite(string RelativePath, string Content);
 /// <param name="Writes">Files to write, ordered by path.</param>
 /// <param name="Deletes">Planner-owned files (<c>.strm</c>/<c>.nfo</c>) to delete, ordered by path.</param>
 /// <param name="TouchedDirs">Distinct relative directories that have a write or delete, ordered.</param>
+/// <param name="Skipped">Entries skipped because their placeholder location was not a safe relative path.</param>
 public sealed record PlaceholderDiff(
     IReadOnlyList<FileWrite> Writes,
     IReadOnlyList<string> Deletes,
-    IReadOnlyList<string> TouchedDirs);
+    IReadOnlyList<string> TouchedDirs,
+    int Skipped = 0);
 
 /// <summary>Computes placeholder file changes from the merged catalog. Pure: touches no file system.</summary>
 public static class PlaceholderPlanner
@@ -51,6 +53,7 @@ public static class PlaceholderPlanner
 
         var desired = new Dictionary<string, string>(StringComparer.Ordinal);
         var seriesDirs = new HashSet<string>(StringComparer.Ordinal);
+        var skipped = 0;
 
         var ordered = wanted
             .Where(e => e.Sources.Count > 0 && !e.Keys.Any(localKeys.Contains))
@@ -60,8 +63,15 @@ public static class PlaceholderPlanner
         {
             var item = entry.Sources[0].Item;
             var isEpisode = string.Equals(item.Type, "Episode", StringComparison.Ordinal);
-            var local = isEpisode ? LocalSeries.Find(localSeries, PathNaming.SeriesIds(entry)) : null;
+            var seriesIds = isEpisode ? PathNaming.SeriesIds(entry) : null;
+            var local = seriesIds is null ? null : LocalSeries.Find(localSeries, seriesIds);
             var file = PathNaming.ForEntry(entry, local);
+            if (!PathNaming.IsSafeRelative(file.RelativeDir, file.BaseName))
+            {
+                skipped++;
+                continue;
+            }
+
             var strmPath = file.RelativeDir + "/" + file.BaseName + ".strm";
             if (desired.ContainsKey(strmPath))
             {
@@ -78,7 +88,7 @@ public static class PlaceholderPlanner
                 var seriesDir = file.RelativeDir[..file.RelativeDir.IndexOf('/', StringComparison.Ordinal)];
                 if (seriesDirs.Add(seriesDir))
                 {
-                    desired[seriesDir + "/tvshow.nfo"] = NfoWriter.Series(item, local);
+                    desired[seriesDir + "/tvshow.nfo"] = NfoWriter.Series(item, local, seriesIds);
                 }
             }
         }
@@ -107,7 +117,7 @@ public static class PlaceholderPlanner
             touched.Add(slash < 0 ? string.Empty : path[..slash]);
         }
 
-        return new PlaceholderDiff(writes, deletes, touched.ToList());
+        return new PlaceholderDiff(writes, deletes, touched.ToList(), skipped);
     }
 
     private static bool IsOwned(string path)

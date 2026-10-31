@@ -1,3 +1,5 @@
+using Jellyfin.Plugin.JellyShare.Keys;
+
 namespace Jellyfin.Plugin.JellyShare.Placeholders;
 
 /// <summary>A series the owner already has locally; placeholders adopt its title and provider ids.</summary>
@@ -19,9 +21,9 @@ public sealed record LocalSeries(string Name, IReadOnlyDictionary<string, string
 
         foreach (var (name, value) in ids)
         {
-            if (string.Equals(name, kind, StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(value))
+            if (string.Equals(name, kind, StringComparison.OrdinalIgnoreCase) && MediaKey.NormalizeId(value) is { } id)
             {
-                return value.Trim().ToLowerInvariant();
+                return id;
             }
         }
 

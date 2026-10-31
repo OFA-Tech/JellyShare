@@ -91,20 +91,27 @@ public static class PathNaming
         return new PlaceholderFile(tag.Length == 0 ? baseName : baseName + " " + tag, baseName, "Movie");
     }
 
-    /// <summary>Gets the series provider ids (tvdb, imdb, tmdb; lowercased) of an episode entry.</summary>
+    /// <summary>
+    /// Gets the validated series provider ids (tvdb, imdb, tmdb; lowercased) of an episode entry, merged across all
+    /// its sources (earlier sources win) and its keys. Folder tag, local-series lookup and tvshow.nfo all use this set.
+    /// </summary>
     /// <param name="e">The merged entry.</param>
     /// <returns>Kind to id.</returns>
     internal static Dictionary<string, string> SeriesIds(MergedEntry e)
     {
         var ids = new Dictionary<string, string>(StringComparer.Ordinal);
-        var seriesIds = e.Sources[0].Item.SeriesProviderIds;
-        if (seriesIds is not null)
+        foreach (var (_, item) in e.Sources)
         {
+            if (item.SeriesProviderIds is null)
+            {
+                continue;
+            }
+
             foreach (var kind in LocalSeries.SeriesKinds)
             {
-                if (LocalSeries.Normalize(seriesIds, kind) is { } id)
+                if (LocalSeries.Normalize(item.SeriesProviderIds, kind) is { } id)
                 {
-                    ids[kind] = id;
+                    ids.TryAdd(kind, id);
                 }
             }
         }
@@ -112,6 +119,31 @@ public static class PathNaming
         AddFromKeys(e, ids, "ep");
         return ids;
     }
+
+    /// <summary>
+    /// Checks that a placeholder location is a plain relative path: no rooted path, no empty, <c>.</c> or <c>..</c>
+    /// segment and no characters that are illegal in file names.
+    /// </summary>
+    /// <param name="relativeDir">The relative directory (forward slashes).</param>
+    /// <param name="baseName">The file name without extension.</param>
+    /// <returns><c>true</c> if the location cannot escape the placeholder root.</returns>
+    public static bool IsSafeRelative(string relativeDir, string baseName)
+    {
+        if (string.IsNullOrEmpty(relativeDir) || string.IsNullOrEmpty(baseName))
+        {
+            return false;
+        }
+
+        return relativeDir.Split('/').All(IsSafeSegment) && IsSafeSegment(baseName);
+    }
+
+    private static bool IsSafeSegment(string segment)
+        => segment.Length > 0
+            && segment is not ("." or "..")
+            && !segment.Any(c => IsIllegal(c) || (char.IsWhiteSpace(c) && c != ' '))
+            && !segment.EndsWith('.')
+            && !segment.EndsWith(' ')
+            && !segment.StartsWith(' ');
 
     private static PlaceholderFile ForEpisode(MergedEntry e, CatalogItem item, LocalSeries? local)
     {
@@ -155,12 +187,17 @@ public static class PathNaming
 
     private static void AddFromKeys(MergedEntry e, Dictionary<string, string> ids, string prefix)
     {
+        var expectedParts = string.Equals(prefix, "ep", StringComparison.Ordinal) ? 4 : 3;
         foreach (var key in e.Keys)
         {
             var parts = key.Split(':');
-            if (parts.Length >= 3 && string.Equals(parts[0], prefix, StringComparison.Ordinal))
+            if (parts.Length == expectedParts
+                && string.Equals(parts[0], prefix, StringComparison.Ordinal)
+                && Array.IndexOf(LocalSeries.SeriesKinds, parts[1]) >= 0
+                && MediaKey.NormalizeId(parts[2]) is { } id
+                && string.Equals(id, parts[2], StringComparison.Ordinal))
             {
-                ids.TryAdd(parts[1], parts[2]);
+                ids.TryAdd(parts[1], id);
             }
         }
     }

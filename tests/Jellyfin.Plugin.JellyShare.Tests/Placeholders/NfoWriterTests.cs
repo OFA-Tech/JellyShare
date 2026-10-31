@@ -55,6 +55,29 @@ public class NfoWriterTests
     }
 
     [Fact]
+    public void Nfo_PeerIdsFailingValidation_AreNotWritten()
+    {
+        var movie = TestItems.Movie("X", tmdb: "1]/../x", imdb: "tt5");
+        var ids = XDocument.Parse(NfoWriter.Movie(movie)).Root!.Elements("uniqueid").Select(e => e.Value).ToList();
+        Assert.Equal(["tt5"], ids);
+
+        var ep = TestItems.Episode("S", new() { ["Tvdb"] = "a:b", ["Tmdb"] = "7" }, 1, 1);
+        var series = XDocument.Parse(NfoWriter.Series(ep)).Root!.Elements("uniqueid").Select(e => e.Value).ToList();
+        Assert.Equal(["7"], series);
+    }
+
+    [Fact]
+    public void Nfo_Series_UsesGivenMergedSeriesIds()
+    {
+        var ep = TestItems.Episode("S", new() { ["Tvdb"] = "1" }, 1, 1);
+        var merged = new Dictionary<string, string> { ["tvdb"] = "1", ["imdb"] = "tt2" };
+        var ids = XDocument.Parse(NfoWriter.Series(ep, null, merged)).Root!.Elements("uniqueid")
+            .ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
+        Assert.Equal("tt2", ids["imdb"]);
+        Assert.Equal("1", ids["tvdb"]);
+    }
+
+    [Fact]
     public void Nfo_Movie_ImdbIsDefaultWhenNoTmdb()
     {
         var xml = XDocument.Parse(NfoWriter.Movie(TestItems.Movie("X", imdb: "tt5")));

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Xml;
+using Jellyfin.Plugin.JellyShare.Keys;
 using Jellyfin.Plugin.JellyShare.Protocol;
 
 namespace Jellyfin.Plugin.JellyShare.Placeholders;
@@ -51,14 +52,21 @@ public static class NfoWriter
     /// <summary>Writes the <c>tvshow.nfo</c> content for the series of an episode.</summary>
     /// <param name="anyEpisode">Any episode of the series.</param>
     /// <param name="localSeries">The owner's local series; its title and provider ids are used when given.</param>
+    /// <param name="seriesIds">
+    /// The merged series ids of all sources (the set the folder tag is derived from); defaults to the episode's own.
+    /// Ignored when a local series is given.
+    /// </param>
     /// <returns>The XML text.</returns>
-    public static string Series(CatalogItem anyEpisode, LocalSeries? localSeries = null)
+    public static string Series(
+        CatalogItem anyEpisode,
+        LocalSeries? localSeries = null,
+        IReadOnlyDictionary<string, string>? seriesIds = null)
     {
         ArgumentNullException.ThrowIfNull(anyEpisode);
         var title = localSeries?.Name ?? anyEpisode.SeriesName;
         var ids = localSeries is not null
-            ? OrderedIds(localSeries.ProviderIds, LocalSeries.SeriesKinds, includeOthers: true)
-            : OrderedIds(anyEpisode.SeriesProviderIds, LocalSeries.SeriesKinds);
+            ? OrderedIds(localSeries.ProviderIds, LocalSeries.SeriesKinds, includeOthers: true, validate: false)
+            : OrderedIds(seriesIds ?? anyEpisode.SeriesProviderIds, LocalSeries.SeriesKinds);
         return Build("tvshow", w =>
         {
             Text(w, "title", title);
@@ -98,7 +106,8 @@ public static class NfoWriter
     private static List<(string Kind, string Id)> OrderedIds(
         IEnumerable<KeyValuePair<string, string>>? ids,
         string[] kinds,
-        bool includeOthers = false)
+        bool includeOthers = false,
+        bool validate = true)
     {
         var result = new List<(string, string)>();
         if (ids is null)
@@ -109,9 +118,10 @@ public static class NfoWriter
         var all = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in ids)
         {
-            if (!string.IsNullOrWhiteSpace(value))
+            var id = validate ? MediaKey.NormalizeId(value) : (string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+            if (id is not null)
             {
-                all.TryAdd(name.Trim(), value.Trim());
+                all.TryAdd(name.Trim(), id);
             }
         }
 

@@ -175,6 +175,96 @@ public class PlaceholderPlannerTests
         Assert.Empty(diff.Writes);
     }
 
+    private static void AssertPathsStayInsideRoot(PlaceholderDiff diff)
+    {
+        foreach (var path in diff.Writes.Select(w => w.RelativePath).Concat(diff.Deletes).Concat(diff.TouchedDirs))
+        {
+            Assert.False(Path.IsPathRooted(path), path);
+            Assert.DoesNotContain('\\', path);
+            Assert.DoesNotContain(':', path);
+            foreach (var segment in path.Split('/'))
+            {
+                Assert.NotEqual("..", segment);
+                Assert.NotEqual(".", segment);
+                Assert.NotEqual(string.Empty, segment);
+            }
+        }
+    }
+
+    [Fact]
+    public void Plan_MaliciousProviderId_NeverEscapesRoot()
+    {
+        const string evil = "1]/../../x";
+        var movie = TestItems.Movie("Evil", tmdb: evil, imdb: "tt1");
+        var movieNoValid = TestItems.Movie("Evil2", tmdb: evil);
+        var episode = TestItems.Episode("Evil Show", new() { ["Tvdb"] = "..\\..\\x", ["Tmdb"] = "9" }, 1, 1);
+
+        // hand-built entries bypass MediaKey, as a buggy or hostile caller could
+        var handBuiltMovie = new MergedEntry(
+            "movie:tmdb:" + evil, ["movie:tmdb:" + evil, "movie:tmdb:a:b"], [(TestItems.PeerA, movie with { ProviderIds = new() { ["Tmdb"] = evil } })]);
+        var handBuiltEpisode = new MergedEntry(
+            "ep:tvdb:../..:s1e1", ["ep:tvdb:../..:s1e1"], [(TestItems.PeerA, episode with { SeriesProviderIds = new() { ["Tvdb"] = "../../x", ["Imdb"] = "a/b" } })]);
+
+        var wanted = new[] { Entry(movie), handBuiltMovie, handBuiltEpisode, Entry(episode) };
+        var diff = PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay);
+
+        AssertPathsStayInsideRoot(diff);
+        Assert.Contains(diff.Writes, w => w.RelativePath == "Evil (2020) [imdbid-tt1]/Evil (2020).strm");
+        Assert.Contains(diff.Writes, w => w.RelativePath.StartsWith("Evil Show [tmdbid-9]/", StringComparison.Ordinal));
+        Assert.DoesNotContain(diff.Writes, w => w.RelativePath.Contains("..", StringComparison.Ordinal));
+        Assert.Equal(0, diff.Skipped);
+        Assert.Empty(MediaKey.For(movieNoValid));
+
+        var second = PlaceholderPlanner.Plan(wanted, NoLocal, Hashed(diff), Relay);
+        Assert.Empty(second.Writes);
+        AssertPathsStayInsideRoot(second);
+    }
+
+    [Theory]
+    [InlineData("a/../b", "x", false)]
+    [InlineData("../a", "x", false)]
+    [InlineData("a/./b", "x", false)]
+    [InlineData("/abs", "x", false)]
+    [InlineData("a//b", "x", false)]
+    [InlineData("a/", "x", false)]
+    [InlineData("", "x", false)]
+    [InlineData("C:/x", "x", false)]
+    [InlineData("a\\b", "x", false)]
+    [InlineData("ok", "..", false)]
+    [InlineData("ok", "a/b", false)]
+    [InlineData("ok", "", false)]
+    [InlineData("Show [tvdbid-1]/Season 01", "Show S01E01", true)]
+    [InlineData("Sintel (2010) [tmdbid-45745]", "Sintel (2010)", true)]
+    public void IsSafeRelative_RejectsRootedOrTraversingPaths(string dir, string baseName, bool expected)
+        => Assert.Equal(expected, PathNaming.IsSafeRelative(dir, baseName));
+
+    [Fact]
+    public void Plan_NamesLikeDotDot_AreSanitizedAndNotSkipped()
+    {
+        var item = TestItems.Movie("..", tmdb: "1");
+        var diff = PlaceholderPlanner.Plan([Entry(item)], NoLocal, NoExisting, Relay);
+        AssertPathsStayInsideRoot(diff);
+        Assert.Equal(0, diff.Skipped);
+        Assert.Contains(diff.Writes, w => w.RelativePath == "Untitled (2020) [tmdbid-1]/Untitled (2020).strm");
+    }
+
+    [Fact]
+    public void Plan_SeriesNfo_UsesIdsMergedAcrossSources_ConsistentWithFolderTag()
+    {
+        var a = TestItems.Episode("Pioneer One", new() { ["Tvdb"] = "153021" }, 1, 1, "a");
+        var b = TestItems.Episode("Pioneer One", new() { ["Tvdb"] = "153021", ["Imdb"] = "tt1759761", ["Tmdb"] = "77" }, 1, 1, "b");
+        var entry = new MergedEntry(
+            "ep:tmdb:77:s1e1", ["ep:tmdb:77:s1e1", "ep:tvdb:153021:s1e1"], [(TestItems.PeerA, a), (TestItems.PeerB, b)]);
+
+        var diff = PlaceholderPlanner.Plan([entry], NoLocal, NoExisting, Relay);
+        var show = diff.Writes.Single(w => w.RelativePath == "Pioneer One [tvdbid-153021]/tvshow.nfo");
+        var ids = System.Xml.Linq.XDocument.Parse(show.Content).Root!.Elements("uniqueid")
+            .ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
+        Assert.Equal("153021", ids["tvdb"]);
+        Assert.Equal("tt1759761", ids["imdb"]);
+        Assert.Equal("77", ids["tmdb"]);
+    }
+
     [Fact]
     public void Plan_Output_IsIndependentOfInputOrder()
     {
