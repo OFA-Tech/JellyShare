@@ -1,0 +1,96 @@
+name: Release
+
+# Push a tag like v0.1.0.0 (four numbers, matching the plugin version) to publish a release.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Read version from tag
+        run: |
+          VERSION="${TAG#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$TAG' must look like v0.1.0.0"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: The tagged commit must be on main
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Test
+        run: |
+          dotnet test -c Release
+          python3 -m unittest discover -s build -p "test_*.py"
+
+      - name: Publish
+        run: >
+          dotnet publish src/Jellyfin.Plugin.JellyShare -c Release -o publish
+          -p:Version="$VERSION" -p:AssemblyVersion="$VERSION" -p:FileVersion="$VERSION"
+
+      - name: Zip the plugin DLL
+        run: python3 build/package.py --publish-dir publish --version "$VERSION" --out dist
+
+      - name: Changelog from commit subjects since the previous release
+        run: |
+          PREV="$(git describe --tags --abbrev=0 --match 'v*' "${GITHUB_SHA}^" 2>/dev/null || true)"
+          if [ -n "$PREV" ]; then
+            git log --no-merges --pretty='- %s' "$PREV..$GITHUB_SHA" > changelog.txt
+          else
+            echo "First release." > changelog.txt
+          fi
+          cat changelog.txt
+
+      - name: GitHub Release
+        run: |
+          ZIP="dist/jellyshare_${VERSION}.zip"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" --title "JellyShare $VERSION" --notes-file changelog.txt --verify-tag
+          fi
+
+      - name: Update manifest.json on main
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B main origin/main
+          python3 build/update_manifest.py \
+            --manifest manifest.json \
+            --version "$VERSION" \
+            --zip "dist/jellyshare_${VERSION}.zip" \
+            --source-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/jellyshare_${VERSION}.zip" \
+            --changelog-file changelog.txt
+          git add manifest.json
+          if git diff --cached --quiet; then
+            echo "manifest.json already up to date"
+          else
+            git commit -m "chore: manifest for $TAG"
+            git push origin main
+          fi

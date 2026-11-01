@@ -9,3 +9,4 @@ __pycache__/
 harness/.secrets/
 harness/screens/
 .playwright-cli/
+dist/
