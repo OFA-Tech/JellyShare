@@ -17,7 +17,17 @@ public delegate Task<Stream?> PlaceholderImageFetcher(string topDir, string imag
 /// <param name="Refused">Diff entries refused because their path was unsafe.</param>
 /// <param name="ImagesWritten">Images downloaded.</param>
 /// <param name="ChangedDirs">Full paths of directories that changed (including removed ones), ordered.</param>
-public sealed record PlaceholderWriteResult(int Written, int Deleted, int Refused, int ImagesWritten, IReadOnlyList<string> ChangedDirs);
+public sealed record PlaceholderWriteResult(int Written, int Deleted, int Refused, int ImagesWritten, IReadOnlyList<string> ChangedDirs)
+{
+    /// <summary>Gets the relative paths written (committed), with the hash of what was written.</summary>
+    public IReadOnlyDictionary<string, string> WrittenPaths { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Gets the relative paths deleted (or already gone).</summary>
+    public IReadOnlyList<string> DeletedPaths { get; init; } = [];
+
+    /// <summary>Gets the movie/series folders (relative, first segment) that got a new <c>.strm</c>.</summary>
+    public IReadOnlyList<string> NewStrmTops { get; init; } = [];
+}
 
 /// <summary>Thrown when applying a diff fails part-way; <see cref="Partial"/> holds what was already changed.</summary>
 public sealed class PlaceholderWriteException : Exception
@@ -122,7 +132,17 @@ public sealed class PlaceholderWriter
 
         var changed = new SortedSet<string>(StringComparer.Ordinal);
         var removedTops = new SortedSet<string>(StringComparer.Ordinal);
+        var strmTops = new SortedSet<string>(StringComparer.Ordinal);
+        var writtenPaths = new Dictionary<string, string>(StringComparer.Ordinal);
+        var deletedPaths = new List<string>();
         int written = 0, deleted = 0, refused = 0, images = 0;
+
+        PlaceholderWriteResult Result() => new(written, deleted, refused, images, changed.ToList())
+        {
+            WrittenPaths = writtenPaths,
+            DeletedPaths = deletedPaths,
+            NewStrmTops = strmTops.ToList(),
+        };
 
         try
         {
@@ -143,11 +163,11 @@ public sealed class PlaceholderWriter
                     deleted++;
                 }
 
+                deletedPaths.Add(rel);
                 changed.Add(Path.GetDirectoryName(full)!);
                 removedTops.Add(TopDir(rel));
             }
 
-            var strmTops = new SortedSet<string>(StringComparer.Ordinal);
             foreach (var write in diff.Writes)
             {
                 ct.ThrowIfCancellationRequested();
@@ -161,6 +181,7 @@ public sealed class PlaceholderWriter
 
                 AtomicFile.WriteAllText(full, write.Content, BeforeCommit);
                 written++;
+                writtenPaths[write.RelativePath] = PlaceholderPlanner.Hash(write.Content);
                 changed.Add(Path.GetDirectoryName(full)!);
                 if (write.RelativePath.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
                 {
@@ -203,10 +224,10 @@ public sealed class PlaceholderWriter
         catch (Exception ex)
         {
             // Files already changed on disk must still be scanned: hand the partial result to the caller.
-            throw new PlaceholderWriteException(new PlaceholderWriteResult(written, deleted, refused, images, changed.ToList()), ex);
+            throw new PlaceholderWriteException(Result(), ex);
         }
 
-        return new PlaceholderWriteResult(written, deleted, refused, images, changed.ToList());
+        return Result();
     }
 
     /// <summary>Resolves a relative placeholder path inside the root, or returns <c>null</c> if it is unsafe.</summary>

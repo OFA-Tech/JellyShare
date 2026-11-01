@@ -81,6 +81,8 @@ public sealed class SyncService : ISyncRunner
     private readonly object _lastLock = new();
     private SyncReport? _last;
     private bool _lastLoaded;
+    private PlaceholderLedger? _ledger;
+    private (DateTime WriteUtc, long Length) _ledgerStamp;
 
     /// <summary>Initializes a new instance of the <see cref="SyncService"/> class.</summary>
     /// <param name="config">The plugin configuration.</param>
@@ -476,29 +478,85 @@ public sealed class SyncService : ISyncRunner
             return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0);
         }
 
-        var existing = PlaceholderWriter.ScanExisting(root);
+        var rootFull = Path.GetFullPath(root);
+        var ledger = Ledger(dataDir);
+        var records = ledger.For(rootFull);
+        if (records is null)
+        {
+            // First run with a ledger: what is on disk now counts as plugin-written.
+            records = PlaceholderLedger.Seed(rootFull);
+            ledger.Set(rootFull, records);
+        }
+
+        bool Present(string rel) => PlaceholderWriter.Resolve(rootFull, rel) is { } full && File.Exists(full);
+
+        // "Existing" is what the plugin wrote and is still there: compared by recorded hash, never by reading the
+        // file, so files Jellyfin rewrites (NFO saver) are left alone and files it adds are never deleted.
+        var existing = new Dictionary<string, string>(StringComparer.Ordinal);
+        var vanished = new List<string>();
         PlaceholderDiff diff;
         if (targeted)
         {
-            // Only the given entries' own files may be written or deleted. The shared tvshow.nfo is left to full syncs
-            // unless it is missing (other episodes of the series may still depend on it).
+            // Only the given entries' own files may be written or deleted (and only those are looked at). The shared
+            // tvshow.nfo is left to full syncs unless it is missing (other episodes of the series may depend on it).
             var owned = PlaceholderPlanner.Plan(entries, new HashSet<string>(), new Dictionary<string, string>(), relay, localSeries)
                 .Writes
                 .Select(w => w.RelativePath)
                 .Where(p => !p.EndsWith("/tvshow.nfo", StringComparison.Ordinal))
                 .ToHashSet(StringComparer.Ordinal);
-            var scoped = existing.Where(kv => owned.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
-            diff = PlaceholderPlanner.Plan(entries, localKeys, scoped, relay, localSeries);
+            foreach (var path in owned)
+            {
+                if (records.TryGetValue(path, out var hash))
+                {
+                    if (Present(path))
+                    {
+                        existing[path] = hash;
+                    }
+                    else
+                    {
+                        vanished.Add(path);
+                    }
+                }
+            }
+
+            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
             diff = diff with
             {
                 Writes = diff.Writes
-                    .Where(w => !(w.RelativePath.EndsWith("/tvshow.nfo", StringComparison.Ordinal) && existing.ContainsKey(w.RelativePath)))
+                    .Where(w => !(w.RelativePath.EndsWith("/tvshow.nfo", StringComparison.Ordinal) && Present(w.RelativePath)))
                     .ToList(),
             };
         }
         else
         {
+            foreach (var (path, hash) in records)
+            {
+                if (Present(path))
+                {
+                    existing[path] = hash;
+                }
+                else
+                {
+                    vanished.Add(path);
+                }
+            }
+
             diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
+        }
+
+        void Record(PlaceholderWriteResult done)
+        {
+            foreach (var path in vanished.Concat(done.DeletedPaths))
+            {
+                records.Remove(path);
+            }
+
+            foreach (var (path, hash) in done.WrittenPaths)
+            {
+                records[path] = hash;
+            }
+
+            SaveLedger(dataDir, ledger);
         }
 
         var imageSources = ImageSources(entries, localSeries);
@@ -535,10 +593,12 @@ public sealed class SyncService : ISyncRunner
         catch (PlaceholderWriteException ex)
         {
             // Persist what already changed on disk before failing, so those folders are still scanned later.
+            Record(ex.Partial);
             EnqueueScans(dataDir, ex.Partial.ChangedDirs);
             throw;
         }
 
+        Record(result);
         EnqueueScans(dataDir, result.ChangedDirs);
         return (result, diff.Skipped);
     }
@@ -573,6 +633,41 @@ public sealed class SyncService : ISyncRunner
         }
 
         return map;
+    }
+
+    private PlaceholderLedger Ledger(string dataDir)
+    {
+        // Kept in memory; re-read only when the file changed or vanished behind our back.
+        var path = Path.Combine(dataDir, PlaceholderLedger.FileName);
+        var stamp = FileStamp(path);
+        if (_ledger is null || stamp != _ledgerStamp)
+        {
+            _ledger = PlaceholderLedger.Load(path);
+            _ledgerStamp = stamp;
+        }
+
+        return _ledger;
+    }
+
+    private void SaveLedger(string dataDir, PlaceholderLedger ledger)
+    {
+        var path = Path.Combine(dataDir, PlaceholderLedger.FileName);
+        ledger.Save(path);
+        _ledger = ledger;
+        _ledgerStamp = FileStamp(path);
+    }
+
+    private static (DateTime WriteUtc, long Length) FileStamp(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            return info.Exists ? (info.LastWriteTimeUtc, info.Length) : default;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return default;
+        }
     }
 
     private List<string> ReadPending(string path)

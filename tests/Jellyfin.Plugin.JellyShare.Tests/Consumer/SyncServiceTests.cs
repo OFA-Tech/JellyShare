@@ -413,6 +413,104 @@ public sealed class SyncServiceTests : IDisposable
         Assert.False(Directory.Exists(MoviesRoot));
     }
 
+    private string BunnyNfo => Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).nfo");
+
+    private string BunnyStrm => Path.ChangeExtension(BunnyNfo, ".strm");
+
+    [Fact]
+    public async Task Sync_JellyfinRewritesNfo_NoRewriteWhileDesiredContentUnchanged()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        Assert.True(File.Exists(BunnyNfo));
+        const string jellyfin = "<?xml version=\"1.0\"?><movie><title>Big Buck Bunny</title><lockdata>false</lockdata></movie>";
+        File.WriteAllText(BunnyNfo, jellyfin);
+        _scans.Reported.Clear();
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.Written);
+        Assert.Equal(0, report.Deleted);
+        Assert.Empty(_scans.Reported);
+        Assert.Equal(jellyfin, File.ReadAllText(BunnyNfo));
+    }
+
+    [Fact]
+    public async Task Sync_JellyfinSeasonNfo_IsLeftAlone()
+    {
+        Offer(Pioneer(1, 1));
+        await _sync.RunAsync(CancellationToken.None);
+        var seasonDir = Directory.GetDirectories(Path.Combine(ShowsRoot, PioneerDir)).Single();
+        var seasonNfo = Path.Combine(seasonDir, "season.nfo");
+        File.WriteAllText(seasonNfo, "<season/>");
+        File.WriteAllText(Path.Combine(ShowsRoot, PioneerDir, "tvshow.nfo"), "<tvshow>rewritten by jellyfin</tvshow>");
+        _scans.Reported.Clear();
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.Written + report.Deleted);
+        Assert.True(File.Exists(seasonNfo));
+        Assert.Empty(_scans.Reported);
+    }
+
+    [Fact]
+    public async Task Sync_DesiredNfoChanged_IsRewritten_EvenAfterJellyfinEdit()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        File.WriteAllText(BunnyNfo, "<movie>jellyfin</movie>");
+
+        Offer(Bunny() with { Overview = "A new plot" });
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, report.Written);
+        Assert.Contains("A new plot", File.ReadAllText(BunnyNfo), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Sync_TitleGone_RemovesWholeFolder_IncludingJellyfinFiles()
+    {
+        Offer(Pioneer(1, 1));
+        await _sync.RunAsync(CancellationToken.None);
+        var series = Path.Combine(ShowsRoot, PioneerDir);
+        File.WriteAllText(Path.Combine(Directory.GetDirectories(series).Single(), "season.nfo"), "<season/>");
+
+        Offer();
+        await _sync.RunAsync(CancellationToken.None);
+
+        Assert.False(Directory.Exists(series));
+    }
+
+    [Fact]
+    public async Task Sync_NoLedgerYet_SeedsFromDisk_NoRewrites_AndKeepsForeignNfo()
+    {
+        Offer(Pioneer(1, 1), Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        var seasonNfo = Path.Combine(Directory.GetDirectories(Path.Combine(ShowsRoot, PioneerDir)).Single(), "season.nfo");
+        File.WriteAllText(seasonNfo, "<season/>");
+        File.Delete(Path.Combine(DataDir, "placeholder-ledger.json"));
+        _scans.Reported.Clear();
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.Written + report.Deleted);
+        Assert.True(File.Exists(seasonNfo));
+        Assert.True(File.Exists(Path.Combine(DataDir, "placeholder-ledger.json")));
+    }
+
+    [Fact]
+    public async Task Sync_PlaceholderDeletedByHand_IsWrittenAgain()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        File.Delete(BunnyStrm);
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(1, report.Written);
+        Assert.True(File.Exists(BunnyStrm));
+    }
+
     [Fact]
     public async Task Sync_OverlappingRuns_AreSerialized()
     {
