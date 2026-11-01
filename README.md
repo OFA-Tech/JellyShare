@@ -217,6 +217,14 @@ provides them. The release zip contains only the six `JellyShare.*.dll`.
 `Directory.Packages.props`. A rule is turned off only where it conflicts with Jellyfin's or a framework's contract, with
 a targeted `[SuppressMessage(..., Justification = "...")]` next to the code.
 
+Deviations from the template, on purpose:
+
+- No `Directory.Build.targets`: it only strips template pieces JellyShare doesn't have.
+- `coverlet.collector` is in every test project (test-only). NSubstitute is not referenced, because no test needs it;
+  fakes are hand-written.
+- Test classes are `sealed` with Shouldly assertions; `Should.Throw` checks go through `ShouldExactly` (exact exception
+  type), and string `ShouldContain`/`ShouldStartWith` always name their `Case`.
+
 ## Updating for a new Jellyfin version
 
 Only `Source/Infrastructure/Platform/Jellyfin` (and `Tests/JellyfinTests`) reference Jellyfin. To move to a new
@@ -241,12 +249,33 @@ Jellyfin APIs it uses:
 | `Adapters/ServerIdentity.cs` | `IServerApplicationHost.FriendlyName` |
 | `Controllers/V1/*` | ASP.NET Core MVC; `AdminController` uses Jellyfin's `Policies.RequiresElevation` |
 | `Filters/PlaybackInfoFilter.cs` | an MVC filter on Jellyfin's PlaybackInfo and item endpoints: `PlaybackInfoResponse`, `MediaSourceInfo`, `BaseItemDto`, `QueryResult<T>` |
+| `Adapters/JellyfinBitrateRules.cs` | mirrors Jellyfin's `MediaInfoHelper.GetMaxBitrate`: the requested bitrate capped by the remote-client limit, which applies only to callers outside the local network (`INetworkManager.IsInLocalNetwork`). Jellyfin-internal ports and records (`IPlaceholderLookup`, `CallerContext`, `CallerLimits`) sit next to it and are `internal` |
 | `Filters/PlaybackInfoTargetCheck.cs` | checks at startup that Jellyfin's PlaybackInfo actions still have the route and parameter names the filter expects (logs a warning otherwise) |
 | `Tasks/SyncTask.cs` | `IScheduledTask`, `TaskTriggerInfo` |
 | `Web/configPage.{html,js}` | the dashboard's `ApiClient` (`getUrl`, `ajax`) |
 
 `Tests/JellyfinTests/Filters/PlaybackInfoFilterTests.cs` pins the PlaybackInfo routes and parameter names of the
 supported version; update it with the filter. Then run the full test suite and the harness e2e (below).
+
+### What else mirrors Jellyfin's conventions
+
+These places are outside the Jellyfin project because they are JellyShare's own rules, but they copy how Jellyfin
+behaves. After a Jellyfin update, recheck them:
+
+- **Library folder paths** (`Application/Features/Admin/AdminRules.SamePath`): compares paths the way Jellyfin stores
+  them (slash style, trailing separator, case rules per OS). Recheck if Jellyfin changes how virtual-folder paths are
+  stored or reported.
+- **Placeholder naming and NFO** (`Application/Features/Placeholders/PathNaming`, `NfoWriter`): folder and file names
+  `<Name> (<Year>) [tmdbid-<id>]` and the `[xxxid-...]` tags, plus the `movie.nfo`/`tvshow.nfo`/episode `.nfo` files, are
+  the forms Jellyfin's scanner and NFO reader use to match titles to providers. Recheck the provider tag syntax and the
+  NFO elements Jellyfin reads (`uniqueid`, season/episode numbers).
+- **`.strm` handling** (`Application/Features/Relay/RelayUrl`, `Data.Files/Placeholders/PlaceholderWriter`, and
+  `Adapters/JellyfinPlaceholderLookup` which reads `IsShortcut`/`ShortcutPath`): a placeholder is a `.strm` file holding a
+  loopback relay URL, and Jellyfin must keep treating such items as shortcuts with a remote source. Recheck that
+  `.strm` items are still scanned, still expose their URL, and that a client bitrate limit is still not applied to them
+  (that last point is what `PlaybackInfoFilter` works around).
+- **Library merge setting**: episodes of a shared series join the user's own series only while Jellyfin's "merge series
+  spread across multiple folders" library option (LibraryOptions.EnableAutomaticSeriesGrouping, read in\n  Adapters/JellyfinAdminLibraries.cs) exists and is on; the admin page warns when it is off.
 
 ## Build and test
 

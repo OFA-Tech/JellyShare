@@ -23,11 +23,18 @@ All notable changes to this project are documented here. The format is based on
   admin messages log under the `JellyShare.Application.Features.*.*Handler` types; placeholder writes and "placeholder
   folder unreadable" under `PlaceholderWriter`; "pending scan list unreadable" under `PendingScanStore`; the startup
   line "JellyShare infrastructure modules enabled" under `InfrastructureModuleLog`.
+- The bitrate decision is split: how Jellyfin derives the max bitrate (`MediaInfoHelper.GetMaxBitrate`) and the
+  Jellyfin-internal lookup port (`IPlaceholderLookup`, `CallerContext`, `CallerLimits`) moved from Domain/Application
+  into `JellyShare.Jellyfin` (now `internal`); `PlaybackBitrateRule.ForcedTranscodeLimit` now takes the already derived
+  max bitrate.
 - Use cases run as handlers behind a dispatcher with logging and validation behaviors. The logging behavior logs
   request type names at debug level only; exceptions are left to Jellyfin to log once.
-- Some warnings now include the exception (stack trace) next to the unchanged message: "Could not start ffmpeg for a
-  capped stream", "JellyShare sync failed" and "watcher: stopped before ... background passes finished". Peer errors in
-  the relay are still logged as a redacted message only.
+- Some log lines now include the exception (stack trace) next to the unchanged message: the warning "Could not start
+  ffmpeg for a capped stream", the error "JellyShare sync failed" (error level; the exception carries no inner exception
+  and the peer client already redacts tokens from its messages), the warning "watcher: stopped before ... background
+  passes finished" and the debug line "Capped stream write failed". Peer errors in the relay are still logged as a
+  redacted message only, and the expected-cancellation debug lines ("Capped stream replaced by a newer request", "client
+  disconnected", relay peer timeout or stall) log no exception.
 - Build: the template's analyzers (`Microsoft.CodeAnalysis.NetAnalyzers`, `SonarAnalyzer.CSharp`) at
   `latest-recommended`, code style enforced in the build and warnings treated as errors. Tests use Shouldly.
 
