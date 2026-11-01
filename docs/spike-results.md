@@ -354,7 +354,7 @@ From the Task 2 spike (details above):
     Step 5 in the harness must `POST /Library/Refresh` after deleting the file instead of waiting
     "~1 min". Drive-offline does **not** produce events (items are kept), so events alone cannot
     meet spec goal 3. **Add a presence sweep** to `LocalItemWatcher`: every **60 s** (configurable),
-    run off the request path, stat (`File.Exists`) the files of local (non-placeholder)
+    run off the request path, stat (`LocalIndex.ProbeFile`, see 12) the files of local (non-placeholder)
     Movie/Episode items **whose keys appear in the merged index**, i.e. only titles a peer could
     replace (bounded set). Local file missing → write that entry's placeholder (same path as the
     event path) and scan its dir. File back → delete the placeholder and scan. Keep per-key state
@@ -376,9 +376,17 @@ From the Task 2 spike (details above):
       endpoint answers **503** (not 500) when the file cannot be opened, so the consumer fails
       over to the next peer.
     - Consumer (Task 8): `LocalIndex.GetLocalKeys` counts an item as local **only if its file
-      exists** (non-placeholder and `File.Exists(path)`), so a sync during an outage writes
-      placeholders for the missing titles. Tests: `LocalIndex_MissingFile_NotLocal`,
-      `LocalIndex_ExistingFile_IsLocal`, `Sync_LocalFileMissing_WritesPlaceholder`.
+      exists**, so a sync during an outage writes placeholders for the missing titles. Tests:
+      `LocalIndex_MissingFile_NotLocal`, `LocalIndex_ExistingFile_IsLocal`, `Sync_LocalFileMissing_WritesPlaceholder`.
+    - **As implemented (Task 8 review, controller ruling):** not `File.Exists` (it returns `false` for every
+      error) but `LocalIndex.ProbeFile` = `File.GetAttributes`: `FileNotFoundException` /
+      `DirectoryNotFoundException` → **missing** (deleted file, offline drive, missing library folder, empty
+      mount point → peer fallback, spec goal 3; the 200-scans-per-run batching absorbs a whole-drive storm);
+      any other error (EACCES, EIO, ESTALE) and files not checked within the time budget → **present**.
+      There is deliberately no "library root missing/empty → present" guard. Task 10's sweep should use the
+      same probe. Tests: `LocalIndex_MissingRoot_ItemsAreMissing`, `LocalIndex_EmptyMountPoint_ItemsAreMissing`,
+      `LocalIndex_IoErrorOtherThanNotFound_IsPresent`, `LocalIndex_DefaultProbe_DistinguishesNotFoundFromErrors`,
+      `LocalIndex_ExistenceBudgetExceeded_TreatsUncheckedAsPresent`.
 13. **Task 10 user data:** watched/resume/favourite carry over automatically between a local item
     and a placeholder with the same provider id (movie key = provider id, episode key = series key
     + season/episode numbers). No plugin code; Task 10 Step 5 just records it.

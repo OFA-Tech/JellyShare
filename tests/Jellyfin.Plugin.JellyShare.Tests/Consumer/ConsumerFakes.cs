@@ -98,9 +98,7 @@ internal sealed class FakeLocalLibrary : ILocalLibrary
 
     public List<LocalSeriesItem> Series { get; } = new();
 
-    public List<string> Roots { get; } = new();
-
-    public LocalLibrarySnapshot Read() => new(Media.ToList(), Series.ToList(), Roots.ToList());
+    public LocalLibrarySnapshot Read() => new(Media.ToList(), Series.ToList());
 
     public static Func<string, FilePresence> Exists(Func<string, bool> exists)
         => p => exists(p) ? FilePresence.Present : FilePresence.Missing;

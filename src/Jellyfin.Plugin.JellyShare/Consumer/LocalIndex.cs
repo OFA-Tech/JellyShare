@@ -29,8 +29,7 @@ public sealed record LocalSeriesItem(string Name, string? Path, IReadOnlyDiction
 /// <summary>Everything the local index reads from the library, in one pass.</summary>
 /// <param name="Media">All movies and episodes in all libraries.</param>
 /// <param name="Series">All series in all libraries.</param>
-/// <param name="Roots">The physical library folders.</param>
-public sealed record LocalLibrarySnapshot(IReadOnlyList<LocalMedia> Media, IReadOnlyList<LocalSeriesItem> Series, IReadOnlyList<string>? Roots = null);
+public sealed record LocalLibrarySnapshot(IReadOnlyList<LocalMedia> Media, IReadOnlyList<LocalSeriesItem> Series);
 
 /// <summary>Result of a file existence probe.</summary>
 public enum FilePresence
@@ -58,8 +57,7 @@ public interface ILocalLibrary
 /// <param name="EpisodeKeys">Keys of local episodes whose file exists.</param>
 /// <param name="Series">Local series keyed <c>tvdb:{id}</c>/<c>imdb:{id}</c>/<c>tmdb:{id}</c>.</param>
 /// <param name="UncheckedFiles">
-/// Files counted as present without proof: not checked within the time budget, probe errors, or under a missing,
-/// unreadable or empty library folder.
+/// Files counted as present without proof: not checked within the time budget, or probe errors other than not-found.
 /// </param>
 /// <param name="MissingFiles">Files that were checked and do not exist.</param>
 public sealed record LocalIndexResult(
@@ -85,14 +83,12 @@ public interface ILocalIndex
     Task<LocalIndexResult> BuildAsync(CancellationToken ct);
 }
 
-
 /// <summary>
-/// Local, non-placeholder items in all libraries whose file exists. A title only counts as missing when its file is
-/// positively reported as not found inside a reachable library folder; everything uncertain counts as present
-/// (never create placeholders over owned titles):
+/// Local, non-placeholder items in all libraries whose file exists. A title counts as missing (so a peer copy is used,
+/// spec goal 3) only when its file is reported as not found — this includes a deleted file, an offline drive, a
+/// missing library folder or an empty mount point. Anything uncertain counts as present:
 /// <list type="bullet">
 /// <item>probe errors other than not-found (permissions, I/O, stale handles) → present;</item>
-/// <item>a library folder that is missing, unreadable or empty (unmounted share, offline drive) → all its items present;</item>
 /// <item>checks run off the caller's thread under a time budget (hung mounts) → items not checked in time present.</item>
 /// </list>
 /// </summary>
@@ -111,7 +107,6 @@ public sealed class LocalIndex : ILocalIndex
     private readonly ILocalLibrary _library;
     private readonly IConfigProvider _config;
     private readonly Func<string, FilePresence> _probe;
-    private readonly Func<string, bool> _rootReachable;
     private readonly TimeSpan _budget;
 
     /// <summary>Initializes a new instance of the <see cref="LocalIndex"/> class.</summary>
@@ -119,18 +114,15 @@ public sealed class LocalIndex : ILocalIndex
     /// <param name="config">The plugin configuration (placeholder roots).</param>
     /// <param name="probe">File probe; defaults to <see cref="ProbeFile"/>.</param>
     /// <param name="budget">Time budget for all checks; defaults to <see cref="DefaultBudget"/>.</param>
-    /// <param name="rootReachable">Library folder check; defaults to <see cref="IsRootReachable"/>.</param>
     public LocalIndex(
         ILocalLibrary library,
         IConfigProvider config,
         Func<string, FilePresence>? probe = null,
-        TimeSpan? budget = null,
-        Func<string, bool>? rootReachable = null)
+        TimeSpan? budget = null)
     {
         _library = library;
         _config = config;
         _probe = probe ?? ProbeFile;
-        _rootReachable = rootReachable ?? IsRootReachable;
         _budget = budget ?? DefaultBudget;
     }
 
@@ -161,21 +153,6 @@ public sealed class LocalIndex : ILocalIndex
         }
     }
 
-    /// <summary>Checks that a library folder exists, can be listed and is not empty.</summary>
-    /// <param name="root">The library folder.</param>
-    /// <returns><c>true</c> when its items can be judged by their own files.</returns>
-    public static bool IsRootReachable(string root)
-    {
-        try
-        {
-            return Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any();
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
-
     /// <summary>Gets the keys of local titles of a type.</summary>
     /// <param name="mediaType"><c>Movie</c> or <c>Episode</c>.</param>
     /// <returns>The keys.</returns>
@@ -187,14 +164,8 @@ public sealed class LocalIndex : ILocalIndex
     {
         var cfg = _config.Current;
         var snapshot = _library.Read();
-        var roots = (snapshot.Roots ?? [])
-            .Where(r => !string.IsNullOrWhiteSpace(r))
-            .Select(r => (Raw: r, Norm: Normalize(r)))
-            .Where(r => r.Norm.Length > 0)
-            .OrderByDescending(r => r.Norm.Length)
-            .ToList();
 
-        var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys, string? Root)>();
+        var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys)>();
         foreach (var media in snapshot.Media)
         {
             if (string.IsNullOrWhiteSpace(media.Path)
@@ -207,9 +178,7 @@ public sealed class LocalIndex : ILocalIndex
             var keys = MediaKey.For(ToItem(media));
             if (keys.Count > 0)
             {
-                var norm = Normalize(media.Path);
-                var root = roots.FirstOrDefault(r => norm.StartsWith(r.Norm + "/", PathComparison)).Raw;
-                candidates.Add((media, keys, root));
+                candidates.Add((media, keys));
             }
         }
 
@@ -218,25 +187,8 @@ public sealed class LocalIndex : ILocalIndex
         var check = Task.Run(
             () =>
             {
-                var reachable = new Dictionary<string, bool>(StringComparer.Ordinal);
                 for (var i = 0; i < candidates.Count && Volatile.Read(ref stop) == 0; i++)
                 {
-                    var root = candidates[i].Root;
-                    if (root is not null)
-                    {
-                        if (!reachable.TryGetValue(root, out var ok))
-                        {
-                            ok = SafeRootCheck(root);
-                            reachable[root] = ok;
-                        }
-
-                        if (!ok)
-                        {
-                            Volatile.Write(ref states[i], AssumedPresent);
-                            continue;
-                        }
-                    }
-
                     var presence = SafeProbe(candidates[i].Media.Path!);
                     Volatile.Write(ref states[i], presence switch
                     {
@@ -281,22 +233,6 @@ public sealed class LocalIndex : ILocalIndex
         return new LocalIndexResult(movies, episodes, BuildSeries(snapshot.Series, cfg), unverified, missing);
     }
 
-    private static StringComparison PathComparison
-        => OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-
-    private static string Normalize(string path) => path.Trim().Replace('\\', '/').TrimEnd('/');
-
-    private bool SafeRootCheck(string root)
-    {
-        try
-        {
-            return _rootReachable(root);
-        }
-        catch (Exception)
-        {
-            return false;
-        }
-    }
 
     private FilePresence SafeProbe(string path)
     {

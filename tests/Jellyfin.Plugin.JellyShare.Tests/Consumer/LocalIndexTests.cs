@@ -28,15 +28,15 @@ public class LocalIndexTests
         return (new LocalIndex(library, config, probe), library);
     }
 
+
     [Fact]
-    public async Task LocalIndex_RealProbe_ReachableRoot_MissingFileIsMissing_ExistingIsLocal()
+    public async Task LocalIndex_RealProbe_MissingFileIsMissing_ExistingIsLocal()
     {
         using var tmp = new TempDir();
         var root = tmp.Sub("Movies");
         Directory.CreateDirectory(Path.Combine(root, "A"));
         File.WriteAllText(Path.Combine(root, "A", "a.mkv"), "x");
         var (index, library) = Real();
-        library.Roots.Add(root);
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "A", "a.mkv"), Tmdb("1"), null, null, null));
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "B", "b.mkv"), Tmdb("2"), null, null, null));
 
@@ -48,49 +48,51 @@ public class LocalIndexTests
     }
 
     [Fact]
-    public async Task LocalIndex_RootMissing_ItemsCountAsPresent()
+    public async Task LocalIndex_MissingRoot_ItemsAreMissing()
     {
         using var tmp = new TempDir();
-        var root = tmp.Sub("unmounted");
+        var root = tmp.Sub("offline-drive");
         var (index, library) = Real();
-        library.Roots.Add(root);
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "A", "a.mkv"), Tmdb("1"), null, null, null));
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:1"], result.MovieKeys);
-        Assert.Equal(0, result.MissingFiles);
-        Assert.Equal(1, result.UncheckedFiles);
+        Assert.Empty(result.MovieKeys);
+        Assert.Equal(1, result.MissingFiles);
+        Assert.Equal(0, result.UncheckedFiles);
     }
 
     [Fact]
-    public async Task LocalIndex_RootEmpty_ItemsCountAsPresent()
+    public async Task LocalIndex_EmptyMountPoint_ItemsAreMissing()
     {
         using var tmp = new TempDir();
         var root = tmp.Sub("mountpoint");
         Directory.CreateDirectory(root);
         var (index, library) = Real();
-        library.Roots.Add(root + Path.DirectorySeparatorChar);
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "A", "a.mkv"), Tmdb("1"), null, null, null));
         library.Media.Add(new LocalMedia("Episode", Path.Combine(root, "S", "e.mkv"), null, new Dictionary<string, string> { ["Tvdb"] = "9" }, 1, 2));
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:1"], result.MovieKeys);
-        Assert.Equal(["ep:tvdb:9:s1e2"], result.EpisodeKeys);
-        Assert.Equal(2, result.UncheckedFiles);
+        Assert.Empty(result.MovieKeys);
+        Assert.Empty(result.EpisodeKeys);
+        Assert.Equal(2, result.MissingFiles);
     }
 
     [Fact]
-    public async Task LocalIndex_ProbeError_CountsAsPresent()
+    public async Task LocalIndex_IoErrorOtherThanNotFound_IsPresent()
     {
-        var (index, library) = Real(_ => FilePresence.Unknown);
+        var (index, library) = Real(p => p.Contains("throws", StringComparison.Ordinal)
+            ? throw new IOException("stale file handle")
+            : FilePresence.Unknown);
         library.Media.Add(new LocalMedia("Movie", "/media/denied.mkv", Tmdb("1"), null, null, null));
+        library.Media.Add(new LocalMedia("Movie", "/media/throws.mkv", Tmdb("2"), null, null, null));
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:1"], result.MovieKeys);
-        Assert.Equal(1, result.UncheckedFiles);
+        Assert.Equal(["movie:tmdb:1", "movie:tmdb:2"], result.MovieKeys.Order(StringComparer.Ordinal));
+        Assert.Equal(0, result.MissingFiles);
+        Assert.Equal(2, result.UncheckedFiles);
     }
 
     [Fact]
