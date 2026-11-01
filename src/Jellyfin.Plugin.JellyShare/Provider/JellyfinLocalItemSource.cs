@@ -106,7 +106,9 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         {
             case Movie:
             case Episode:
-                var bitrate = item.TotalBitrate ?? SumOfStreamBitrates(_mediaSourceManager.GetMediaStreams(item.Id));
+                var bitrate = item.TotalBitrate is > 0
+                    ? item.TotalBitrate
+                    : SumOfStreamBitrates(_mediaSourceManager.GetMediaStreams(item.Id));
                 return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate, item.RunTimeTicks);
             case null:
                 return null;
@@ -128,7 +130,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             .Where(s => s.Type == MediaStreamType.Subtitle)
             .Select(s => new SubtitleTrack(s.Language, s.Codec, s.Title ?? s.DisplayTitle))
             .ToArray();
-        var bitRate = item.TotalBitrate ?? SumOfStreamBitrates(streams);
+        var bitRate = EffectiveBitrate(item.TotalBitrate, streams);
 
         return new CatalogItem(
             item.Id.ToString("N"),
@@ -150,6 +152,13 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             item.DateModified,
             episode is null || episode.SeriesId == Guid.Empty ? null : episode.SeriesId.ToString("N"));
     }
+
+    /// <summary>The container total when positive, else the sum of the stream bitrates; <c>null</c> when unknown.</summary>
+    /// <param name="total">The container's total bitrate as Jellyfin recorded it (0 means unknown).</param>
+    /// <param name="streams">The media streams.</param>
+    /// <returns>The bitrate in bits per second, or <c>null</c>.</returns>
+    internal static int? EffectiveBitrate(int? total, IEnumerable<MediaStream> streams)
+        => total is > 0 ? total : SumOfStreamBitrates(streams);
 
     /// <summary>Video plus audio stream bitrates when the container has no total; <c>null</c> when none is known.</summary>
     internal static int? SumOfStreamBitrates(IEnumerable<MediaStream> streams)

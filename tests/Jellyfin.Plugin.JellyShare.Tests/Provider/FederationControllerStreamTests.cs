@@ -491,6 +491,22 @@ public sealed class FederationControllerStreamTests : IDisposable
         Assert.Single(_runner.Calls);
     }
 
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public async Task Stream_ZeroOrNegativeBitrate_WithCap_IsTranscoded(long bitrate)
+    {
+        _config.Current.Shares[0].MaxBitrate = 2_000_000;
+        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
+        var controller = Controller(_token);
+
+        var result = controller.Stream(MovieId.ToString("N"));
+
+        Assert.IsNotType<PhysicalFileResult>(result);
+        await Execute(controller, result);
+        Assert.Single(_runner.Calls);
+    }
+
     [Fact]
     public void Stream_UnknownBitrate_WithoutCap_ServesFile()
     {

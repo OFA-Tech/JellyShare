@@ -168,8 +168,8 @@ public class FederationController : ControllerBase
         EncoderSettings? encoder = null;
         double? startSeconds = null;
         var cap = share.MaxBitrate;
-        // An unknown bitrate cannot be shown to be within the cap, so it is transcoded too.
-        var overCap = cap is { } c && (info.Bitrate is not { } bitrate || bitrate > c);
+        // An unknown (missing or non-positive) bitrate cannot be shown to be within the cap, so it is transcoded too.
+        var overCap = cap is { } c && (info.Bitrate is not { } bitrate || bitrate <= 0 || bitrate > c);
         if (overCap)
         {
             if (!CappedStreamArgs.TryParseStart(start, info.RunTimeTicks, out startSeconds))
