@@ -30,11 +30,11 @@ public class FederationControllerPingTests
     }
 
     [Fact]
-    public void Ping_ReturnsProtocolVersionAndServerName()
+    public async Task Ping_ReturnsProtocolVersionAndServerName()
     {
         var controller = NewController("Alice");
 
-        var result = controller.Ping().GetAwaiter().GetResult();
+        var result = (await controller.Ping());
 
         Assert.NotNull(result.Value);
         Assert.Equal("1.0", result.Value!.ProtocolVersion);
@@ -42,11 +42,11 @@ public class FederationControllerPingTests
     }
 
     [Fact]
-    public void Ping_SerializesToCamelCaseWireShape()
+    public async Task Ping_SerializesToCamelCaseWireShape()
     {
         var controller = NewController("Alice");
 
-        var json = JsonSerializer.Serialize(controller.Ping().GetAwaiter().GetResult().Value);
+        var json = JsonSerializer.Serialize((await controller.Ping()).Value);
 
         Assert.Equal("{\"protocolVersion\":\"1.0\",\"serverName\":\"Alice\"}", json);
     }

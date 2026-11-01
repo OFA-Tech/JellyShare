@@ -108,41 +108,41 @@ public sealed class FederationControllerCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Catalog_NoToken_Returns401()
+    public async Task Catalog_NoToken_Returns401()
     {
-        var result = Controller(null).Catalog().GetAwaiter().GetResult();
+        var result = (await Controller(null).Catalog());
 
         Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
     }
 
     [Fact]
-    public void Catalog_WrongToken_Returns401_AndDoesNotEchoToken()
+    public async Task Catalog_WrongToken_Returns401_AndDoesNotEchoToken()
     {
         const string wrong = "js1_not-a-real-token-value";
         var controller = Controller(wrong);
 
-        var result = Assert.IsAssignableFrom<ObjectResult>(controller.Catalog().GetAwaiter().GetResult());
+        var result = Assert.IsAssignableFrom<ObjectResult>((await controller.Catalog()));
 
         Assert.Equal(401, result.StatusCode);
         Assert.DoesNotContain(wrong, System.Text.Json.JsonSerializer.Serialize(result.Value));
     }
 
     [Fact]
-    public void Catalog_DisabledShare_Returns401()
+    public async Task Catalog_DisabledShare_Returns401()
     {
         _config.Settings.Shares[0].Enabled = false;
 
-        var result = Controller(_token).Catalog().GetAwaiter().GetResult();
+        var result = (await Controller(_token).Catalog());
 
         Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
     }
 
     [Fact]
-    public void Catalog_ValidToken_ReturnsOnlyShareItemsWithQuotedEtag()
+    public async Task Catalog_ValidToken_ReturnsOnlyShareItemsWithQuotedEtag()
     {
         var controller = Controller(_token);
 
-        var result = Assert.IsType<OkObjectResult>(controller.Catalog().GetAwaiter().GetResult());
+        var result = Assert.IsType<OkObjectResult>((await controller.Catalog()));
 
         var catalog = Assert.IsType<CatalogResponse>(result.Value);
         Assert.Equal(2, catalog.Items.Count);
@@ -151,46 +151,46 @@ public sealed class FederationControllerCatalogTests : IDisposable
     }
 
     [Fact]
-    public void Catalog_IfNoneMatchMatches_Returns304WithoutBody()
+    public async Task Catalog_IfNoneMatchMatches_Returns304WithoutBody()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).Value).Etag;
+        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>((await Controller(_token).Catalog())).Value).Etag;
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        var result = controller.Catalog().GetAwaiter().GetResult();
+        var result = (await controller.Catalog());
 
         Assert.Equal(304, Assert.IsType<StatusCodeResult>(result).StatusCode);
         Assert.Equal("\"" + etag + "\"", controller.Response.Headers.ETag.ToString());
     }
 
     [Fact]
-    public void Catalog_304_MaterializesNothing()
+    public async Task Catalog_304_MaterializesNothing()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).Value).Etag;
+        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>((await Controller(_token).Catalog())).Value).Etag;
         _materialized = 0;
 
         // A fresh builder (no cache): the 304 answer must still not build any catalog entry.
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        Assert.Equal(304, Assert.IsType<StatusCodeResult>(controller.Catalog().GetAwaiter().GetResult()).StatusCode);
+        Assert.Equal(304, Assert.IsType<StatusCodeResult>((await controller.Catalog())).StatusCode);
         Assert.Equal(0, _materialized);
     }
 
     [Fact]
-    public void Catalog_IfNoneMatchStale_Returns200()
+    public async Task Catalog_IfNoneMatchStale_Returns200()
     {
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"deadbeef\"");
 
-        Assert.IsType<OkObjectResult>(controller.Catalog().GetAwaiter().GetResult());
+        Assert.IsType<OkObjectResult>((await controller.Catalog()));
     }
 
     [Fact]
-    public void Catalog_RevocationIsImmediate()
+    public async Task Catalog_RevocationIsImmediate()
     {
-        Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult());
+        Assert.IsType<OkObjectResult>((await Controller(_token).Catalog()));
 
         _config.Settings.Shares.Clear();
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).StatusCode);
+        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>((await Controller(_token).Catalog())).StatusCode);
     }
 
     [Fact]

@@ -6,7 +6,6 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Jellyfin.Controllers.V1;
 using JellyShare.JellyfinTests.Fakes;
-using JellyShare.JellyfinTests.Fakes;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;

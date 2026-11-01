@@ -143,7 +143,7 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var root = _h.Config.Settings.MoviesPlaceholderPath;
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "someone-else.txt"), "x");
+        await File.WriteAllTextAsync(Path.Combine(root, "someone-else.txt"), "x");
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Movies"));
 
