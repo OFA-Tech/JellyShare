@@ -52,6 +52,10 @@ internal sealed class RecordingTimeProvider : TimeProvider
 {
     public List<RecordedTimer> Timers { get; } = new();
 
+    public DateTimeOffset Now { get; set; } = new(2026, 10, 1, 12, 0, 0, TimeSpan.Zero);
+
+    public override DateTimeOffset GetUtcNow() => Now;
+
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
         var timer = new RecordedTimer(callback, state, dueTime, period);
@@ -477,54 +481,265 @@ public sealed class LocalItemWatcherTests : IDisposable
         Assert.True(MoviePlaceholder("Movie 7 (2000) [tmdbid-100007]"));
     }
 
+    private void OfferNumbered(params int[] tmdb)
+        => Offer(tmdb.Select(t => TestItems.Movie("T" + t, tmdb: t.ToString(), id: "t" + t) with { Year = 2000 }).ToArray());
+
     [Fact]
     public async Task Sweep_RespectsTimeBudget()
+    {
+        using var release = new ManualResetEventSlim(false);
+        const string slow = "/media/Movies/Slow/Slow.mkv";
+        _library.Media.Add(LocalMovie(slow, "1"));
+        _library.Media.Add(LocalMovie("/media/Movies/Gone/Gone.mkv", "2"));
+        OfferNumbered(1, 2);
+        await _sync.RunAsync(CancellationToken.None);
+        var watcher = NewWatcher(TimeSpan.FromMilliseconds(150), p =>
+        {
+            if (p == slow)
+            {
+                release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            return FilePresence.Present;
+        });
+
+        try
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            var first = await watcher.SweepAsync(CancellationToken.None);
+
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
+            Assert.Equal(0, first.Examined);
+            Assert.Equal(2, first.Candidates);
+            Assert.False(first.Skipped);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_HungProbe_DoesNotBlockOtherPaths()
     {
         using var release = new ManualResetEventSlim(false);
         const string slow = "/media/Movies/Slow/Slow.mkv";
         const string gone = "/media/Movies/Gone/Gone.mkv";
         _library.Media.Add(LocalMovie(slow, "1"));
         _library.Media.Add(LocalMovie(gone, "2"));
-        Offer(
-            TestItems.Movie("Slow", tmdb: "1", id: "slow") with { Year = 2000 },
-            TestItems.Movie("Gone", tmdb: "2", id: "gone") with { Year = 2000 });
+        OfferNumbered(1, 2);
         await _sync.RunAsync(CancellationToken.None);
-        _missing.Add(gone);
-
-        var watcher = NewWatcher(
-            TimeSpan.FromMilliseconds(150),
-            p =>
-            {
-                if (p == slow)
-                {
-                    release.Wait(TimeSpan.FromSeconds(30));
-                }
-
-                return _missing.Contains(p) ? FilePresence.Missing : FilePresence.Present;
-            });
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        var first = await watcher.SweepAsync(CancellationToken.None);
-        sw.Stop();
-
-        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
-        Assert.Equal(0, first.Examined);
-        Assert.Equal(2, first.Candidates);
-        Assert.False(MoviePlaceholder("Gone (2000) [tmdbid-2]"));
-
-        // While the stuck probe is still running no second probe thread is started.
-        var skipped = await watcher.SweepAsync(CancellationToken.None);
-        Assert.True(skipped.Skipped);
-
-        release.Set();
-        SweepResult done = skipped;
-        for (var i = 0; i < 100 && done.Skipped; i++)
+        var slowCalls = 0;
+        var watcher = NewWatcher(TimeSpan.FromMilliseconds(150), p =>
         {
-            await Task.Delay(50);
-            done = await watcher.SweepAsync(CancellationToken.None);
+            if (p == slow)
+            {
+                Interlocked.Increment(ref slowCalls);
+                release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            return _missing.Contains(p) ? FilePresence.Missing : FilePresence.Present;
+        });
+
+        try
+        {
+            await watcher.SweepAsync(CancellationToken.None);
+            _missing.Add(gone);
+
+            // The cursor moved past the stuck item and the stuck path is not probed again while its probe hangs.
+            var second = await watcher.SweepAsync(CancellationToken.None);
+
+            Assert.False(second.Skipped);
+            Assert.Equal(1, second.Changed);
+            Assert.True(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
+            Assert.Equal(1, Volatile.Read(ref slowCalls));
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_TooManyHungProbes_SkipsPassUntilTheyReturn()
+    {
+        using var release = new ManualResetEventSlim(false);
+        for (var i = 1; i <= 6; i++)
+        {
+            _library.Media.Add(LocalMovie("/media/Movies/S" + i + "/s.mkv", i.ToString()));
         }
 
-        Assert.False(done.Skipped);
-        Assert.True(MoviePlaceholder("Gone (2000) [tmdbid-2]"));
+        OfferNumbered(1, 2, 3, 4, 5, 6);
+        await _sync.RunAsync(CancellationToken.None);
+        var watcher = NewWatcher(TimeSpan.FromMilliseconds(100), _ =>
+        {
+            release.Wait(TimeSpan.FromSeconds(30));
+            return FilePresence.Present;
+        });
+
+        try
+        {
+            for (var i = 0; i < LocalItemWatcher.MaxHungProbes; i++)
+            {
+                Assert.False((await watcher.SweepAsync(CancellationToken.None)).Skipped);
+            }
+
+            Assert.True((await watcher.SweepAsync(CancellationToken.None)).Skipped);
+
+            release.Set();
+            var result = new SweepResult(0, 0, 0, false, true);
+            for (var i = 0; i < 100 && result.Skipped; i++)
+            {
+                await Task.Delay(30);
+                result = await watcher.SweepAsync(CancellationToken.None);
+            }
+
+            Assert.False(result.Skipped);
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_CandidatesCachedBetweenPasses()
+    {
+        AddLocalSintel();
+        Offer(Sintel());
+        await _sync.RunAsync(CancellationToken.None);
+        var reads = _library.Reads;
+
+        await _watcher.SweepAsync(CancellationToken.None);
+        await _watcher.SweepAsync(CancellationToken.None);
+        Assert.Equal(reads + 1, _library.Reads);
+
+        // A change found by the sweep is reconciled without reading the library again.
+        _missing.Add(SintelPath);
+        var result = await _watcher.SweepAsync(CancellationToken.None);
+        Assert.Equal(1, result.Changed);
+        Assert.True(MoviePlaceholder(SintelDir));
+        Assert.Equal(reads + 1, _library.Reads);
+    }
+
+    [Fact]
+    public async Task Sweep_MergedIndexChanged_RebuildsCandidates()
+    {
+        AddLocalSintel();
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+
+        Offer(Bunny(), Sintel());
+        _clock.Now += TimeSpan.FromMinutes(1);
+        await _sync.RunAsync(CancellationToken.None);
+        File.SetLastWriteTimeUtc(_sync.MergedIndexPath, DateTime.UtcNow.AddMinutes(5));
+
+        Assert.Equal(1, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+    }
+
+    [Fact]
+    public async Task Sweep_RefreshesCandidatesPeriodically()
+    {
+        Offer(Sintel());
+        await _sync.RunAsync(CancellationToken.None);
+        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+
+        // Added without a usable event: picked up by the periodic refresh.
+        AddLocalSintel();
+        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+        _timers.Now += LocalItemWatcher.CandidateRefreshInterval + TimeSpan.FromSeconds(1);
+        var result = await _watcher.SweepAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Candidates);
+        Assert.False(MoviePlaceholder(SintelDir));
+    }
+
+    [Fact]
+    public async Task Sweep_PresentLocalWithLeftoverPlaceholder_RemovesIt()
+    {
+        AddLocalSintel();
+        _missing.Add(SintelPath);
+        Offer(Sintel());
+        await _sync.RunAsync(CancellationToken.None);
+        Assert.True(MoviePlaceholder(SintelDir));
+
+        // A fresh watcher (plugin restart) that never saw the file missing.
+        _missing.Clear();
+        var result = await NewWatcher(null).SweepAsync(CancellationToken.None);
+
+        Assert.Equal(1, result.Changed);
+        Assert.False(MoviePlaceholder(SintelDir));
+    }
+
+    [Fact]
+    public async Task Sweep_EventPlaceholderThenLocalBackWithoutUsableEvent_RemovesIt()
+    {
+        AddLocalSintel();
+        Offer(Sintel());
+        await _sync.RunAsync(CancellationToken.None);
+        await _watcher.StartAsync(CancellationToken.None);
+        await _watcher.SweepAsync(CancellationToken.None);
+
+        // Removed: the event path writes the placeholder.
+        _library.Media.Clear();
+        _missing.Add(SintelPath);
+        _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
+        await _watcher.ProcessPendingAsync(CancellationToken.None);
+        Assert.True(MoviePlaceholder(SintelDir));
+
+        // Back, but its ItemAdded event never had usable ids.
+        _missing.Clear();
+        AddLocalSintel();
+        await _watcher.SweepAsync(CancellationToken.None);
+
+        Assert.False(MoviePlaceholder(SintelDir));
+    }
+
+    [Fact]
+    public async Task Fire_AfterDispose_DoesNotThrow()
+    {
+        await _watcher.StartAsync(CancellationToken.None);
+        _watcher.Dispose();
+
+        foreach (var timer in _timers.Timers)
+        {
+            timer.Fire();
+        }
+    }
+
+    [Fact]
+    public async Task StopAsync_CancelsAndAwaitsInFlightSweep()
+    {
+        using var release = new ManualResetEventSlim(false);
+        using var entered = new ManualResetEventSlim(false);
+        AddLocalSintel();
+        Offer(Sintel());
+        await _sync.RunAsync(CancellationToken.None);
+        var watcher = NewWatcher(TimeSpan.FromSeconds(30), _ =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(30));
+            return FilePresence.Present;
+        });
+
+        try
+        {
+            await watcher.StartAsync(CancellationToken.None);
+            _timers.Timers.Last(t => t.Period == TimeSpan.FromSeconds(60)).Fire();
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
+            Assert.Equal(1, watcher.RunningPasses);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            using var stopToken = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await watcher.StopAsync(stopToken.Token);
+
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
+            Assert.Equal(0, watcher.RunningPasses);
+        }
+        finally
+        {
+            release.Set();
+        }
     }
 }

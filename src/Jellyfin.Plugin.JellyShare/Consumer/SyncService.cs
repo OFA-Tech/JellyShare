@@ -48,7 +48,7 @@ public sealed record SyncReport(
     public DateTimeOffset FinishedUtc { get; init; }
 }
 
-/// <summary>Outcome of a targeted <see cref="SyncService.ReconcileAsync"/>.</summary>
+/// <summary>Outcome of a targeted <see cref="SyncService.ReconcileAsync(IReadOnlyCollection{string}, CancellationToken)"/>.</summary>
 /// <param name="Entries">Merged-index entries that matched the requested keys.</param>
 /// <param name="Written">Placeholder files written.</param>
 /// <param name="Deleted">Placeholder files deleted.</param>
@@ -156,13 +156,24 @@ public sealed class SyncService
     /// <param name="keys">Keys of the titles to re-evaluate.</param>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>What was done.</returns>
-    public async Task<ReconcileReport> ReconcileAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
+    public Task<ReconcileReport> ReconcileAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
+        => ReconcileAsync(keys, null, ct);
+
+    /// <summary>
+    /// Like <see cref="ReconcileAsync(IReadOnlyCollection{string}, CancellationToken)"/>, but with local presence already
+    /// known by the caller (the presence sweep), so the library is not read again.
+    /// </summary>
+    /// <param name="keys">Keys of the titles to re-evaluate.</param>
+    /// <param name="local">Local presence covering at least the affected titles; <c>null</c> to check it here.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>What was done.</returns>
+    public async Task<ReconcileReport> ReconcileAsync(IReadOnlyCollection<string> keys, LocalIndexResult? local, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(keys);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await ReconcileCoreAsync(keys, ct).ConfigureAwait(false);
+            return await ReconcileCoreAsync(keys, local, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -170,7 +181,7 @@ public sealed class SyncService
         }
     }
 
-    private async Task<ReconcileReport> ReconcileCoreAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
+    private async Task<ReconcileReport> ReconcileCoreAsync(IReadOnlyCollection<string> keys, LocalIndexResult? known, CancellationToken ct)
     {
         var cfg = _config.Current;
         EnsureRootsSeparate(cfg);
@@ -190,7 +201,7 @@ public sealed class SyncService
         }
 
         var entryKeys = new HashSet<string>(affected.SelectMany(e => e.Keys), StringComparer.Ordinal);
-        var local = await _localIndex.BuildForKeysAsync(entryKeys, ct).ConfigureAwait(false);
+        var local = known ?? await _localIndex.BuildForKeysAsync(entryKeys, ct).ConfigureAwait(false);
         var contributing = cfg.Peers
             .Where(p => p.Enabled && p.Id != Guid.Empty)
             .GroupBy(p => p.Id)

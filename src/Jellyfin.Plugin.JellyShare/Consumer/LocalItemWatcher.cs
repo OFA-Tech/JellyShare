@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using Jellyfin.Plugin.JellyShare.Configuration;
 using Jellyfin.Plugin.JellyShare.Placeholders;
 using Jellyfin.Plugin.JellyShare.Provider;
 using Microsoft.Extensions.Hosting;
@@ -56,7 +58,20 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     /// <summary>More events or changed keys than this in one window go to a full sync.</summary>
     public const int StormThreshold = 500;
 
+    /// <summary>Abandoned file checks (stuck on a hung mount) allowed before sweeping pauses until they return.</summary>
+    public const int MaxHungProbes = 4;
+
+    /// <summary>The sweep candidate list is rebuilt (one library read) at least this often.</summary>
+    public static readonly TimeSpan CandidateRefreshInterval = TimeSpan.FromMinutes(10);
+
     private const int MaxAttempts = 3;
+
+    private const int NotChecked = 0;
+    private const int PresentState = 1;
+    private const int MissingState = 2;
+    private const int UnknownState = 3;
+    private const int InFlight = 4;
+    private const int Stuck = 5;
 
     private readonly SyncService _sync;
     private readonly ILocalItemEvents _events;
@@ -74,6 +89,9 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private readonly SemaphoreSlim _sweepGate = new(1, 1);
     private readonly HashSet<string> _missingKeys = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<string, byte> _probing = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<TaskCompletionSource, byte> _passes = new();
+    private readonly HashSet<string> _slowWarned = new(StringComparer.Ordinal);
 
     private int _disposed;
     private int _windowEvents;
@@ -81,8 +99,14 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private IDisposable? _subscription;
     private ITimer? _processTimer;
     private ITimer? _sweepTimer;
-    private Task? _probeTask;
     private int _cursor;
+    private int _hungProbes;
+    private int _hungWarned;
+    private int _dirty;
+    private List<Candidate>? _candidates;
+    private IReadOnlyDictionary<string, LocalSeries> _series = new Dictionary<string, LocalSeries>();
+    private (DateTime WriteUtc, long Length) _indexStamp;
+    private DateTimeOffset _builtUtc;
 
     /// <summary>Initializes a new instance of the <see cref="LocalItemWatcher"/> class.</summary>
     /// <param name="sync">The sync service (reconcile and full sync).</param>
@@ -133,8 +157,11 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
+    /// <summary>Gets the number of timer-started passes still running.</summary>
+    internal int RunningPasses => _passes.Count;
+
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         IDisposable? subscription;
         lock (_lock)
@@ -150,7 +177,20 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         _processTimer = null;
         _sweepTimer = null;
         _cts.Cancel();
-        return Task.CompletedTask;
+
+        // In-flight passes observe the cancelled token; wait for them, bounded by the host's stop token.
+        var running = _passes.Keys.Select(p => p.Task).ToArray();
+        if (running.Length > 0)
+        {
+            try
+            {
+                await Task.WhenAll(running).WaitAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("JellyShare watcher: stopped before {Count} background passes finished", running.Length);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -166,7 +206,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         _processTimer?.Dispose();
         _sweepTimer?.Dispose();
         _subscription?.Dispose();
-        _cts.Dispose();
+
+        // _cts is deliberately not disposed: a timer callback racing with Dispose may still read its token.
     }
 
     /// <summary>Processes the queued events: reconcile the affected titles, or one full sync for a storm.</summary>
@@ -239,8 +280,9 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     }
 
     /// <summary>
-    /// One presence sweep pass: stat the files of local movies/episodes whose keys appear in the merged index, under a
-    /// time budget, and reconcile the titles whose presence changed since the previous pass.
+    /// One presence sweep pass: stat the cached file paths of local movies/episodes whose keys appear in the merged index,
+    /// under a time budget, and reconcile the titles whose presence changed. The candidate list (one library read) is only
+    /// rebuilt when the merged index changes, after library events, or every <see cref="CandidateRefreshInterval"/>.
     /// </summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>What the pass did.</returns>
@@ -253,112 +295,71 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
         try
         {
-            // A probe stuck on a hung mount keeps its thread; never start a second one behind it.
-            if (_probeTask is { IsCompleted: false })
-            {
-                return new SweepResult(0, 0, 0, false, true);
-            }
-            var file = MergedIndexStore.Load(_sync.MergedIndexPath);
-            var indexKeys = new HashSet<string>(StringComparer.Ordinal);
-            if (file is not null)
-            {
-                foreach (var entry in file.Entries.Where(e => e.Sources.Count > 0))
-                {
-                    indexKeys.UnionWith(entry.Keys);
-                }
-            }
-
             var cfg = _config.Current;
-            var candidates = new List<(LocalMedia Media, List<string> Keys)>();
-            if (indexKeys.Count > 0)
-            {
-                foreach (var media in _library.Read().Media)
-                {
-                    if (string.IsNullOrWhiteSpace(media.Path)
-                        || media.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
-                        || PlaceholderPaths.IsPlaceholder(media.Path, cfg))
-                    {
-                        continue;
-                    }
-
-                    var keys = LocalIndex.KeysFor(media).Where(indexKeys.Contains).ToList();
-                    if (keys.Count > 0)
-                    {
-                        candidates.Add((media, keys));
-                    }
-                }
-            }
-
+            var candidates = EnsureCandidates(cfg);
             var n = candidates.Count;
             if (n == 0)
             {
-                _missingKeys.Clear();
                 return new SweepResult(0, 0, 0, false);
             }
 
+            if (Volatile.Read(ref _hungProbes) >= MaxHungProbes)
+            {
+                if (Interlocked.Exchange(ref _hungWarned, 1) == 0)
+                {
+                    _logger.LogWarning("JellyShare sweep: {Count} file checks are stuck (hung mount?); sweeping paused until they return", MaxHungProbes);
+                }
+
+                return new SweepResult(n, 0, 0, false, true);
+            }
+
+            Volatile.Write(ref _hungWarned, 0);
             var start = _cursor % n;
-            var ordered = new (LocalMedia Media, List<string> Keys)[n];
+            var ordered = new Candidate[n];
             for (var i = 0; i < n; i++)
             {
                 ordered[i] = candidates[(start + i) % n];
             }
 
-            var states = new int[n];
-            var stop = 0;
-            var probe = _probe;
-            var check = Task.Run(
-                () =>
-                {
-                    for (var i = 0; i < n && Volatile.Read(ref stop) == 0; i++)
-                    {
-                        FilePresence presence;
-                        try
-                        {
-                            presence = probe(ordered[i].Media.Path!);
-                        }
-                        catch (Exception)
-                        {
-                            presence = FilePresence.Unknown;
-                        }
+            var states = await ProbeAsync(ordered, ct).ConfigureAwait(false);
 
-                        Volatile.Write(ref states[i], presence == FilePresence.Missing ? 2 : 1);
-                    }
-                },
-                CancellationToken.None);
-            _probeTask = check;
-
-            try
-            {
-                await check.WaitAsync(_budget, ct).ConfigureAwait(false);
-            }
-            catch (TimeoutException)
-            {
-                Volatile.Write(ref stop, 1);
-            }
-
-            var snapshot = new int[n];
             var examined = 0;
-            for (var i = 0; i < n; i++)
+            while (examined < n && states[examined] is not (NotChecked or Stuck))
             {
-                snapshot[i] = Volatile.Read(ref states[i]);
-                if (snapshot[i] != 0 && examined == i)
-                {
-                    examined++;
-                }
+                examined++;
             }
 
-            _cursor = (start + examined) % n;
+            // Move past an item whose check is still running (it counts as present), so a stuck path never pins the cursor.
+            _cursor = (start + Math.Min(n, examined + 1)) % n;
 
             var seen = new Dictionary<string, (bool Present, bool Unchecked, bool Missing)>(StringComparer.Ordinal);
+            var presentMovies = new HashSet<string>(StringComparer.Ordinal);
+            var presentEpisodes = new HashSet<string>(StringComparer.Ordinal);
+            int unverified = 0, missing = 0;
             for (var i = 0; i < n; i++)
             {
+                var state = states[i];
+                if (state == MissingState)
+                {
+                    missing++;
+                }
+                else
+                {
+                    if (state != PresentState)
+                    {
+                        unverified++;
+                    }
+
+                    (ordered[i].Type == "Movie" ? presentMovies : presentEpisodes).UnionWith(ordered[i].Keys);
+                }
+
                 foreach (var key in ordered[i].Keys)
                 {
                     seen.TryGetValue(key, out var info);
-                    info = snapshot[i] switch
+                    info = state switch
                     {
-                        0 => info with { Unchecked = true },
-                        2 => info with { Missing = true },
+                        NotChecked or InFlight or Stuck => info with { Unchecked = true },
+                        MissingState => info with { Missing = true },
                         _ => info with { Present = true },
                     };
                     seen[key] = info;
@@ -378,15 +379,18 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                     nowMissing.Add(key);
                 }
             }
+
             var changed = nowMissing.Except(_missingKeys).Concat(_missingKeys.Intersect(seen.Keys).Except(nowMissing)).ToList();
-            if (changed.Count > StormThreshold)
+            var fullSync = changed.Count > StormThreshold;
+            if (fullSync)
             {
                 _logger.LogInformation("JellyShare sweep: presence of {Count} titles changed, running a full sync", changed.Count);
                 await _sync.RunAsync(ct).ConfigureAwait(false);
             }
             else if (changed.Count > 0)
             {
-                var report = await _sync.ReconcileAsync(changed, ct).ConfigureAwait(false);
+                var local = new LocalIndexResult(presentMovies, presentEpisodes, _series, unverified, missing);
+                var report = await _sync.ReconcileAsync(changed, local, ct).ConfigureAwait(false);
                 _logger.LogInformation(
                     "JellyShare sweep: presence of {Count} titles changed, {Written} placeholder files written, {Deleted} deleted",
                     changed.Count,
@@ -396,12 +400,215 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
             _missingKeys.Clear();
             _missingKeys.UnionWith(nowMissing);
-            return new SweepResult(n, examined, changed.Count, changed.Count > StormThreshold);
+            return new SweepResult(n, examined, changed.Count, fullSync);
         }
         finally
         {
             _sweepGate.Release();
         }
+    }
+
+    private async Task<int[]> ProbeAsync(Candidate[] ordered, CancellationToken ct)
+    {
+        var n = ordered.Length;
+        var states = new int[n];
+        var current = -1;
+        var stop = 0;
+        var probe = _probe;
+        var probing = _probing;
+
+        // A fresh worker per pass: a check stuck on a hung mount is abandoned (its thread finishes when the OS call
+        // returns) and the next pass skips that path, so one dead mount never blocks the others.
+        var worker = Task.Factory.StartNew(
+            () =>
+            {
+                for (var i = 0; i < n && Volatile.Read(ref stop) == 0; i++)
+                {
+                    var path = ordered[i].Path;
+                    if (!probing.TryAdd(path, 0))
+                    {
+                        Volatile.Write(ref states[i], InFlight);
+                        continue;
+                    }
+
+                    Volatile.Write(ref current, i);
+                    FilePresence presence;
+                    try
+                    {
+                        presence = probe(path);
+                    }
+                    catch (Exception)
+                    {
+                        presence = FilePresence.Unknown;
+                    }
+                    finally
+                    {
+                        probing.TryRemove(path, out _);
+                    }
+
+                    Volatile.Write(ref states[i], presence switch
+                    {
+                        FilePresence.Present => PresentState,
+                        FilePresence.Missing => MissingState,
+                        _ => UnknownState,
+                    });
+                }
+            },
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+
+        var timedOut = false;
+        try
+        {
+            await worker.WaitAsync(_budget, ct).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            timedOut = true;
+        }
+        finally
+        {
+            Volatile.Write(ref stop, 1);
+        }
+
+        var snapshot = new int[n];
+        for (var i = 0; i < n; i++)
+        {
+            snapshot[i] = Volatile.Read(ref states[i]);
+        }
+
+        if (timedOut && !worker.IsCompleted)
+        {
+            Interlocked.Increment(ref _hungProbes);
+            _ = worker.ContinueWith(_ => Interlocked.Decrement(ref _hungProbes), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            var stuck = Volatile.Read(ref current);
+            if (stuck >= 0 && snapshot[stuck] == NotChecked)
+            {
+                snapshot[stuck] = Stuck;
+                if (_slowWarned.Add(ordered[stuck].Path))
+                {
+                    _logger.LogWarning("JellyShare sweep: checking a local file took longer than {Budget} s (slow or hung mount); it is treated as present", _budget.TotalSeconds);
+                }
+            }
+        }
+
+        return snapshot;
+    }
+
+    private List<Candidate> EnsureCandidates(PluginConfiguration cfg)
+    {
+        var info = new FileInfo(_sync.MergedIndexPath);
+        if (!info.Exists)
+        {
+            _candidates = [];
+            _indexStamp = default;
+            _missingKeys.Clear();
+            return _candidates;
+        }
+
+        var stamp = (info.LastWriteTimeUtc, info.Length);
+        var now = _clock.GetUtcNow();
+        var dirty = Interlocked.Exchange(ref _dirty, 0) != 0;
+        if (_candidates is not null && !dirty && stamp == _indexStamp && now - _builtUtc < CandidateRefreshInterval)
+        {
+            return _candidates;
+        }
+
+        var file = MergedIndexStore.Load(info.FullName);
+        var canonicalOf = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var entry in file?.Entries ?? [])
+        {
+            if (entry.Sources.Count == 0)
+            {
+                continue;
+            }
+
+            foreach (var key in entry.Keys)
+            {
+                canonicalOf.TryAdd(key, entry.CanonicalKey);
+            }
+        }
+
+        var candidates = new List<Candidate>();
+        IReadOnlyDictionary<string, LocalSeries> series = new Dictionary<string, LocalSeries>();
+        if (canonicalOf.Count > 0)
+        {
+            var snapshot = _library.Read();
+            series = LocalIndex.BuildSeries(snapshot.Series, cfg);
+            foreach (var media in snapshot.Media)
+            {
+                if (string.IsNullOrWhiteSpace(media.Path)
+                    || media.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
+                    || PlaceholderPaths.IsPlaceholder(media.Path, cfg))
+                {
+                    continue;
+                }
+
+                var keys = LocalIndex.KeysFor(media).Where(canonicalOf.ContainsKey).ToArray();
+                if (keys.Length > 0)
+                {
+                    candidates.Add(new Candidate(media.Type, media.Path, keys, keys.Select(k => canonicalOf[k]).Distinct().ToArray()));
+                }
+            }
+        }
+
+        // Seed "missing" from the placeholders on disk: a title that has a placeholder is treated as previously missing,
+        // so a present local copy next to a leftover placeholder (restart, dropped event) is reconciled away.
+        var placeholders = ReadPlaceholderKeys(cfg);
+        _missingKeys.Clear();
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Canonicals.Any(placeholders.Contains))
+            {
+                _missingKeys.UnionWith(candidate.Keys);
+            }
+        }
+
+        _candidates = candidates;
+        _series = series;
+        _indexStamp = stamp;
+        _builtUtc = now;
+        return candidates;
+    }
+
+    private HashSet<string> ReadPlaceholderKeys(PluginConfiguration cfg)
+    {
+        const string Marker = "/JellyShare/v1/play/";
+        var keys = new HashSet<string>(StringComparer.Ordinal);
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        foreach (var root in new[] { cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath })
+        {
+            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            {
+                continue;
+            }
+
+            try
+            {
+                foreach (var strm in Directory.EnumerateFiles(root, "*.strm", options))
+                {
+                    try
+                    {
+                        var content = File.ReadAllText(strm).Trim();
+                        var at = content.LastIndexOf(Marker, StringComparison.Ordinal);
+                        if (at >= 0)
+                        {
+                            keys.Add(Uri.UnescapeDataString(content[(at + Marker.Length)..]));
+                        }
+                    }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                    {
+                    }
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("JellyShare sweep: placeholder folder unreadable: {Error}", ex.GetType().Name);
+            }
+        }
+
+        return keys;
     }
 
     private void OnEvent(LocalItemEvent e)
@@ -435,6 +642,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                 }
 
                 _windowEvents++;
+                Volatile.Write(ref _dirty, 1);
                 if (_windowEvents > StormThreshold)
                 {
                     // Only the count matters from here on; don't keep growing the queues.
@@ -496,6 +704,11 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                     _deferred.Add((refresh, attempts + 1));
                 }
             }
+            else
+            {
+                // Given up on the event; let the next sweep re-read the library instead.
+                Volatile.Write(ref _dirty, 1);
+            }
         }
     }
 
@@ -515,22 +728,44 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
     private void Fire<T>(Func<CancellationToken, Task<T>> action)
     {
-        var token = _cts.Token;
-        _ = Task.Run(
-            async () =>
+        try
+        {
+            if (Volatile.Read(ref _disposed) != 0 || _cts.IsCancellationRequested)
             {
-                try
+                return;
+            }
+
+            var token = _cts.Token;
+            var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _passes[done] = 0;
+            _ = Task.Run(
+                async () =>
                 {
-                    await action(token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) when (token.IsCancellationRequested)
-                {
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "JellyShare watcher: background pass failed");
-                }
-            },
-            CancellationToken.None);
+                    try
+                    {
+                        await action(token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested)
+                    {
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "JellyShare watcher: background pass failed");
+                    }
+                    finally
+                    {
+                        _passes.TryRemove(done, out _);
+                        done.TrySetResult();
+                    }
+                },
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // Timer callbacks must never throw (shutdown races).
+            _logger.LogDebug(ex, "JellyShare watcher: background pass not started");
+        }
     }
+
+    private sealed record Candidate(string Type, string Path, string[] Keys, string[] Canonicals);
 }

@@ -266,7 +266,7 @@ public sealed class LocalIndex : ILocalIndex
         }
     }
 
-    private static Dictionary<string, LocalSeries> BuildSeries(
+    internal static Dictionary<string, LocalSeries> BuildSeries(
         IReadOnlyList<LocalSeriesItem> series,
         Configuration.PluginConfiguration cfg)
     {
