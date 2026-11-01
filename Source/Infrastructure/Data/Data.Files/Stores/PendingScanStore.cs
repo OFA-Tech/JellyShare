@@ -11,6 +11,8 @@ public sealed class PendingScanStore : IPendingScanStore
     /// <summary>The file name in the plugin data folder.</summary>
     public const string FileName = "pending-scans.json";
 
+    private const string TypeOnlyLogging = "Only the exception type is logged, never its message (paths, peer URLs, tokens) or stack.";
+
     private readonly Func<string> _dataDir;
     private readonly ILogger _logger;
 
@@ -29,7 +31,6 @@ public sealed class PendingScanStore : IPendingScanStore
     public bool Exists() => File.Exists(FilePath);
 
     /// <inheritdoc />
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = "An unreadable list is expected after a crash: only the exception type is logged, never its text (paths) or stack.")]
     public List<string> Read()
     {
         var path = FilePath;
@@ -42,11 +43,15 @@ public sealed class PendingScanStore : IPendingScanStore
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("JellyShare sync: pending scan list unreadable ({Error}), starting a new one", ex.GetType().Name);
+            LogListUnreadable(ex);
         }
 
         return [];
     }
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogListUnreadable(Exception ex)
+        => _logger.LogWarning("JellyShare sync: pending scan list unreadable ({Error}), starting a new one", ex.GetType().Name);
 
     /// <inheritdoc />
     public void Write(IReadOnlyList<string> dirs) => AtomicFile.WriteAllText(FilePath, JsonSerializer.Serialize(dirs));

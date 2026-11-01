@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Streaming;
 using JellyShare.Domain.Models.Streaming;
@@ -51,6 +52,8 @@ public sealed class CappedStreamService
     /// and a further request (e.g. a seek restart) cancels the oldest.
     /// </summary>
     public const int MaxTranscodesPerSession = 2;
+
+    private const string ExpectedCancellation = "Expected cancellation (a replaced request or a client that went away), not an error: no stack trace is wanted.";
 
     private readonly IEncoderSettingsSource _settings;
     private readonly IFfmpegRunner _runner;
@@ -175,17 +178,17 @@ public sealed class CappedStreamService
             _logger.LogWarning(ex, "Could not start ffmpeg for a capped stream: {Error}", ex.Message);
             return CappedStreamOutcome.FailedWithoutOutput;
         }
-        catch (OperationCanceledException ex) when (cancel.IsCancellationRequested)
+        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
         {
             if (!requestAborted.IsCancellationRequested)
             {
                 // A newer request for the same session took over: the caller cuts this response so the client does
                 // not take the end of the body for the end of the title.
-                _logger.LogDebug(ex, "Capped stream replaced by a newer request for the same title");
+                LogReplaced();
                 return CappedStreamOutcome.Superseded;
             }
 
-            _logger.LogDebug(ex, "Capped stream client disconnected");
+            LogClientDisconnected();
             return CappedStreamOutcome.ClientDisconnected;
         }
         catch (IOException ex)
@@ -241,6 +244,12 @@ public sealed class CappedStreamService
 
         return result;
     }
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogReplaced() => _logger.LogDebug("Capped stream replaced by a newer request for the same title");
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogClientDisconnected() => _logger.LogDebug("Capped stream client disconnected");
 
     private bool HardwareAllowed()
     {

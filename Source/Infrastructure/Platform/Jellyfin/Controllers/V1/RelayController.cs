@@ -4,6 +4,7 @@ using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Interfaces.Sync;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Relay;
 using JellyShare.Jellyfin.Filters;
@@ -28,8 +29,9 @@ public class RelayController : ControllerBase
     /// <summary>Default time a committed peer may send no bytes before the response is aborted.</summary>
     public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
 
-    private const string RedactedLogging = "Peer errors are logged as a redacted message only: the exception itself could carry the peer token.";
+    private const string ExpectedCancellation = "A peer timeout or stall is an expected cancellation, not an error: no stack trace is wanted.";
 
+    private const string RedactedLogging = "Only the exception message is logged, with the peer token redacted; the exception object itself could carry the token.";
 
     // A request that passed through a reverse proxy on this host would otherwise look like loopback.
     // X-Original-* are what ASP.NET's forwarded-headers middleware leaves after consuming X-Forwarded-*.
@@ -87,7 +89,6 @@ public class RelayController : ControllerBase
     [HttpGet("play/{key}")]
     [HttpHead("play/{key}")]
     [AllowAnonymous]
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
     public async Task<IActionResult> Play(string key)
     {
         if (!IsLocalRequest(HttpContext))
@@ -121,13 +122,13 @@ public class RelayController : ControllerBase
             }
             catch (OperationCanceledException)
             {
-                _logger.LogDebug("JellyShare relay: peer {Peer} timed out for {Key}", source.Peer.Name, entry.CanonicalKey);
+                LogTimedOut(source.Peer, entry.CanonicalKey);
                 continue;
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
             {
                 // PeerClient redacts the token from connection errors.
-                _logger.LogDebug("JellyShare relay: peer {Peer} failed for {Key}: {Error}", source.Peer.Name, entry.CanonicalKey, ex.Message);
+                LogPeerFailed(source.Peer, entry.CanonicalKey, ex);
                 continue;
             }
 
@@ -229,7 +230,6 @@ public class RelayController : ControllerBase
         return ordered.Where(s => s.Peer.Id == active).Concat(ordered.Where(s => s.Peer.Id != active)).ToList();
     }
 
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
     private async Task CopyBodyAsync(HttpResponseMessage response, RelaySource source, string key, CancellationToken ct)
     {
         var aborted = HttpContext.RequestAborted;
@@ -257,7 +257,7 @@ public class RelayController : ControllerBase
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested && idle.IsCancellationRequested)
         {
-            _logger.LogDebug("JellyShare relay: peer {Peer} stalled for {Key}, aborting", source.Peer.Name, key);
+            LogStalled(source.Peer, key);
             HttpContext.Abort();
         }
         catch (OperationCanceledException)
@@ -270,12 +270,27 @@ public class RelayController : ControllerBase
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException)
         {
-            _logger.LogDebug(
-                "JellyShare relay: stream from peer {Peer} broke for {Key}: {Error}",
-                source.Peer.Name,
-                key,
-                string.IsNullOrEmpty(source.Peer.Token) ? ex.Message : ex.Message.Replace(source.Peer.Token, "***", StringComparison.Ordinal));
+            LogStreamBroke(source.Peer, key, ex);
             HttpContext.Abort();
         }
     }
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogTimedOut(RemotePeer peer, string key)
+        => _logger.LogDebug("JellyShare relay: peer {Peer} timed out for {Key}", peer.Name, key);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogStalled(RemotePeer peer, string key)
+        => _logger.LogDebug("JellyShare relay: peer {Peer} stalled for {Key}, aborting", peer.Name, key);
+
+    private static string Redacted(RemotePeer peer, Exception ex)
+        => string.IsNullOrEmpty(peer.Token) ? ex.Message : ex.Message.Replace(peer.Token, "***", StringComparison.Ordinal);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
+    private void LogPeerFailed(RemotePeer peer, string key, Exception ex)
+        => _logger.LogDebug("JellyShare relay: peer {Peer} failed for {Key}: {Error}", peer.Name, key, Redacted(peer, ex));
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
+    private void LogStreamBroke(RemotePeer peer, string key, Exception ex)
+        => _logger.LogDebug("JellyShare relay: stream from peer {Peer} broke for {Key}: {Error}", peer.Name, key, Redacted(peer, ex));
 }

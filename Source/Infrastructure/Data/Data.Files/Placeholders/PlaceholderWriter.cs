@@ -15,7 +15,7 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
     /// <summary>The marker file kept in every root so scans never skip it as empty. Never deleted.</summary>
     public const string MarkerName = ".jellyshare";
 
-    private const string TypeOnlyLogging = "An expected disk or peer failure: only the exception type is logged, never its text (paths, peer URLs) or stack.";
+    private const string TypeOnlyLogging = "Only the exception type is logged, never its message (paths, peer URLs, tokens) or stack.";
 
     private static readonly (string Type, string FileName)[] _images = [("Primary", "poster.jpg"), ("Backdrop", "fanart.jpg")];
 
@@ -45,7 +45,6 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
         => Resolve(rootFull, relativePath) is { } full && File.Exists(full);
 
     /// <inheritdoc />
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
     public IReadOnlyList<string> ReadStrmContents(string root)
     {
         var contents = new List<string>();
@@ -67,7 +66,7 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("JellyShare sweep: placeholder folder unreadable: {Error}", ex.GetType().Name);
+            LogFolderUnreadable(ex);
         }
 
         return contents;
@@ -484,7 +483,6 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
         }
     }
 
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
     private async Task<bool> TryDownloadAsync(PlaceholderImageFetcher fetcher, string top, string type, string target, CancellationToken ct)
     {
         try
@@ -504,12 +502,23 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning("JellyShare: {Type} image for a placeholder folder could not be downloaded: {Error}", type, ex.GetType().Name);
+            LogImageNotDownloaded(type, ex);
             return false;
         }
     }
 
     [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogFolderUnreadable(Exception ex)
+        => _logger.LogWarning("JellyShare sweep: placeholder folder unreadable: {Error}", ex.GetType().Name);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogImageNotDownloaded(string type, Exception ex)
+        => _logger.LogWarning("JellyShare: {Type} image for a placeholder folder could not be downloaded: {Error}", type, ex.GetType().Name);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogFolderNotRemoved(Exception ex)
+        => _logger.LogWarning("JellyShare: could not remove placeholder folder: {Error}", ex.GetType().Name);
+
     private void RemoveIfNoStrm(string rootFull, string top)
     {
         var topFull = Path.GetFullPath(Path.Combine(rootFull, top));
@@ -530,7 +539,7 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("JellyShare: could not remove placeholder folder: {Error}", ex.GetType().Name);
+            LogFolderNotRemoved(ex);
         }
     }
 

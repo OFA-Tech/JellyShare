@@ -31,7 +31,7 @@ public sealed class SyncService : ISyncRunner
     /// <summary>Maximum directories reported for scanning per run.</summary>
     public const int MaxScansPerRun = 200;
 
-    private const string TypeOnlyLogging = "An expected disk or Jellyfin failure: only the exception type is logged, never its text (paths) or stack.";
+    private const string TypeOnlyLogging = "Only the exception type is logged, never its message (paths, peer URLs, tokens) or stack.";
 
     private readonly ISettingsProvider _config;
     private readonly IPeerClient _client;
@@ -202,7 +202,6 @@ public sealed class SyncService : ISyncRunner
     /// <summary>Runs one sync. Concurrent calls are serialised (never overlap).</summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The report.</returns>
-    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
     public async Task<SyncReport> RunAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref _active);
@@ -237,7 +236,7 @@ public sealed class SyncService : ISyncRunner
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                _logger.LogWarning("JellyShare sync: could not persist the sync report: {Error}", ex.GetType().Name);
+                LogReportNotPersisted(ex);
             }
 
             _logger.LogInformation(
@@ -871,6 +870,13 @@ public sealed class SyncService : ISyncRunner
     }
 
     [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogReportNotPersisted(Exception ex)
+        => _logger.LogWarning("JellyShare sync: could not persist the sync report: {Error}", ex.GetType().Name);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
+    private void LogScanRequestFailed(Exception ex)
+        => _logger.LogWarning("JellyShare sync: scan request failed, will retry: {Error}", ex.GetType().Name);
+
     private (int Scanned, int Pending) ReportScans()
     {
         if (!_pendingScans.Exists())
@@ -894,7 +900,7 @@ public sealed class SyncService : ISyncRunner
             {
                 // Keep it queued for the next run.
                 rest.Add(dir);
-                _logger.LogWarning("JellyShare sync: scan request failed, will retry: {Error}", ex.GetType().Name);
+                LogScanRequestFailed(ex);
             }
         }
 
