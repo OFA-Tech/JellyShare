@@ -52,9 +52,10 @@ public sealed class ConsumerIndexFiles : IConsumerIndex
         lock (_lock)
         {
             var version = Version(path);
-            if (version != _indexVersion)
+            // A failed read (file locked, half-visible) keeps the last good index and is retried on the next call.
+            if (version != _indexVersion && MergedIndexStore.TryLoad(path, out var file))
             {
-                _byKey = Build(MergedIndexStore.Load(path));
+                _byKey = Build(file);
                 _indexVersion = version;
             }
 
@@ -74,13 +75,12 @@ public sealed class ConsumerIndexFiles : IConsumerIndex
                 try
                 {
                     _states = new PeerStateStore(path).Load();
+                    _stateVersion = version;
                 }
                 catch (PeerStateUnreadableException)
                 {
-                    // Keep the last states read; a half-written file is replaced atomically by the next sync.
+                    // Keep the last states read and retry on the next call (the failure may be transient).
                 }
-
-                _stateVersion = version;
             }
 
             return _states;

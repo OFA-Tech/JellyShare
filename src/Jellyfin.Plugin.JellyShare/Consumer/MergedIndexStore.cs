@@ -79,19 +79,31 @@ public static class MergedIndexStore
     /// <returns>The index, or <c>null</c> when missing or unreadable.</returns>
     public static MergedIndexFile? Load(string path)
     {
+        TryLoad(path, out var file);
+        return file;
+    }
+
+    /// <summary>Loads the merged index, telling a missing file apart from a read failure.</summary>
+    /// <param name="path">The file path.</param>
+    /// <param name="file">The index, or <c>null</c> when missing or unreadable.</param>
+    /// <returns><c>false</c> when the file exists but could not be read or parsed (possibly a transient error).</returns>
+    public static bool TryLoad(string path, out MergedIndexFile? file)
+    {
+        file = null;
         try
         {
             if (!File.Exists(path))
             {
-                return null;
+                return true;
             }
 
             using var stream = File.OpenRead(path);
-            return JsonSerializer.Deserialize<MergedIndexFile>(stream);
+            file = JsonSerializer.Deserialize<MergedIndexFile>(stream);
+            return true;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            return null;
+            return false;
         }
     }
 }

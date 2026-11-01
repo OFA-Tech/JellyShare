@@ -66,6 +66,51 @@ public class RelayUrlTests
     }
 
     [Fact]
+    public void ConsumerIndexFiles_TransientReadFailure_IsRetriedWithoutAFileChange()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return; // Exclusive file locks are only enforced on Windows.
+        }
+
+        using var dir = new TempDir();
+        var path = dir.Sub(MergedIndexStore.FileName);
+        var item = TestItems.Movie("M", tmdb: "1");
+        MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch);
+        var index = new ConsumerIndexFiles(() => dir.Path);
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.Null(index.Find("movie:tmdb:1"));
+        }
+
+        Assert.Equal("movie:tmdb:1", index.Find("movie:tmdb:1")!.CanonicalKey);
+    }
+
+    [Fact]
+    public void ConsumerIndexFiles_TransientReadFailure_KeepsLastGoodIndex()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var dir = new TempDir();
+        var path = dir.Sub(MergedIndexStore.FileName);
+        var item = TestItems.Movie("M", tmdb: "1");
+        MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch);
+        var index = new ConsumerIndexFiles(() => dir.Path);
+        Assert.NotNull(index.Find("movie:tmdb:1"));
+
+        MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch.AddDays(1));
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.NotNull(index.Find("movie:tmdb:1"));
+        }
+    }
+
+    [Fact]
     public void ConsumerIndexFiles_UnreadableState_IsEmpty()
     {
         using var dir = new TempDir();
