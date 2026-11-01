@@ -95,6 +95,9 @@ public sealed class SenderTests
         Assert.Contains(services, d => d.ServiceType == typeof(ISender) && d.Lifetime == ServiceLifetime.Singleton);
         var behaviors = services.Where(d => d.ServiceType == typeof(IPipelineBehavior<,>)).Select(d => d.ImplementationType).ToList();
         Assert.Equal([typeof(LoggingBehavior<,>), typeof(ValidationBehavior<,>)], behaviors);
+        Assert.Contains(services, d => d.ServiceType == typeof(IRequestHandler<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand, Result<JellyShare.Domain.Models.Admin.CreatedShareResponse>>));
+        Assert.Contains(services, d => d.ServiceType == typeof(IValidator<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand>));
+        Assert.All(services, d => Assert.Equal(ServiceLifetime.Singleton, d.Lifetime));
         Assert.DoesNotContain(services, d => d.ImplementationType == typeof(EchoQueryHandler));
         await Task.CompletedTask;
     }
