@@ -48,6 +48,16 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             TimeProvider.System,
             sp.GetRequiredService<ILogger<SyncService>>()));
 
+        serviceCollection.AddSingleton<ILocalItemEvents, JellyfinLocalItemEvents>();
+        serviceCollection.AddSingleton(sp => new LocalItemWatcher(
+            sp.GetRequiredService<SyncService>(),
+            sp.GetRequiredService<ILocalItemEvents>(),
+            sp.GetRequiredService<ILocalLibrary>(),
+            sp.GetRequiredService<IConfigProvider>(),
+            TimeProvider.System,
+            sp.GetRequiredService<ILogger<LocalItemWatcher>>()));
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<LocalItemWatcher>());
+
         serviceCollection.AddSingleton<IConsumerIndex>(new ConsumerIndexFiles(
             () => Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("JellyShare plugin not loaded")));
         serviceCollection.AddSingleton(new RelaySessions(TimeProvider.System));

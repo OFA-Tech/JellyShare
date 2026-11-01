@@ -81,6 +81,12 @@ public interface ILocalIndex
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The local keys and series.</returns>
     Task<LocalIndexResult> BuildAsync(CancellationToken ct);
+
+    /// <summary>Builds the index for the titles that have any of the given keys; only those files are checked.</summary>
+    /// <param name="keys">The keys of interest.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>The local keys (restricted to titles matching <paramref name="keys"/>) and all series.</returns>
+    Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, CancellationToken ct);
 }
 
 /// <summary>
@@ -159,8 +165,22 @@ public sealed class LocalIndex : ILocalIndex
     public ISet<string> GetLocalKeys(string mediaType)
         => BuildAsync(CancellationToken.None).GetAwaiter().GetResult().KeysFor(mediaType);
 
+    /// <summary>Computes the keys of a local item.</summary>
+    /// <param name="media">The item.</param>
+    /// <returns>The keys; empty when the item has no usable provider ids.</returns>
+    internal static IReadOnlyList<string> KeysFor(LocalMedia media) => MediaKey.For(ToItem(media));
+
     /// <inheritdoc />
-    public async Task<LocalIndexResult> BuildAsync(CancellationToken ct)
+    public Task<LocalIndexResult> BuildAsync(CancellationToken ct) => BuildCoreAsync(null, ct);
+
+    /// <inheritdoc />
+    public Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        return BuildCoreAsync(keys, ct);
+    }
+
+    private async Task<LocalIndexResult> BuildCoreAsync(IReadOnlySet<string>? onlyKeys, CancellationToken ct)
     {
         var cfg = _config.Current;
         var snapshot = _library.Read();
@@ -175,8 +195,8 @@ public sealed class LocalIndex : ILocalIndex
                 continue;
             }
 
-            var keys = MediaKey.For(ToItem(media));
-            if (keys.Count > 0)
+            var keys = KeysFor(media);
+            if (keys.Count > 0 && (onlyKeys is null || keys.Any(onlyKeys.Contains)))
             {
                 candidates.Add((media, keys));
             }

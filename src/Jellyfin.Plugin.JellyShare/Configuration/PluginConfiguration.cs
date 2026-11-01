@@ -22,6 +22,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the hours between catalog syncs.</summary>
     public int SyncIntervalHours { get; set; } = 6;
 
+    /// <summary>Gets or sets the seconds between presence sweeps of local files (clamped to 15..3600).</summary>
+    public int PresenceSweepSeconds { get; set; } = 60;
+
     /// <summary>Gets or sets an override for the loopback relay base URL used in placeholder files.</summary>
     public string? RelayBaseOverride { get; set; }
 

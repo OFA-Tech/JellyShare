@@ -442,3 +442,23 @@ From Task 9 (harness, 12.4.0, `harness/relay_gate.py`, `harness/relay_web_play.j
     `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Documented in the README ("Security notes");
     the Task 11 admin page must repeat the hint. Once a peer is committed, the relay aborts the response after 60 s
     without upstream bytes, and a client that disconnects while the relay writes is not logged as a peer failure.
+
+From Task 10 (harness, 12.4.0):
+
+19. **Item events for new items arrive before their ids / season / episode numbers are set.** `ItemAdded` for a new
+    episode fires with `ParentIndexNumber`/`IndexNumber` still empty (set by the metadata refresh right after), so keys
+    computed at event time are empty. `LocalItemWatcher` therefore re-reads added items (`LocalItemEvent.Refresh`)
+    when the 15 s window is processed. The episode `SeriesId` is also unset at that moment; use `Episode.Series`
+    (parent chain). Observed: delete + `POST /Library/Refresh` → placeholder written at the next 15 s tick; restore +
+    refresh → placeholder removed at the next tick; a placeholder appears in the library ~60 s after the write
+    (`ReportFileSystemChanged` debounce). Sweep path (file deleted, no scan): placeholder written within 30–45 s,
+    visible ~60 s later, while the owner's stale item stays until the next scan (its stream answers 404, the
+    placeholder plays).
+20. **User data (correction 13, recorded).** Watched/resume/favourite carried over to the placeholder for the Pioneer
+    One episode (event path, new placeholder item id) and in the second Sintel sweep run; one earlier Sintel run showed
+    the new placeholder as unwatched while the owner's stale item was still in the library. When the local file comes
+    back, the local item keeps its user data (same item id). No plugin code.
+21. **Deploy to the harness with `docker cp` + restart, not just `dotnet build`.** After a rebuild the container
+    process keeps running the old code from the bind-mounted Release folder although the file looks updated. Verify
+    new code by behaviour or by `docker cp` + hash.
+

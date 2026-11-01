@@ -48,6 +48,14 @@ public sealed record SyncReport(
     public DateTimeOffset FinishedUtc { get; init; }
 }
 
+/// <summary>Outcome of a targeted <see cref="SyncService.ReconcileAsync"/>.</summary>
+/// <param name="Entries">Merged-index entries that matched the requested keys.</param>
+/// <param name="Written">Placeholder files written.</param>
+/// <param name="Deleted">Placeholder files deleted.</param>
+/// <param name="Scanned">Directories reported for a targeted scan.</param>
+/// <param name="MissingLocalFiles">Matching local files that are missing.</param>
+public sealed record ReconcileReport(int Entries, int Written, int Deleted, int Scanned, int MissingLocalFiles);
+
 /// <summary>Pulls peer catalogs, merges them and maintains the placeholder folders.</summary>
 public sealed class SyncService
 {
@@ -139,14 +147,90 @@ public sealed class SyncService
         }
     }
 
-    private async Task<SyncReport> RunCoreAsync(CancellationToken ct)
+    /// <summary>
+    /// Re-evaluates only the titles that have any of <paramref name="keys"/>, from the persisted merged index (the last
+    /// good peer catalogs): no peer catalog fetch. Local presence is re-checked (file exists) for just those titles,
+    /// then the same planner, writer and scan reporter as <see cref="RunAsync"/> write or delete only those titles'
+    /// placeholders. Serialised with <see cref="RunAsync"/>.
+    /// </summary>
+    /// <param name="keys">Keys of the titles to re-evaluate.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>What was done.</returns>
+    public async Task<ReconcileReport> ReconcileAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(keys);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return await ReconcileCoreAsync(keys, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private async Task<ReconcileReport> ReconcileCoreAsync(IReadOnlyCollection<string> keys, CancellationToken ct)
     {
         var cfg = _config.Current;
+        EnsureRootsSeparate(cfg);
+
+        var dataDir = _dataDir();
+        var file = MergedIndexStore.Load(Path.Combine(dataDir, MergedIndexStore.FileName));
+        if (file is null || keys.Count == 0)
+        {
+            return new ReconcileReport(0, 0, 0, 0, 0);
+        }
+
+        var wanted = new HashSet<string>(keys, StringComparer.Ordinal);
+        var affected = file.ToEntries().Where(e => e.Keys.Any(wanted.Contains)).ToList();
+        if (affected.Count == 0)
+        {
+            return new ReconcileReport(0, 0, 0, 0, 0);
+        }
+
+        var entryKeys = new HashSet<string>(affected.SelectMany(e => e.Keys), StringComparer.Ordinal);
+        var local = await _localIndex.BuildForKeysAsync(entryKeys, ct).ConfigureAwait(false);
+        var contributing = cfg.Peers
+            .Where(p => p.Enabled && p.Id != Guid.Empty)
+            .GroupBy(p => p.Id)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var relay = _relayBase.Current;
+        var movies = affected.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
+        var episodes = affected.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
+        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, dataDir, ct, targeted: true).ConfigureAwait(false);
+        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, dataDir, ct, targeted: true).ConfigureAwait(false);
+        var (scanned, _) = ReportScans(dataDir);
+
+        var report = new ReconcileReport(
+            affected.Count,
+            movieResult.Write.Written + showResult.Write.Written,
+            movieResult.Write.Deleted + showResult.Write.Deleted,
+            scanned,
+            local.MissingFiles);
+        _logger.LogInformation(
+            "JellyShare reconcile: entries={Entries} written={Written} deleted={Deleted} scans={Scans}",
+            report.Entries,
+            report.Written,
+            report.Deleted,
+            report.Scanned);
+        return report;
+    }
+
+    private static void EnsureRootsSeparate(PluginConfiguration cfg)
+    {
         if (RootsOverlap(cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath))
         {
             // Each planner owns every .strm/.nfo under its root, so shared roots would delete each other's files.
             throw new InvalidOperationException("JellyShare: the movie and show placeholder folders must be separate, non-nested folders");
         }
+    }
+
+    private async Task<SyncReport> RunCoreAsync(CancellationToken ct)
+    {
+        var cfg = _config.Current;
+        EnsureRootsSeparate(cfg);
 
         var now = _clock.GetUtcNow();
         var dataDir = _dataDir();
@@ -308,7 +392,8 @@ public sealed class SyncService
         string relay,
         IReadOnlyDictionary<Guid, RemotePeer> peers,
         string dataDir,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool targeted = false)
     {
         if (string.IsNullOrWhiteSpace(root))
         {
@@ -316,8 +401,36 @@ public sealed class SyncService
             return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0);
         }
 
+        if (entries.Count == 0 && targeted)
+        {
+            return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0);
+        }
+
         var existing = PlaceholderWriter.ScanExisting(root);
-        var diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
+        PlaceholderDiff diff;
+        if (targeted)
+        {
+            // Only the given entries' own files may be written or deleted. The shared tvshow.nfo is left to full syncs
+            // unless it is missing (other episodes of the series may still depend on it).
+            var owned = PlaceholderPlanner.Plan(entries, new HashSet<string>(), new Dictionary<string, string>(), relay, localSeries)
+                .Writes
+                .Select(w => w.RelativePath)
+                .Where(p => !p.EndsWith("/tvshow.nfo", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal);
+            var scoped = existing.Where(kv => owned.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+            diff = PlaceholderPlanner.Plan(entries, localKeys, scoped, relay, localSeries);
+            diff = diff with
+            {
+                Writes = diff.Writes
+                    .Where(w => !(w.RelativePath.EndsWith("/tvshow.nfo", StringComparison.Ordinal) && existing.ContainsKey(w.RelativePath)))
+                    .ToList(),
+            };
+        }
+        else
+        {
+            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
+        }
+
         var imageSources = ImageSources(entries, localSeries);
 
         async Task<Stream?> Fetch(string topDir, string imageType, CancellationToken token)
