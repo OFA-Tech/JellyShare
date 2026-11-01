@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>JellyShare.JellyfinTests</AssemblyName>
+    <RootNamespace>JellyShare.JellyfinTests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <!-- Runtime copies of the Jellyfin assemblies (the plugin project excludes them from output). -->
+    <PackageReference Include="Jellyfin.Controller" />
+    <PackageReference Include="Jellyfin.Model" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Source\Infrastructure\Platform\Jellyfin\JellyShare.Jellyfin.csproj" />
+  </ItemGroup>
+
+</Project>
