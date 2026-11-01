@@ -58,6 +58,26 @@ internal static class Solution
 
     public static XDocument Load(string projectPath) => XDocument.Load(projectPath);
 
+    /// <summary>Gets the path of a JellyShare assembly in the test output (read with Cecil; never loaded).</summary>
+    public static string AssemblyPath(string assemblyName) => Path.Combine(AppContext.BaseDirectory, assemblyName + ".dll");
+
+    public static bool IsHostAssembly(string name)
+        => HostNamespaces.Any(h => name == h || name.StartsWith(h + ".", StringComparison.Ordinal));
+
+    /// <summary>Lists package references that would ship or flow on (missing ExcludeAssets=runtime or PrivateAssets=all).</summary>
+    public static string?[] LoosePackageReferences(string projectPath)
+        => Load(projectPath)
+            .Descendants("PackageReference")
+            .Where(e => !Has(e, "ExcludeAssets", "runtime") || !Has(e, "PrivateAssets", "all"))
+            .Select(e => e.Attribute("Include")?.Value)
+            .ToArray();
+
+    private static bool Has(XElement element, string name, string value)
+    {
+        var text = element.Attribute(name)?.Value ?? element.Element(name)?.Value ?? string.Empty;
+        return text.Split(';', StringSplitOptions.TrimEntries).Contains(value, StringComparer.OrdinalIgnoreCase);
+    }
+
     public static string[] ProjectReferences(string projectPath)
         => Load(projectPath)
             .Descendants("ProjectReference")

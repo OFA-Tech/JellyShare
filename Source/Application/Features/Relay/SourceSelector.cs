@@ -3,14 +3,10 @@ using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Models.Relay;
 using JellyShare.Domain.Models.Sync;
 
 namespace JellyShare.Application.Features.Relay;
-
-/// <summary>A peer item the relay can stream from.</summary>
-/// <param name="Peer">The configured peer.</param>
-/// <param name="Item">The peer's catalog item.</param>
-public sealed record RelaySource(RemotePeer Peer, CatalogItem Item);
 
 /// <summary>Orders the peers of a merged title for playback.</summary>
 public static class SourceSelector

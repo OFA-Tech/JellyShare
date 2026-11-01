@@ -4,6 +4,7 @@ using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Models.Relay;
 using JellyShare.Jellyfin.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
