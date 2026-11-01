@@ -197,7 +197,7 @@ public sealed class PeerClientTests
         using var response = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
 
         // A disposed request message refuses new content.
-        Should.Throw<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
+        ShouldExactly.Throw<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
     }
 
     [Fact]

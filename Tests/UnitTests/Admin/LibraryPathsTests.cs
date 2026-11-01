@@ -26,7 +26,7 @@ public sealed class LibraryPathsTests
     [Fact]
     public void AddFails_MonitorIsStartedAgain_AndTheErrorPropagates_NoScan()
     {
-        var ex = Should.Throw<ArgumentException>(() => Run(add: () => throw new ArgumentException("bad path")));
+        var ex = ShouldExactly.Throw<ArgumentException>(() => Run(add: () => throw new ArgumentException("bad path")));
 
         ex.Message.ShouldBe("bad path");
         _calls.ShouldBe(["stop", "start"]);

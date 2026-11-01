@@ -81,7 +81,7 @@ public sealed partial class ModuleTests
         var name = ModuleTypes(assembly).Single().Name;
         var loader = File.ReadAllText(Solution.Full(LoaderSource));
 
-        loader.ShouldContain($"new {name}()", customMessage: $"{name} must be in the explicit list of InfrastructureModuleLoader.");
+        loader.ShouldContain($"new {name}()", Case.Sensitive, customMessage: $"{name} must be in the explicit list of InfrastructureModuleLoader.");
     }
 
     [Fact]

@@ -78,7 +78,7 @@ public sealed class PlaceholderWriterTests
             },
         };
 
-        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None));
+        var ex = await ShouldExactly.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None));
         ex.InnerException.ShouldBeOfType<IOException>();
 
         seenDuringWrite.ShouldBe(["old"]);
@@ -219,7 +219,7 @@ public sealed class PlaceholderWriterTests
         await File.WriteAllTextAsync(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
         await File.WriteAllTextAsync(Path.Combine(root, "Blocked"), "file where a folder should be");
 
-        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
+        var ex = await ShouldExactly.ThrowAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
             Diff([Movie("strm"), new FileWrite("Blocked/x.strm", "x")]), root, null, CancellationToken.None));
 
         ex.Partial.Written.ShouldBe(1);
@@ -235,7 +235,7 @@ public sealed class PlaceholderWriterTests
         using var cts = new CancellationTokenSource();
         var writer = new PlaceholderWriter { BeforeCommit = (_, final) => { if (final.EndsWith(".nfo", StringComparison.Ordinal)) { cts.Cancel(); } } };
 
-        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(
+        var ex = await ShouldExactly.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(
             Diff([Movie("nfo"), Movie("strm"), new FileWrite("Other/o.strm", "o")]), root, null, cts.Token));
 
         ex.InnerException.ShouldBeAssignableTo<OperationCanceledException>();

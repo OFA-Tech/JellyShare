@@ -33,7 +33,7 @@ public sealed class PeerStateStoreTests
         var path = tmp.Sub("peer-state.json");
         File.WriteAllText(path, "{ not json");
 
-        Should.Throw<PeerStateUnreadableException>(() => new PeerStateStore(path).Load());
+        ShouldExactly.Throw<PeerStateUnreadableException>(() => new PeerStateStore(path).Load());
         File.ReadAllText(path).ShouldBe("{ not json");
     }
 
@@ -47,7 +47,7 @@ public sealed class PeerStateStoreTests
 
         if (OperatingSystem.IsWindows())
         {
-            Should.Throw<PeerStateUnreadableException>(() => new PeerStateStore(path).Load());
+            ShouldExactly.Throw<PeerStateUnreadableException>(() => new PeerStateStore(path).Load());
         }
     }
 }

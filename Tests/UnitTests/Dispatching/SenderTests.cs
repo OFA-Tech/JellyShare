@@ -56,7 +56,7 @@ public sealed class SenderTests
     {
         using var sp = Build();
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => sp.GetRequiredService<ISender>().Send(new UnhandledQuery()));
+        var ex = await ShouldExactly.ThrowAsync<InvalidOperationException>(() => sp.GetRequiredService<ISender>().Send(new UnhandledQuery()));
 
         ex.Message.ShouldContain(nameof(UnhandledQuery), Case.Sensitive);
         ex.Message.ShouldContain("AddDispatcherSetup", Case.Sensitive);
@@ -82,7 +82,7 @@ public sealed class SenderTests
     {
         using var sp = Build();
 
-        await Should.ThrowAsync<ArgumentNullException>(() => sp.GetRequiredService<ISender>().Send<Result<string>>(null!));
+        await ShouldExactly.ThrowAsync<ArgumentNullException>(() => sp.GetRequiredService<ISender>().Send<Result<string>>(null!));
     }
 
     [Fact]
@@ -209,7 +209,7 @@ public sealed class LoggingBehaviorTests
         var logger = new LevelLogger<LoggingBehavior<EchoQuery, Result<string>>>();
         var behavior = new LoggingBehavior<EchoQuery, Result<string>>(logger);
 
-        await Should.ThrowAsync<IOException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new IOException("disk"), CancellationToken.None));
+        await ShouldExactly.ThrowAsync<IOException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new IOException("disk"), CancellationToken.None));
 
         logger.Entries.ShouldBeEmpty();
     }
@@ -220,7 +220,7 @@ public sealed class LoggingBehaviorTests
         var logger = new LevelLogger<LoggingBehavior<EchoQuery, Result<string>>>();
         var behavior = new LoggingBehavior<EchoQuery, Result<string>>(logger);
 
-        await Should.ThrowAsync<OperationCanceledException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new OperationCanceledException(), CancellationToken.None));
+        await ShouldExactly.ThrowAsync<OperationCanceledException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new OperationCanceledException(), CancellationToken.None));
 
         logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Debug);
     }

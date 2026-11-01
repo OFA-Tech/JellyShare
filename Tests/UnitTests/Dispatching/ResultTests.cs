@@ -33,7 +33,7 @@ public sealed class ResultTests
 
         result.IsFailure.ShouldBeTrue();
         result.Error.ShouldBeSameAs(error);
-        Should.Throw<InvalidOperationException>(() => result.Value);
+        ShouldExactly.Throw<InvalidOperationException>(() => result.Value);
     }
 
     [Fact]
@@ -47,7 +47,7 @@ public sealed class ResultTests
 
     [Fact]
     public void Failure_WithoutAnError_IsRejected()
-        => Should.Throw<ArgumentException>(() => Result.Failure(Error.None));
+        => ShouldExactly.Throw<ArgumentException>(() => Result.Failure(Error.None));
 
     [Theory]
     [InlineData(ErrorType.Validation)]

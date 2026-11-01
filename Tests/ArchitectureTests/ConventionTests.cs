@@ -55,8 +55,8 @@ public sealed partial class ConventionTests
 
             var x = match.Groups[1].Value;
             var text = File.ReadAllText(file);
-            text.ShouldContain($"public static class {x}Setup", customMessage: $"{name}.cs must declare 'public static class {x}Setup'.");
-            text.ShouldContain($"public static IServiceCollection Add{x}Setup(this IServiceCollection services", customMessage: $"{name}.cs must declare 'Add{x}Setup'.");
+            text.ShouldContain($"public static class {x}Setup", Case.Sensitive, customMessage: $"{name}.cs must declare 'public static class {x}Setup'.");
+            text.ShouldContain($"public static IServiceCollection Add{x}Setup(this IServiceCollection services", Case.Sensitive, customMessage: $"{name}.cs must declare 'Add{x}Setup'.");
         }
     }
 
@@ -65,10 +65,10 @@ public sealed partial class ConventionTests
     {
         var registrator = File.ReadAllText(Solution.Full("Source/Infrastructure/Platform/Jellyfin/PluginServiceRegistrator.cs"));
 
-        registrator.ShouldContain(".AddDomainSetup(");
-        registrator.ShouldContain(".AddApplicationSetup(");
-        registrator.ShouldContain(".AddModulesSetup(");
-        registrator.ShouldContain(".AddJellyfinSetup(");
+        registrator.ShouldContain(".AddDomainSetup(", Case.Sensitive);
+        registrator.ShouldContain(".AddApplicationSetup(", Case.Sensitive);
+        registrator.ShouldContain(".AddModulesSetup(", Case.Sensitive);
+        registrator.ShouldContain(".AddJellyfinSetup(", Case.Sensitive);
     }
 
     [Theory]

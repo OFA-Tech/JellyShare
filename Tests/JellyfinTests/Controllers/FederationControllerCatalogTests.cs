@@ -123,7 +123,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
         var result = (await controller.Catalog()).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(401);
-        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
+        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong, Case.Sensitive);
     }
 
     [Fact]

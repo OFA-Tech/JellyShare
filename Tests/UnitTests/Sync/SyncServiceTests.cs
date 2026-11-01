@@ -322,7 +322,7 @@ public sealed class SyncServiceTests : IDisposable
         _client.Catalogs[_alice.Id] = _ => FakePeerClient.Fail("connection failed");
         _clock.Now += TimeSpan.FromHours(6);
 
-        await Should.ThrowAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
+        await ShouldExactly.ThrowAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
 
         MoviePlaceholder(BunnyDir).ShouldBeTrue();
         (await File.ReadAllTextAsync(statePath)).ShouldBe("{ truncated");
@@ -371,7 +371,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = Path.Combine(MoviesRoot, "Shows");
         Offer(Bunny(), Pioneer(2, 1));
 
-        await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
         Directory.Exists(MoviesRoot).ShouldBeFalse();
     }
@@ -411,7 +411,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.RelayBaseOverride = "http://10.0.0.2:8096";
         Offer(Bunny());
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
         ex.Message.ShouldContain("RelayBaseOverride", Case.Sensitive);
         Directory.Exists(MoviesRoot).ShouldBeFalse();
@@ -523,7 +523,7 @@ public sealed class SyncServiceTests : IDisposable
         _library.Locations.Add(_tmp.Sub(location.Split('/')));
         Offer(Bunny());
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
         ex.Message.ShouldContain("library folder", Case.Sensitive);
         MoviePlaceholder(BunnyDir).ShouldBeFalse();
@@ -540,7 +540,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.MoviesPlaceholderPath = owner;
         Offer(Bunny());
 
-        await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
         File.Exists(ownerNfo).ShouldBeTrue();
         File.Exists(Path.Combine(owner, ".jellyshare")).ShouldBeFalse();
@@ -567,7 +567,7 @@ public sealed class SyncServiceTests : IDisposable
         await File.WriteAllTextAsync(foreign, "x");
         Offer(Bunny());
 
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
         ex.Message.ShouldContain(".jellyshare", Case.Sensitive);
         File.Exists(foreign).ShouldBeTrue();
@@ -593,7 +593,7 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
         _library.Locations.Add(_tmp.Sub("ph"));
 
-        await Should.ThrowAsync<InvalidOperationException>(() => _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None));
+        await ShouldExactly.ThrowAsync<InvalidOperationException>(() => _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None));
     }
 
     [Fact]

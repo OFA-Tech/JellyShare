@@ -154,7 +154,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         var result = Controller(wrong).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(401);
-        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
+        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong, Case.Sensitive);
     }
 
     [Theory]
@@ -746,7 +746,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         var line = _logger.Lines.ShouldHaveSingleItem();
         line.ShouldContain("bob", Case.Sensitive);
         line.ShouldContain("Name of 00000001", Case.Sensitive);
-        line.ShouldNotContain(_token);
+        line.ShouldNotContain(_token, Case.Sensitive);
     }
 
     [Fact]

@@ -138,14 +138,16 @@ public sealed class AdminControllerTests : IDisposable
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(m => m.GetCustomAttributes<HttpMethodAttribute>().Any())
             .ToList();
-        (actions.Count >= 11).ShouldBeTrue();
+        actions.Count.ShouldBeGreaterThanOrEqualTo(11);
         foreach (var action in actions)
         {
             action.GetCustomAttributes<AllowAnonymousAttribute>().ShouldBeEmpty();
         }
 
-        Assert.All(type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly), m =>
-            m.GetCustomAttributes<HttpMethodAttribute>().Any().ShouldBeTrue(m.Name + " is public but has no route"));
+        foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly))
+        {
+            m.GetCustomAttributes<HttpMethodAttribute>().Any().ShouldBeTrue(m.Name + " is public but has no route");
+        }
     }
 
     // ---- shares ----
@@ -824,7 +826,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         _libs.AddThrows = new OperationCanceledException();
 
-        await Should.ThrowAsync<OperationCanceledException>(() => _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None));
+        await ShouldExactly.ThrowAsync<OperationCanceledException>(() => _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None));
     }
 
     [Fact]

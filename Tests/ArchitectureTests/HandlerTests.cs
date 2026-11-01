@@ -89,7 +89,7 @@ public sealed class HandlerTests
         var type = new TypeDefinition("JellyShare.Probe", "Probe", TypeAttributes.Public | TypeAttributes.Class, module.TypeSystem.Object);
         type.Interfaces.Add(new InterfaceImplementation(missing));
 
-        Should.Throw<AssemblyResolutionException>(() => Implements(type, HandlerInterface));
+        Should.Throw<AssemblyResolutionException>(() => Implements(type, HandlerInterface)).ShouldBeOfType<AssemblyResolutionException>();
     }
 
     internal static bool HasCloneMethod(TypeDefinition type) => type.Methods.Any(m => m.Name == "<Clone>$");

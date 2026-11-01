@@ -47,7 +47,7 @@ public sealed class FfmpegProcessRunnerTests
 
         (clock.Elapsed < TimeSpan.FromSeconds(5)).ShouldBeTrue();
         pid.ShouldNotBeNull();
-        Should.Throw<ArgumentException>(() => Process.GetProcessById(pid.Value));
+        ShouldExactly.Throw<ArgumentException>(() => Process.GetProcessById(pid.Value));
     }
 
     [Fact]

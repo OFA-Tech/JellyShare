@@ -28,7 +28,7 @@ public sealed class InfrastructureModuleLoaderTests
     [Fact]
     public void DuplicateNames_AreRejected()
     {
-        var ex = Should.Throw<InvalidOperationException>(() => new InfrastructureModuleLoader([new PeersModule(), new FakeModule("Peers", true)]));
+        var ex = ShouldExactly.Throw<InvalidOperationException>(() => new InfrastructureModuleLoader([new PeersModule(), new FakeModule("Peers", true)]));
 
         ex.Message.ShouldContain("Peers", Case.Sensitive);
     }
