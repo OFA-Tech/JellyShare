@@ -1,3 +1,5 @@
+using JellyShare.Domain.Interfaces.Messaging;
+using JellyShare.Domain.Results;
 using Mono.Cecil;
 
 namespace JellyShare.ArchitectureTests;
@@ -63,14 +65,41 @@ public sealed class HandlerTests
         Implementing(Solution.Application.Location, RequestInterface).ShouldBeEmpty();
     }
 
-    internal static bool IsRecord(TypeDefinition type) => type.Methods.Any(m => m.Name == "<Clone>$");
+    [Fact]
+    public void Requests_RespondWithResult()
+    {
+        var requests = Solution.Domain.GetTypes()
+            .Where(t => t is { IsClass: true, IsAbstract: false })
+            .SelectMany(t => t.GetInterfaces()
+                .Where(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IRequest<>))
+                .Select(i => (Request: t, Response: i.GetGenericArguments()[0])))
+            .ToList();
+
+        requests.ShouldNotBeEmpty();
+        requests.Where(r => !typeof(Result).IsAssignableFrom(r.Response))
+            .Select(r => r.Request.FullName)
+            .ShouldBeEmpty("Every request responds with Result or Result<T>: the controllers map its Error to a status code.");
+    }
+
+    [Fact]
+    public void Implements_FailsWhenAJellyShareInterfaceCannotBeResolved()
+    {
+        using var module = ModuleDefinition.ReadModule(Solution.Application.Location);
+        var missing = new TypeReference("JellyShare.Missing", "IMissing", module, new AssemblyNameReference("JellyShare.Missing", new Version(1, 0)));
+        var type = new TypeDefinition("JellyShare.Probe", "Probe", TypeAttributes.Public | TypeAttributes.Class, module.TypeSystem.Object);
+        type.Interfaces.Add(new InterfaceImplementation(missing));
+
+        Should.Throw<AssemblyResolutionException>(() => Implements(type, HandlerInterface));
+    }
+
+    internal static bool HasCloneMethod(TypeDefinition type) => type.Methods.Any(m => m.Name == "<Clone>$");
 
     private static List<TypeSnapshot> Implementing(string path, string openInterface)
     {
         using var module = ModuleDefinition.ReadModule(path);
         return module.Types
             .Where(t => t.IsClass && !t.IsAbstract && Implements(t, openInterface))
-            .Select(t => new TypeSnapshot(t.FullName, t.Namespace, t.Name, t.IsPublic, t.IsSealed, IsRecord(t)))
+            .Select(t => new TypeSnapshot(t.FullName, t.Namespace, t.Name, t.IsPublic, t.IsSealed, HasCloneMethod(t)))
             .ToList();
     }
 
@@ -84,8 +113,7 @@ public sealed class HandlerTests
                 return true;
             }
 
-            var resolved = Resolve(implemented);
-            if (resolved is not null && Implements(resolved, openInterface))
+            if (IsJellyShare(implemented) && Implements(ResolveOrThrow(implemented), openInterface))
             {
                 return true;
             }
@@ -94,17 +122,19 @@ public sealed class HandlerTests
         return false;
     }
 
-    private static TypeDefinition? Resolve(TypeReference reference)
+    private static bool IsJellyShare(TypeReference reference)
     {
-        try
+        var assembly = reference.Scope switch
         {
-            return reference.Resolve();
-        }
-        catch (AssemblyResolutionException)
-        {
-            return null;
-        }
+            AssemblyNameReference name => name.Name,
+            ModuleDefinition module => module.Assembly.Name.Name,
+            var scope => scope.Name,
+        };
+        return assembly.StartsWith("JellyShare.", StringComparison.Ordinal);
     }
+
+    private static TypeDefinition ResolveOrThrow(TypeReference reference)
+        => reference.Resolve() ?? throw new AssemblyResolutionException(new AssemblyNameReference(reference.Scope.Name, new Version(0, 0)));
 
     private sealed record TypeSnapshot(string FullName, string Namespace, string Name, bool IsPublic, bool IsSealed, bool IsRecord);
 }
