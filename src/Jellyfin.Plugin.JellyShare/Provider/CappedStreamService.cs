@@ -58,7 +58,7 @@ public interface IFfmpegRunner
     Task<FfmpegRunResult> RunAsync(string executable, IReadOnlyList<string> arguments, Stream output, CancellationToken cancellationToken);
 }
 
-/// <summary>A reserved transcode of one stream session; a newer request for the same session cancels it.</summary>
+/// <summary>A reserved transcode of one stream session; it is cancelled when it is the oldest of a full session.</summary>
 public sealed class TranscodeSlot : IDisposable
 {
     private readonly CappedStreamService _owner;
@@ -89,20 +89,28 @@ public sealed class TranscodeSlot : IDisposable
 }
 
 /// <summary>
-/// Serves live transcodes within a share's bitrate cap. One transcode runs per stream session (the newest request
-/// wins, which also makes a seek restart the stream), and at most a configured number run across all shares.
+/// Serves live transcodes within a share's bitrate cap. At most <see cref="MaxTranscodesPerSession"/> run per stream
+/// session (a further request cancels the oldest, which also covers a seek restart), and at most a configured number
+/// run across all shares.
 /// </summary>
 public sealed class CappedStreamService
 {
     /// <summary>How long hardware encoding is skipped after it failed where software worked.</summary>
     public static readonly TimeSpan HardwareRetryAfter = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Transcodes one stream session (share + title) may run at once: two consumer users can watch the same title,
+    /// and a further request (e.g. a seek restart) cancels the oldest.
+    /// </summary>
+    public const int MaxTranscodesPerSession = 2;
+
     private readonly IEncoderSettingsSource _settings;
     private readonly IFfmpegRunner _runner;
     private readonly TimeProvider _clock;
     private readonly ILogger<CappedStreamService> _logger;
     private readonly object _lock = new();
-    private readonly Dictionary<(Guid Share, Guid Item), TranscodeSlot> _running = new();
+    private readonly Dictionary<(Guid Share, Guid Item), List<TranscodeSlot>> _running = new();
+    private int _total;
     private DateTimeOffset _hardwareOffUntil = DateTimeOffset.MinValue;
 
     /// <summary>Initializes a new instance of the <see cref="CappedStreamService"/> class.</summary>
@@ -125,7 +133,7 @@ public sealed class CappedStreamService
         {
             lock (_lock)
             {
-                return _running.Count;
+                return _total;
             }
         }
     }
@@ -145,9 +153,9 @@ public sealed class CappedStreamService
     }
 
     /// <summary>
-    /// Reserves the transcode of a session. A transcode already running for the same session is cancelled and
-    /// replaced (it does not count against the limit); otherwise a new one needs a free place under
-    /// <paramref name="maxConcurrent"/>.
+    /// Reserves a transcode of a session. When the session already runs <see cref="MaxTranscodesPerSession"/>, its
+    /// oldest transcode is cancelled and replaced (no new place is used); otherwise the new one needs a free place
+    /// under <paramref name="maxConcurrent"/>.
     /// </summary>
     /// <param name="shareId">The share.</param>
     /// <param name="itemId">The item.</param>
@@ -158,17 +166,29 @@ public sealed class CappedStreamService
         var key = (shareId, itemId);
         lock (_lock)
         {
-            if (_running.TryGetValue(key, out var previous))
+            if (!_running.TryGetValue(key, out var session))
             {
-                previous.Supersede();
+                session = new List<TranscodeSlot>(MaxTranscodesPerSession);
             }
-            else if (_running.Count >= maxConcurrent)
+
+            if (session.Count >= MaxTranscodesPerSession)
+            {
+                var oldest = session[0];
+                session.RemoveAt(0);
+                oldest.Supersede();
+            }
+            else if (_total >= maxConcurrent)
             {
                 return null;
             }
+            else
+            {
+                _total++;
+            }
 
             var slot = new TranscodeSlot(this, key);
-            _running[key] = slot;
+            session.Add(slot);
+            _running[key] = session;
             return slot;
         }
     }
@@ -188,9 +208,14 @@ public sealed class CappedStreamService
     {
         lock (_lock)
         {
-            if (_running.TryGetValue(slot.Key, out var current) && ReferenceEquals(current, slot))
+            // A superseded slot was already taken out of its session (and the total) when it was replaced.
+            if (_running.TryGetValue(slot.Key, out var session) && session.Remove(slot))
             {
-                _running.Remove(slot.Key);
+                _total--;
+                if (session.Count == 0)
+                {
+                    _running.Remove(slot.Key);
+                }
             }
         }
     }

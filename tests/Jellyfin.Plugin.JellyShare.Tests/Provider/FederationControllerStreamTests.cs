@@ -500,7 +500,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     }
 
     [Fact]
-    public async Task Stream_Capped_SecondGetForSameSession_CancelsFirst_OnlyOneTranscodeRuns()
+    public async Task Stream_Capped_TwoParallelCappedGets_BothRun()
     {
         CapMovie();
         _runner.BlockUntilCancelled = true;
@@ -510,22 +510,49 @@ public sealed class FederationControllerStreamTests : IDisposable
         var firstRun = Execute(first, first.Stream(MovieId.ToString("N")));
         await _runner.WaitForStartsAsync(1);
         var secondRun = Execute(second, second.Stream(MovieId.ToString("N"), "300"));
-        await firstRun.WaitAsync(TimeSpan.FromSeconds(5));
         await _runner.WaitForStartsAsync(1);
 
-        Assert.Equal(1, _runner.Cancellations);
-        Assert.Equal(1, _capped!.RunningTranscodes);
+        Assert.Equal(0, _runner.Cancellations);
+        Assert.Equal(2, _capped!.RunningTranscodes);
+        Assert.False(firstRun.IsCompleted);
         Assert.False(secondRun.IsCompleted);
-        Assert.True(_lifetimes[0].Aborted, "superseded response must be aborted, not ended as if complete");
-        Assert.False(_lifetimes[1].Aborted);
+        Assert.Equal(1, _limiter.Active(_config.Current.Shares[0].Id));
 
         _abort.Cancel();
-        await secondRun.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(firstRun, secondRun).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(0, _capped.RunningTranscodes);
     }
 
     [Fact]
-    public async Task Stream_Capped_ManyParallelGetsForSameSession_NeverRunMoreThanOneAtATime()
+    public async Task Stream_Capped_ThirdCappedGet_CancelsOldest()
+    {
+        CapMovie();
+        _runner.BlockUntilCancelled = true;
+        var controllers = new[] { Controller(_token), Controller(_token), Controller(_token) };
+        var runs = new List<Task>();
+        foreach (var controller in controllers)
+        {
+            runs.Add(Execute(controller, controller.Stream(MovieId.ToString("N"))));
+            await _runner.WaitForStartsAsync(1);
+        }
+
+        await runs[0].WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, _runner.Cancellations);
+        Assert.Equal(2, _capped!.RunningTranscodes);
+        Assert.True(_lifetimes[0].Aborted, "superseded response must be aborted, not ended as if complete");
+        Assert.False(_lifetimes[1].Aborted);
+        Assert.False(_lifetimes[2].Aborted);
+        Assert.False(runs[1].IsCompleted);
+        Assert.False(runs[2].IsCompleted);
+
+        _abort.Cancel();
+        await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, _capped.RunningTranscodes);
+    }
+
+    [Fact]
+    public async Task Stream_Capped_ManyParallelGetsForSameSession_NeverRunMoreThanTwo()
     {
         CapMovie();
         _runner.BlockUntilCancelled = true;
@@ -535,14 +562,35 @@ public sealed class FederationControllerStreamTests : IDisposable
             var controller = Controller(_token);
             runs.Add(Execute(controller, controller.Stream(MovieId.ToString("N"))));
             await _runner.WaitForStartsAsync(1);
+            Assert.True(_capped!.RunningTranscodes <= 2);
         }
 
-        await Task.WhenAll(runs.Take(9)).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(1, _capped!.RunningTranscodes);
-        Assert.Equal(9, _runner.Cancellations);
+        await Task.WhenAll(runs.Take(8)).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, _capped!.RunningTranscodes);
+        Assert.Equal(8, _runner.Cancellations);
+        Assert.False(runs[8].IsCompleted);
+        Assert.False(runs[9].IsCompleted);
 
         _abort.Cancel();
         await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task Stream_Capped_SecondTranscodeOfSession_CountsAgainstGlobalLimit()
+    {
+        _config.Current.MaxConcurrentTranscodes = 1;
+        CapMovie();
+        _runner.BlockUntilCancelled = true;
+        var first = Controller(_token);
+        var run = Execute(first, first.Stream(MovieId.ToString("N")));
+        await _runner.WaitForStartsAsync(1);
+
+        var second = Controller(_token);
+        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(second.Stream(MovieId.ToString("N"))).StatusCode);
+        Assert.Equal(0, _runner.Cancellations);
+
+        _abort.Cancel();
+        await run.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
