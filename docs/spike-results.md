@@ -466,3 +466,28 @@ From Task 10 (harness, 12.4.0):
     process keeps running the old code from the bind-mounted Release folder although the file looks updated. Verify
     new code by behaviour or by `docker cp` + hash.
 
+
+From the final whole-branch review (fix wave):
+
+22. **Jellyfin's NFO saver vs. the planner.** With the "Nfo" metadata saver on, Jellyfin rewrites placeholder `.nfo`
+    files and adds `season.nfo`. The planner therefore no longer compares desired content with the disk: the plugin
+    keeps `placeholder-ledger.json` (per root, relative path → hash of what it last wrote), rewrites a file only when the
+    desired content differs from that record (or the file is gone), and deletes only files it wrote; foreign files go
+    only with their whole placeholder folder. An install without a ledger seeds it from disk (`.strm`, same-name `.nfo`,
+    `tvshow.nfo`).
+23. **Placeholder roots must be the plugin's own.** Sync and reconcile refuse to run when a root equals, contains or is
+    inside a library location that is not itself a plugin root, or when a root is non-empty without the `.jellyshare`
+    marker; the marker is only created in a new or empty folder (writer and admin attach).
+24. **"Sync now" is asynchronous.** `POST admin/sync` answers 202 `{started, alreadyRunning}`; `admin/status` carries
+    `syncRunning` and `syncError`. Images are downloaded after the sync lock is released (4 folders at a time), and up to
+    50 folders still missing images are retried per full sync. Removing a peer starts (or queues) a sync.
+25. **Targeted reconcile is key-scoped.** It uses the in-memory merged index (re-read only when the file changes), stats
+    only the affected placeholder paths against the ledger, and reads the library with provider-id queries
+    (`InternalItemsQuery.HasAnyProviderIds` for movies/series, `AncestorIds` = those series for episodes) instead of
+    the two full queries.
+26. **Provider catalog.** The ETag is computed from item ids + `DateModified` before any catalog entry is built (a 304
+    builds none), the built catalog is cached per share and ETag, and `IsExposed` looks up only the requested item (or
+    the series' episodes) in the shared libraries. Catalog fetches get 120 s (images 30 s, ping 15 s; the named
+    HttpClient timeout is 150 s). A container bitrate of 0 counts as unknown, so a capped share transcodes it.
+27. **Relay source order.** Peers whose last sync failed are tried last instead of being skipped; disabled or removed
+    peers stay excluded. A `RelayBaseOverride` must be a loopback URL, otherwise the sync stops with an error.

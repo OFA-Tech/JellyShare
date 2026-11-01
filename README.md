@@ -42,7 +42,8 @@ On the **consumer** (**Dashboard → Plugins → JellyShare → Receive from pee
    this before the first sync. If you ever attach a placeholder folder by hand, attach it **with a library refresh**;
    without one Jellyfin never notices later changes in it.
 2. **Add a peer:** name, server address, token. Press **Test connection** first; it must report success.
-3. **Add peer**, then **Sync now**. About a minute later the provider's titles that you do not already have appear
+3. **Add peer**, then **Sync now**. The sync runs in the background (the page shows "Syncing..." and you can leave
+   it); posters and backdrops are fetched after the placeholders are written. About a minute later the provider's titles that you do not already have appear
    in your libraries (movies, and series with their seasons and episodes). They play directly from the peer.
    If several peers have a title, the first one in the Peers list is used (change the order with the arrows).
 
@@ -52,8 +53,9 @@ Things to know:
   series, as long as your Shows library has **"Automatically merge series that are spread across multiple folders"**
   turned on (Dashboard → Libraries → Shows → Manage library → Settings). **The admin page warns when it is off; if it
   stays off, peer episodes show up as a separate copy of the series.**
-- The sync also runs as the scheduled task "JellyShare: sync peers" (Dashboard → Scheduled Tasks; interval is the
-  plugin's `SyncIntervalHours` setting). If your own file for a title disappears (deleted, or the drive is offline),
+- The sync also runs as the scheduled task "JellyShare: sync peers", every 6 hours by default. Change the interval in
+  **Dashboard → Scheduled Tasks → JellyShare: sync peers** (the plugin's `SyncIntervalHours` setting only sets the
+  default trigger when the task is first registered). If your own file for a title disappears (deleted, or the drive is offline),
   the peer's copy takes over within a minute or two, and goes away again when your file is back.
 
 ## Known limitations
@@ -81,12 +83,32 @@ Things to know:
   loopback-only relay could be reachable through it.
 - **Placeholder folders must be attached to a library with a refresh** (Pairing, consumer step 1). The admin page does
   this; a manual attach without a refresh silently loses changes.
-- Items are matched by provider IDs (Tmdb/Tvdb/Imdb). Titles without any ID are matched by name only and may not merge.
+- Items are matched by provider IDs (movies: Tmdb/Imdb; episodes: the series' Tvdb/Tmdb ID + season/episode number).
+  Peer titles without a usable ID get no placeholder at all; the sync report counts them as "Without usable ids".
+- **Disabling or removing a peer** removes its placeholders at the next sync (removing a peer starts one right away).
+  A peer that is merely offline keeps its placeholders for 7 days.
+- **Jellyfin's "Nfo" metadata saver** may rewrite the placeholder `.nfo` files or add `season.nfo`; JellyShare leaves
+  those edits alone. It remembers what it wrote (`placeholder-ledger.json` in the plugin data folder) and only rewrites
+  a file when the peer's data for it changed, and only deletes files it wrote itself (plus the whole folder when a
+  title goes away).
+- **Placeholder folders must be JellyShare's own:** a sync refuses to run (the admin page shows the error) when a
+  placeholder folder is, contains or is inside one of your library folders, or when it already contains files but no
+  `.jellyshare` marker.
+
+## Uninstall
+
+1. In each library that has a JellyShare placeholder folder (Movies, Shows), remove that folder from the library
+   (Dashboard → Libraries → Manage library → Folders) and let the library scan, so the placeholder items disappear.
+2. **Dashboard → Plugins → JellyShare → Uninstall**, then restart Jellyfin.
+3. Delete the two placeholder folders (the ones shown in the plugin's Setup section; by default `placeholders/Movies` and
+   `placeholders/Shows` in the plugin's data folder) if they are still on disk. Your own media folders are never touched.
 
 ## Security notes
 
 - Placeholder `.strm` files contain only a loopback relay URL (`http://127.0.0.1:{port}{BaseUrl}/JellyShare/v1/play/{key}`),
-  never a token. Peer tokens are sent only in the `X-JellyShare-Token` header and are never logged.
+  never a token. Peer tokens are sent only in the `X-JellyShare-Token` header and are never logged. A
+  `RelayBaseOverride` setting must also be a loopback URL (`http://127.0.0.1…`, `http://[::1]…`, `http://localhost…`);
+  any other value stops the sync with an error, because the relay would refuse it.
 - The standard Jellyfin plugin configuration API (`/Plugins/{id}/Configuration`) returns the whole plugin configuration to
   administrators, including the peer tokens you received and the hashes of the invitations you created. The JellyShare
   admin page never receives them (its own `/JellyShare/v1/admin/...` endpoints are admin-only and return neither), but
