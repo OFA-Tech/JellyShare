@@ -17,12 +17,12 @@ namespace JellyShare.JellyfinTests.Controllers;
 
 public sealed class FederationControllerStreamTests : IDisposable
 {
-    private static readonly Guid Lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid MovieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
-    private static readonly Guid Movie2Id = Guid.Parse("00000001-0000-0000-0000-000000000002");
-    private static readonly Guid EpisodeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
-    private static readonly Guid SeriesId = Guid.Parse("00000003-0000-0000-0000-000000000001");
-    private static readonly Guid OutsideId = Guid.Parse("00000004-0000-0000-0000-000000000001");
+    private static readonly Guid _lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid _movieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid _movie2Id = Guid.Parse("00000001-0000-0000-0000-000000000002");
+    private static readonly Guid _episodeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
+    private static readonly Guid _seriesId = Guid.Parse("00000003-0000-0000-0000-000000000001");
+    private static readonly Guid _outsideId = Guid.Parse("00000004-0000-0000-0000-000000000001");
 
     private readonly FakeSource _source = new();
     private readonly FakeConfig _config = new();
@@ -54,7 +54,7 @@ public sealed class FederationControllerStreamTests : IDisposable
             Name = "bob",
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = new List<Guid> { Lib },
+            LibraryIds = new List<Guid> { _lib },
             MaxStreams = 1,
         });
 
@@ -62,16 +62,22 @@ public sealed class FederationControllerStreamTests : IDisposable
         _movie2File = Path.Combine(_tempDir, "b.mp4");
         File.WriteAllBytes(_movieFile, new byte[4096]);
         File.WriteAllBytes(_movie2File, new byte[4096]);
-        AddItem(Lib, MovieId, "Movie", _movieFile, null);
-        AddItem(Lib, Movie2Id, "Movie", _movie2File, null);
-        AddItem(Lib, EpisodeId, "Episode", Path.Combine(_tempDir, "e.mkv"), SeriesId);
+        AddItem(_lib, _movieId, "Movie", _movieFile, null);
+        AddItem(_lib, _movie2Id, "Movie", _movie2File, null);
+        AddItem(_lib, _episodeId, "Episode", Path.Combine(_tempDir, "e.mkv"), _seriesId);
         File.WriteAllBytes(Path.Combine(_tempDir, "e.mkv"), new byte[10]);
-        AddItem(Guid.NewGuid(), OutsideId, "Movie", _movieFile, null);
+        AddItem(Guid.NewGuid(), _outsideId, "Movie", _movieFile, null);
     }
 
     public void Dispose()
     {
         _abort.Cancel();
+        foreach (var lifetime in _lifetimes)
+        {
+            lifetime.Dispose();
+        }
+
+        _abort.Dispose();
         if (Directory.Exists(_tempDir))
         {
             Directory.Delete(_tempDir, true);
@@ -85,7 +91,9 @@ public sealed class FederationControllerStreamTests : IDisposable
         _source.Streams[id] = new StreamInfo(type, "Name of " + id.ToString("N")[..8], path, 1_000_000);
     }
 
-    private FederationController Controller(string? token, string method = "GET", CancellationToken aborted = default)
+    private FederationController Controller(string? token, string method = "GET") => AbortableController(token, method, CancellationToken.None);
+
+    private FederationController AbortableController(string? token, string method, CancellationToken aborted)
     {
         var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
         _capped ??= new CappedStreamService(_encoder, _runner, _clock, _cappedLogger);
@@ -119,7 +127,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     private void CapMovie(int cap = 2_000_000, long bitrate = 8_000_000)
     {
         _config.Settings.Shares[0].MaxBitrate = cap;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate, RunTimeTicks = TimeSpan.FromMinutes(90).Ticks };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = bitrate, RunTimeTicks = TimeSpan.FromMinutes(90).Ticks };
     }
 
     private static async Task<HttpContext> Execute(FederationController controller, IActionResult result)
@@ -133,7 +141,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_NoToken_Returns401()
     {
-        var result = Controller(null).Stream(MovieId.ToString("N"));
+        var result = Controller(null).Stream(_movieId.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
@@ -143,7 +151,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         const string wrong = "js1_not-a-real-token-value";
 
-        var result = Controller(wrong).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>();
+        var result = Controller(wrong).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(401);
         System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
@@ -166,19 +174,19 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_ItemOutsideShare_Returns404()
     {
-        Controller(_token).Stream(OutsideId.ToString("N")).ShouldBeOfType<NotFoundResult>();
+        Controller(_token).Stream(_outsideId.ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
     public void Stream_SeriesId_Returns404_EvenThoughImagesAreExposed()
     {
-        Controller(_token).Stream(SeriesId.ToString("N")).ShouldBeOfType<NotFoundResult>();
+        Controller(_token).Stream(_seriesId.ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
     public void Stream_Movie_ServesFileWithRangeProcessing()
     {
-        var result = Controller(_token).Stream(MovieId.ToString("N"));
+        var result = Controller(_token).Stream(_movieId.ToString("N"));
 
         var file = result.ShouldBeOfType<PhysicalFileResult>();
         file.FileName.ShouldBe(_movieFile);
@@ -189,7 +197,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_Episode_IsServed()
     {
-        Controller(_token).Stream(EpisodeId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_episodeId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Theory]
@@ -202,7 +210,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         var file = Path.Combine(_tempDir, name);
         File.WriteAllBytes(file, new byte[8]);
-        AddItem(Lib, Guid.Parse("00000009-0000-0000-0000-000000000001"), "Movie", file, null);
+        AddItem(_lib, Guid.Parse("00000009-0000-0000-0000-000000000001"), "Movie", file, null);
 
         var result = Controller(_token).Stream("00000009-0000-0000-0000-000000000001");
 
@@ -214,7 +222,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         File.Delete(_movieFile);
 
-        var result = Controller(_token).Stream(MovieId.ToString("N"));
+        var result = Controller(_token).Stream(_movieId.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
     }
@@ -224,7 +232,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         using var exclusive = new FileStream(_movieFile, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
-        var result = Controller(_token).Stream(MovieId.ToString("N"));
+        var result = Controller(_token).Stream(_movieId.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
     }
@@ -232,10 +240,10 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_SecondItemOverLimit_Returns429WithRetryAfter()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         var controller = Controller(_token);
 
-        var result = controller.Stream(Movie2Id.ToString("N"));
+        var result = controller.Stream(_movie2Id.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
         controller.Response.Headers.RetryAfter.ToString().ShouldBe("30");
@@ -244,43 +252,43 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_SameItemAgain_IsStillServed()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
-        Controller(_token, "HEAD").Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token, "HEAD").Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Stream_AfterIdle30s_OtherItemIsServed()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         CompleteAllResponses();
         _clock.Advance(TimeSpan.FromSeconds(30));
 
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Session_HeldWhileBodyInFlight_DoesNotExpire()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
 
         _clock.Advance(TimeSpan.FromMinutes(5));
 
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
     }
 
     [Fact]
     public void Session_ReleasedAfterBody_ExpiresAfter30s()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         _clock.Advance(TimeSpan.FromMinutes(5));
         CompleteAllResponses();
 
         _clock.Advance(TimeSpan.FromSeconds(29));
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -288,16 +296,16 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         File.Delete(_movieFile);
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
 
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Stream_InvalidPathCharacters_Returns503_AndReleasesSlot()
     {
-        AddItem(Lib, Guid.Parse("00000009-0000-0000-0000-000000000002"), "Movie", "bad\0path.mkv", null);
+        AddItem(_lib, Guid.Parse("00000009-0000-0000-0000-000000000002"), "Movie", "bad\0path.mkv", null);
 
         var result = Controller(_token).Stream("00000009-0000-0000-0000-000000000002");
 
@@ -308,11 +316,11 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void ExistingSession_503_KeepsSlot()
     {
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         CompleteAllResponses();
         File.Delete(_movieFile);
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
 
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(1);
     }
@@ -322,7 +330,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         _config.Settings.Shares[0].MaxStreams = 0;
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
     }
 
     [Fact]
@@ -332,7 +340,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         var controller = Controller(_token);
         controller.Request.Headers.Range = "bytes=1000-";
 
-        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        var http = await Execute(controller, controller.Stream(_movieId.ToString("N")));
 
         http.Response.StatusCode.ShouldBe(200);
         http.Response.ContentType.ShouldBe("video/mp2t");
@@ -351,7 +359,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         var controller = Controller(_token);
 
-        await Execute(controller, controller.Stream(MovieId.ToString("N"), "600.5"));
+        await Execute(controller, controller.Stream(_movieId.ToString("N"), "600.5"));
 
         var args = _runner.Calls.ShouldHaveSingleItem().Args.ToList();
         args[args.IndexOf("-ss") + 1].ShouldBe("600.5");
@@ -364,7 +372,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         var controller = Controller(_token);
 
-        await Execute(controller, controller.Stream(MovieId.ToString("N"), "999999"));
+        await Execute(controller, controller.Stream(_movieId.ToString("N"), "999999"));
 
         var args = _runner.Calls.ShouldHaveSingleItem().Args.ToList();
         args[args.IndexOf("-ss") + 1].ShouldBe("5400");
@@ -378,7 +386,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         CapMovie();
 
-        var result = Controller(_token).Stream(MovieId.ToString("N"), start);
+        var result = Controller(_token).Stream(_movieId.ToString("N"), start);
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(400);
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
@@ -391,7 +399,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         var controller = Controller(_token, "HEAD");
 
-        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        var http = await Execute(controller, controller.Stream(_movieId.ToString("N")));
 
         http.Response.StatusCode.ShouldBe(200);
         http.Response.ContentType.ShouldBe("video/mp2t");
@@ -405,19 +413,19 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         _runner.BlockUntilCancelled = true;
         using var disconnect = new CancellationTokenSource();
-        var controller = Controller(_token, aborted: disconnect.Token);
+        var controller = AbortableController(_token, "GET", disconnect.Token);
 
-        var running = Execute(controller, controller.Stream(MovieId.ToString("N")));
-        await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var running = Execute(controller, controller.Stream(_movieId.ToString("N")));
+        await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         _clock.Advance(TimeSpan.FromMinutes(5));
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
 
-        disconnect.Cancel();
-        await running.WaitAsync(TimeSpan.FromSeconds(5));
+        await disconnect.CancelAsync();
+        await running.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
 
         _runner.SawCancellation.ShouldBeTrue();
         _clock.Advance(TimeSpan.FromSeconds(30));
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -426,10 +434,10 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         var controller = Controller(_token);
 
-        await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        await Execute(controller, controller.Stream(_movieId.ToString("N")));
         _clock.Advance(TimeSpan.FromSeconds(30));
 
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -440,7 +448,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _runner.FailFirstCallWithoutOutput = true;
         var controller = Controller(_token);
 
-        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        var http = await Execute(controller, controller.Stream(_movieId.ToString("N")));
 
         _runner.Calls.Count.ShouldBe(2);
         _runner.Calls[0].Args.ShouldContain("h264_nvenc");
@@ -454,11 +462,11 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         _encoder.Settings = null;
 
-        var result = Controller(_token).Stream(MovieId.ToString("N"));
+        var result = Controller(_token).Stream(_movieId.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(409);
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
-        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -466,7 +474,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         CapMovie(cap: 200_000);
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(409);
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(409);
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
     }
 
@@ -474,9 +482,9 @@ public sealed class FederationControllerStreamTests : IDisposable
     public void Stream_BelowCap_IgnoresStart_AndServesFile()
     {
         _config.Settings.Shares[0].MaxBitrate = 10_000_000;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = 1_000_000 };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = 1_000_000 };
 
-        Controller(_token).Stream(MovieId.ToString("N"), "60").ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N"), "60").ShouldBeOfType<PhysicalFileResult>();
         _runner.Calls.ShouldBeEmpty();
     }
 
@@ -484,10 +492,10 @@ public sealed class FederationControllerStreamTests : IDisposable
     public async Task Stream_UnknownBitrate_WithCap_IsTranscoded()
     {
         _config.Settings.Shares[0].MaxBitrate = 2_000_000;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = null };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = null };
         var controller = Controller(_token);
 
-        var result = controller.Stream(MovieId.ToString("N"));
+        var result = controller.Stream(_movieId.ToString("N"));
 
         result.ShouldNotBeOfType<PhysicalFileResult>();
         var http = await Execute(controller, result);
@@ -501,10 +509,10 @@ public sealed class FederationControllerStreamTests : IDisposable
     public async Task Stream_ZeroOrNegativeBitrate_WithCap_IsTranscoded(long bitrate)
     {
         _config.Settings.Shares[0].MaxBitrate = 2_000_000;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = bitrate };
         var controller = Controller(_token);
 
-        var result = controller.Stream(MovieId.ToString("N"));
+        var result = controller.Stream(_movieId.ToString("N"));
 
         result.ShouldNotBeOfType<PhysicalFileResult>();
         await Execute(controller, result);
@@ -514,9 +522,9 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_UnknownBitrate_WithoutCap_ServesFile()
     {
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = null };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = null };
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -527,9 +535,9 @@ public sealed class FederationControllerStreamTests : IDisposable
         var first = Controller(_token);
         var second = Controller(_token);
 
-        var firstRun = Execute(first, first.Stream(MovieId.ToString("N")));
+        var firstRun = Execute(first, first.Stream(_movieId.ToString("N")));
         await _runner.WaitForStartsAsync(1);
-        var secondRun = Execute(second, second.Stream(MovieId.ToString("N"), "300"));
+        var secondRun = Execute(second, second.Stream(_movieId.ToString("N"), "300"));
         await _runner.WaitForStartsAsync(1);
 
         _runner.Cancellations.ShouldBe(0);
@@ -538,8 +546,8 @@ public sealed class FederationControllerStreamTests : IDisposable
         secondRun.IsCompleted.ShouldBeFalse();
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(1);
 
-        _abort.Cancel();
-        await Task.WhenAll(firstRun, secondRun).WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await Task.WhenAll(firstRun, secondRun).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         _capped.RunningTranscodes.ShouldBe(0);
     }
 
@@ -552,11 +560,11 @@ public sealed class FederationControllerStreamTests : IDisposable
         var runs = new List<Task>();
         foreach (var controller in controllers)
         {
-            runs.Add(Execute(controller, controller.Stream(MovieId.ToString("N"))));
+            runs.Add(Execute(controller, controller.Stream(_movieId.ToString("N"))));
             await _runner.WaitForStartsAsync(1);
         }
 
-        await runs[0].WaitAsync(TimeSpan.FromSeconds(5));
+        await runs[0].WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
 
         _runner.Cancellations.ShouldBe(1);
         _capped!.RunningTranscodes.ShouldBe(2);
@@ -566,8 +574,8 @@ public sealed class FederationControllerStreamTests : IDisposable
         runs[1].IsCompleted.ShouldBeFalse();
         runs[2].IsCompleted.ShouldBeFalse();
 
-        _abort.Cancel();
-        await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         _capped.RunningTranscodes.ShouldBe(0);
     }
 
@@ -580,19 +588,19 @@ public sealed class FederationControllerStreamTests : IDisposable
         for (var i = 0; i < 10; i++)
         {
             var controller = Controller(_token);
-            runs.Add(Execute(controller, controller.Stream(MovieId.ToString("N"))));
+            runs.Add(Execute(controller, controller.Stream(_movieId.ToString("N"))));
             await _runner.WaitForStartsAsync(1);
             (_capped!.RunningTranscodes <= 2).ShouldBeTrue();
         }
 
-        await Task.WhenAll(runs.Take(8)).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(runs.Take(8)).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         _capped!.RunningTranscodes.ShouldBe(2);
         _runner.Cancellations.ShouldBe(8);
         runs[8].IsCompleted.ShouldBeFalse();
         runs[9].IsCompleted.ShouldBeFalse();
 
-        _abort.Cancel();
-        await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
     }
 
     [Fact]
@@ -602,15 +610,15 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         _runner.BlockUntilCancelled = true;
         var first = Controller(_token);
-        var run = Execute(first, first.Stream(MovieId.ToString("N")));
+        var run = Execute(first, first.Stream(_movieId.ToString("N")));
         await _runner.WaitForStartsAsync(1);
 
         var second = Controller(_token);
-        second.Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        second.Stream(_movieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
         _runner.Cancellations.ShouldBe(0);
 
-        _abort.Cancel();
-        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
     }
 
     [Fact]
@@ -619,7 +627,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _config.Settings.MaxConcurrentTranscodes = 2;
         _config.Settings.Shares[0].MaxStreams = 10;
         _config.Settings.Shares[0].MaxBitrate = 2_000_000;
-        foreach (var id in new[] { MovieId, Movie2Id, EpisodeId })
+        foreach (var id in new[] { _movieId, _movie2Id, _episodeId })
         {
             _source.Streams[id] = _source.Streams[id] with { Bitrate = 8_000_000 };
         }
@@ -627,19 +635,19 @@ public sealed class FederationControllerStreamTests : IDisposable
         _runner.BlockUntilCancelled = true;
         var a = Controller(_token);
         var b = Controller(_token);
-        var runA = Execute(a, a.Stream(MovieId.ToString("N")));
-        var runB = Execute(b, b.Stream(Movie2Id.ToString("N")));
+        var runA = Execute(a, a.Stream(_movieId.ToString("N")));
+        var runB = Execute(b, b.Stream(_movie2Id.ToString("N")));
         await _runner.WaitForStartsAsync(2);
         var c = Controller(_token);
 
-        var result = c.Stream(EpisodeId.ToString("N"));
+        var result = c.Stream(_episodeId.ToString("N"));
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
         c.Response.Headers.RetryAfter.ToString().ShouldBe("30");
         _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(2);
 
-        _abort.Cancel();
-        await Task.WhenAll(runA, runB).WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await Task.WhenAll(runA, runB).WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
         _capped!.RunningTranscodes.ShouldBe(0);
     }
 
@@ -649,15 +657,15 @@ public sealed class FederationControllerStreamTests : IDisposable
         CapMovie();
         _runner.BlockUntilCancelled = true;
         var get = Controller(_token);
-        var run = Execute(get, get.Stream(MovieId.ToString("N")));
+        var run = Execute(get, get.Stream(_movieId.ToString("N")));
         await _runner.WaitForStartsAsync(1);
 
         var head = Controller(_token, "HEAD");
-        await Execute(head, head.Stream(MovieId.ToString("N")));
+        await Execute(head, head.Stream(_movieId.ToString("N")));
 
         _runner.Cancellations.ShouldBe(0);
-        _abort.Cancel();
-        await run.WaitAsync(TimeSpan.FromSeconds(5));
+        await _abort.CancelAsync();
+        await run.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
     }
 
     [Fact]
@@ -667,7 +675,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _runner.FailAlwaysWithoutOutput = true;
         var controller = Controller(_token);
 
-        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        var http = await Execute(controller, controller.Stream(_movieId.ToString("N")));
 
         http.Response.StatusCode.ShouldBe(503);
         http.Response.ContentType.ShouldBeNull();
@@ -683,7 +691,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _runner.ThrowStartFailure = true;
         var controller = Controller(_token);
 
-        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        var http = await Execute(controller, controller.Stream(_movieId.ToString("N")));
 
         http.Response.StatusCode.ShouldBe(503);
         http.Response.ContentType.ShouldBeNull();
@@ -700,7 +708,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         for (var i = 0; i < 3; i++)
         {
             var controller = Controller(_token);
-            await Execute(controller, controller.Stream(MovieId.ToString("N")));
+            await Execute(controller, controller.Stream(_movieId.ToString("N")));
         }
 
         _runner.Calls.Count.ShouldBe(4);
@@ -713,7 +721,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         _clock.Advance(TimeSpan.FromMinutes(10));
         var later = Controller(_token);
-        await Execute(later, later.Stream(MovieId.ToString("N")));
+        await Execute(later, later.Stream(_movieId.ToString("N")));
         _runner.Calls[4].Args.ShouldContain("h264_nvenc");
     }
 
@@ -723,17 +731,17 @@ public sealed class FederationControllerStreamTests : IDisposable
     public void Stream_BitrateAtOrBelowCap_IsServed(long? bitrate)
     {
         _config.Settings.Shares[0].MaxBitrate = 1_000_000;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
+        _source.Streams[_movieId] = _source.Streams[_movieId] with { Bitrate = bitrate };
 
-        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(_movieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Stream_NewSession_LogsShareAndItemName_OncePerSession_NoToken()
     {
-        Controller(_token).Stream(MovieId.ToString("N"));
-        Controller(_token).Stream(MovieId.ToString("N"));
-        Controller(_token).Stream(MovieId.ToString("N"));
+        Controller(_token).Stream(_movieId.ToString("N"));
+        Controller(_token).Stream(_movieId.ToString("N"));
+        Controller(_token).Stream(_movieId.ToString("N"));
 
         var line = _logger.Lines.ShouldHaveSingleItem();
         line.ShouldContain("bob", Case.Sensitive);

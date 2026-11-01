@@ -15,12 +15,12 @@ namespace JellyShare.JellyfinTests.Controllers;
 
 public sealed class FederationControllerCatalogTests : IDisposable
 {
-    private static readonly Guid Lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid MovieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
-    private static readonly Guid EpisodeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
-    private static readonly Guid SeriesId = Guid.Parse("00000003-0000-0000-0000-000000000001");
-    private static readonly Guid OutsideId = Guid.Parse("00000004-0000-0000-0000-000000000001");
-    private static readonly DateTime Modified = new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+    private static readonly Guid _lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid _movieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid _episodeId = Guid.Parse("00000002-0000-0000-0000-000000000001");
+    private static readonly Guid _seriesId = Guid.Parse("00000003-0000-0000-0000-000000000001");
+    private static readonly Guid _outsideId = Guid.Parse("00000004-0000-0000-0000-000000000001");
+    private static readonly DateTime _modified = new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 
     private readonly FakeSource _source = new();
     private readonly FakeConfig _config = new();
@@ -39,12 +39,12 @@ public sealed class FederationControllerCatalogTests : IDisposable
             Name = "bob",
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = new List<Guid> { Lib },
+            LibraryIds = new List<Guid> { _lib },
         });
 
-        _source.Items.Add((Lib, Movie(MovieId, "/media/Movies/A/A.mkv")));
-        _source.Items.Add((Lib, Episode(EpisodeId, SeriesId, "/media/Shows/S/Season 01/S.mkv")));
-        _source.Items.Add((Guid.NewGuid(), Movie(OutsideId, "/media/Other/B.mkv")));
+        _source.Items.Add((_lib, Movie(_movieId, "/media/Movies/A/A.mkv")));
+        _source.Items.Add((_lib, Episode(_episodeId, _seriesId, "/media/Shows/S/Season 01/S.mkv")));
+        _source.Items.Add((Guid.NewGuid(), Movie(_outsideId, "/media/Other/B.mkv")));
     }
 
     public void Dispose()
@@ -63,7 +63,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
             Interlocked.Increment(ref _materialized);
             return Make(id, "Movie", null);
         })
-        { DateModified = Modified };
+        { DateModified = _modified };
 
     private LocalItem Episode(Guid id, Guid seriesId, string path)
         => new(id, "Episode", path, seriesId, () =>
@@ -71,7 +71,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
             Interlocked.Increment(ref _materialized);
             return Make(id, "Episode", seriesId.ToString("N"));
         })
-        { DateModified = Modified };
+        { DateModified = _modified };
 
     private static CatalogItem Make(Guid id, string type, string? seriesId)
         => new(
@@ -88,7 +88,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
             null,
             new MediaInfo(null, null, null, null, null, Array.Empty<AudioTrack>(), Array.Empty<SubtitleTrack>()),
             Array.Empty<string>(),
-            Modified,
+            _modified,
             seriesId);
 
     private FederationController Controller(string? token, Action<HttpContext>? tweak = null)
@@ -120,7 +120,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
         const string wrong = "js1_not-a-real-token-value";
         var controller = Controller(wrong);
 
-        var result = ((await controller.Catalog())).ShouldBeAssignableTo<ObjectResult>();
+        var result = (await controller.Catalog()).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(401);
         System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
@@ -141,18 +141,18 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token);
 
-        var result = ((await controller.Catalog())).ShouldBeOfType<OkObjectResult>();
+        var result = (await controller.Catalog()).ShouldBeOfType<OkObjectResult>();
 
         var catalog = result.Value.ShouldBeOfType<CatalogResponse>();
         catalog.Items.Count.ShouldBe(2);
-        catalog.Items.ShouldNotContain(i => i.Id == OutsideId.ToString("N"));
+        catalog.Items.ShouldNotContain(i => i.Id == _outsideId.ToString("N"));
         controller.Response.Headers.ETag.ToString().ShouldBe("\"" + catalog.Etag + "\"");
     }
 
     [Fact]
     public async Task Catalog_IfNoneMatchMatches_Returns304WithoutBody()
     {
-        var etag = (((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>().Value).ShouldBeOfType<CatalogResponse>().Etag;
+        var etag = (await Controller(_token).Catalog()).ShouldBeOfType<OkObjectResult>().Value.ShouldBeOfType<CatalogResponse>().Etag;
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
         var result = (await controller.Catalog());
@@ -164,13 +164,13 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public async Task Catalog_304_MaterializesNothing()
     {
-        var etag = (((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>().Value).ShouldBeOfType<CatalogResponse>().Etag;
+        var etag = (await Controller(_token).Catalog()).ShouldBeOfType<OkObjectResult>().Value.ShouldBeOfType<CatalogResponse>().Etag;
         _materialized = 0;
 
         // A fresh builder (no cache): the 304 answer must still not build any catalog entry.
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        (((await controller.Catalog())).ShouldBeOfType<StatusCodeResult>().StatusCode).ShouldBe(304);
+        (await controller.Catalog()).ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(304);
         _materialized.ShouldBe(0);
     }
 
@@ -179,23 +179,23 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"deadbeef\"");
 
-        ((await controller.Catalog())).ShouldBeOfType<OkObjectResult>();
+        (await controller.Catalog()).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
     public async Task Catalog_RevocationIsImmediate()
     {
-        ((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>();
+        (await Controller(_token).Catalog()).ShouldBeOfType<OkObjectResult>();
 
         _config.Settings.Shares.Clear();
 
-        (((await Controller(_token).Catalog())).ShouldBeAssignableTo<ObjectResult>().StatusCode).ShouldBe(401);
+        (await Controller(_token).Catalog()).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
 
     [Fact]
     public void Image_NoToken_Returns401()
     {
-        var result = Controller(null).Image(MovieId.ToString("N"), "Primary");
+        var result = Controller(null).Image(_movieId.ToString("N"), "Primary");
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
@@ -203,7 +203,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Image_UnknownImageType_Returns400()
     {
-        var result = Controller(_token).Image(MovieId.ToString("N"), "Banner");
+        var result = Controller(_token).Image(_movieId.ToString("N"), "Banner");
 
         result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(400);
     }
@@ -221,9 +221,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var file = Path.Combine(_tempDir, "poster.jpg");
         File.WriteAllBytes(file, new byte[] { 1, 2, 3 });
-        _source.Images[(OutsideId, "Primary")] = file;
+        _source.Images[(_outsideId, "Primary")] = file;
 
-        var result = Controller(_token).Image(OutsideId.ToString("N"), "Primary");
+        var result = Controller(_token).Image(_outsideId.ToString("N"), "Primary");
 
         result.ShouldBeOfType<NotFoundResult>();
     }
@@ -231,7 +231,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Image_ItemWithoutThatImage_Returns404()
     {
-        var result = Controller(_token).Image(MovieId.ToString("N"), "Logo");
+        var result = Controller(_token).Image(_movieId.ToString("N"), "Logo");
 
         result.ShouldBeOfType<NotFoundResult>();
     }
@@ -241,10 +241,10 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var file = Path.Combine(_tempDir, "locked.jpg");
         File.WriteAllBytes(file, new byte[] { 1 });
-        _source.Images[(MovieId, "Primary")] = file;
+        _source.Images[(_movieId, "Primary")] = file;
         using var exclusive = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
 
-        var result = Controller(_token).Image(MovieId.ToString("N"), "Primary");
+        var result = Controller(_token).Image(_movieId.ToString("N"), "Primary");
 
         result.ShouldBeOfType<NotFoundResult>();
     }
@@ -252,9 +252,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Image_MissingFileOnDisk_Returns404()
     {
-        _source.Images[(MovieId, "Primary")] = Path.Combine(_tempDir, "gone.jpg");
+        _source.Images[(_movieId, "Primary")] = Path.Combine(_tempDir, "gone.jpg");
 
-        var result = Controller(_token).Image(MovieId.ToString("N"), "Primary");
+        var result = Controller(_token).Image(_movieId.ToString("N"), "Primary");
 
         result.ShouldBeOfType<NotFoundResult>();
     }
@@ -267,9 +267,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var file = Path.Combine(_tempDir, name);
         File.WriteAllBytes(file, new byte[] { 1, 2, 3 });
-        _source.Images[(MovieId, "Primary")] = file;
+        _source.Images[(_movieId, "Primary")] = file;
 
-        var result = Controller(_token).Image(MovieId.ToString("N"), "primary");
+        var result = Controller(_token).Image(_movieId.ToString("N"), "primary");
 
         var physical = result.ShouldBeOfType<PhysicalFileResult>();
         physical.FileName.ShouldBe(file);
@@ -281,9 +281,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var file = Path.Combine(_tempDir, "backdrop.jpg");
         File.WriteAllBytes(file, new byte[] { 1 });
-        _source.Images[(SeriesId, "Backdrop")] = file;
+        _source.Images[(_seriesId, "Backdrop")] = file;
 
-        var result = Controller(_token).Image(SeriesId.ToString("N"), "Backdrop");
+        var result = Controller(_token).Image(_seriesId.ToString("N"), "Backdrop");
 
         result.ShouldBeOfType<PhysicalFileResult>();
     }

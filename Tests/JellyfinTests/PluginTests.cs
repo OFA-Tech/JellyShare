@@ -15,7 +15,7 @@ public sealed class PluginTests
         }
 
         dir.ShouldNotBeNull();
-        var yaml = File.ReadAllText(Path.Combine(dir!.FullName, "build.yaml"));
+        var yaml = File.ReadAllText(Path.Combine(dir.FullName, "build.yaml"));
         var match = Regex.Match(yaml, @"^guid:\s*""?([0-9a-fA-F-]{36})""?\s*$", RegexOptions.Multiline);
         match.Success.ShouldBeTrue("build.yaml has no guid line");
         Plugin.PluginId.ShouldBe(Guid.Parse(match.Groups[1].Value));

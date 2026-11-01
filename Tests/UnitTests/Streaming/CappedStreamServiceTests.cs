@@ -8,8 +8,8 @@ namespace JellyShare.UnitTests.Streaming;
 /// <summary>The plain stream API the HTTP result in JellyShare.Jellyfin maps to a response.</summary>
 public sealed class CappedStreamServiceTests
 {
-    private static readonly Guid Share = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000a");
-    private static readonly Guid Item = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid _share = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000a");
+    private static readonly Guid _item = Guid.Parse("00000001-0000-0000-0000-000000000001");
 
     private readonly FakeFfmpegRunner _runner = new();
     private readonly CappedStreamService _service;
@@ -25,7 +25,7 @@ public sealed class CappedStreamServiceTests
     [Fact]
     public async Task StreamAsync_WritesTheTranscode_AndCompletes()
     {
-        using var slot = _service.TryReserve(Share, Item, 4)!;
+        using var slot = _service.TryReserve(_share, _item, 4)!;
         using var output = new MemoryStream();
 
         var outcome = await Run(slot, output);
@@ -38,7 +38,7 @@ public sealed class CappedStreamServiceTests
     public async Task StreamAsync_FailureWithoutOutput_IsReported()
     {
         _runner.FailAlwaysWithoutOutput = true;
-        using var slot = _service.TryReserve(Share, Item, 4)!;
+        using var slot = _service.TryReserve(_share, _item, 4)!;
 
         (await Run(slot, new MemoryStream())).ShouldBe(CappedStreamOutcome.FailedWithoutOutput);
     }
@@ -47,7 +47,7 @@ public sealed class CappedStreamServiceTests
     public async Task StreamAsync_FfmpegCannotStart_IsAFailureWithoutOutput()
     {
         _runner.ThrowStartFailure = true;
-        using var slot = _service.TryReserve(Share, Item, 4)!;
+        using var slot = _service.TryReserve(_share, _item, 4)!;
 
         (await Run(slot, new MemoryStream())).ShouldBe(CappedStreamOutcome.FailedWithoutOutput);
     }
@@ -56,7 +56,7 @@ public sealed class CappedStreamServiceTests
     public async Task StreamAsync_ClientDisconnect_IsReported()
     {
         _runner.BlockUntilCancelled = true;
-        using var slot = _service.TryReserve(Share, Item, 4)!;
+        using var slot = _service.TryReserve(_share, _item, 4)!;
         using var aborted = new CancellationTokenSource();
 
         var run = Run(slot, new MemoryStream(), aborted.Token);
@@ -70,12 +70,12 @@ public sealed class CappedStreamServiceTests
     public async Task StreamAsync_NewerRequestsForTheSession_SupersedeTheOldest()
     {
         _runner.BlockUntilCancelled = true;
-        using var first = _service.TryReserve(Share, Item, 4)!;
+        using var first = _service.TryReserve(_share, _item, 4)!;
         var run = Run(first, new MemoryStream());
         await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        using var second = _service.TryReserve(Share, Item, 4)!;
-        using var third = _service.TryReserve(Share, Item, 4)!;
+        using var second = _service.TryReserve(_share, _item, 4)!;
+        using var third = _service.TryReserve(_share, _item, 4)!;
 
         (await run).ShouldBe(CappedStreamOutcome.Superseded);
     }

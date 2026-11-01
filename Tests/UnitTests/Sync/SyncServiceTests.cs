@@ -1,3 +1,4 @@
+using System.Globalization;
 using JellyShare.Application.Features.Sync;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
@@ -74,7 +75,7 @@ public sealed class SyncServiceTests : IDisposable
         report.SkippedLocal.ShouldBe(1);
         report.Written.ShouldBe(2);
         report.PeerErrors.ShouldBeEmpty();
-        File.ReadAllText(Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).strm")).ShouldBe("http://127.0.0.1:8096/JellyShare/v1/play/movie%3Atmdb%3A10378");
+        (await File.ReadAllTextAsync(Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).strm"))).ShouldBe("http://127.0.0.1:8096/JellyShare/v1/play/movie%3Atmdb%3A10378");
     }
 
     [Fact]
@@ -234,7 +235,7 @@ public sealed class SyncServiceTests : IDisposable
     [Fact]
     public async Task Sync_ScanBatching_Max200PerRun_RestNextRun()
     {
-        Offer(Enumerable.Range(1, 250).Select(i => TestItems.Movie("Movie " + i, tmdb: i.ToString(), id: "m" + i)).ToArray());
+        Offer(Enumerable.Range(1, 250).Select(i => TestItems.Movie("Movie " + i, tmdb: i.ToString(CultureInfo.InvariantCulture), id: "m" + i)).ToArray());
 
         var first = await _sync.RunAsync(CancellationToken.None);
         _scans.Reported.Count.ShouldBe(200);
@@ -290,7 +291,7 @@ public sealed class SyncServiceTests : IDisposable
         report.SkippedLocal.ShouldBe(1);
         File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 01", "Pioneer One S01E01.strm")).ShouldBeFalse();
         File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 02", "Pioneer One S02E01.strm")).ShouldBeTrue();
-        File.ReadAllBytes(Path.Combine(ShowsRoot, PioneerDir, "poster.jpg")).ShouldBe([7]);
+        (await File.ReadAllBytesAsync(Path.Combine(ShowsRoot, PioneerDir, "poster.jpg"))).ShouldBe([7]);
         _client.ImageRequests.ShouldContain((_alice.Id, "s1", "Backdrop"));
     }
 
@@ -317,14 +318,14 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
 
         var statePath = Path.Combine(DataDir, "peer-state.json");
-        File.WriteAllText(statePath, "{ truncated");
+        await File.WriteAllTextAsync(statePath, "{ truncated");
         _client.Catalogs[_alice.Id] = _ => FakePeerClient.Fail("connection failed");
         _clock.Now += TimeSpan.FromHours(6);
 
         await Should.ThrowAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
 
         MoviePlaceholder(BunnyDir).ShouldBeTrue();
-        File.ReadAllText(statePath).ShouldBe("{ truncated");
+        (await File.ReadAllTextAsync(statePath)).ShouldBe("{ truncated");
     }
 
     [Fact]
@@ -332,9 +333,9 @@ public sealed class SyncServiceTests : IDisposable
     {
         Offer(Bunny(), Pioneer(2, 1));
         Directory.CreateDirectory(ShowsRoot);
-        File.WriteAllText(Path.Combine(ShowsRoot, PlaceholderWriter.MarkerName), string.Empty);
+        await File.WriteAllTextAsync(Path.Combine(ShowsRoot, PlaceholderWriter.MarkerName), string.Empty);
         var blocker = Path.Combine(ShowsRoot, PioneerDir);
-        File.WriteAllText(blocker, "a file where the series folder should go");
+        await File.WriteAllTextAsync(blocker, "a file where the series folder should go");
 
         await Should.ThrowAsync<Exception>(() => _sync.RunAsync(CancellationToken.None));
         MoviePlaceholder(BunnyDir).ShouldBeTrue();
@@ -427,7 +428,7 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
         File.Exists(BunnyNfo).ShouldBeTrue();
         const string jellyfin = "<?xml version=\"1.0\"?><movie><title>Big Buck Bunny</title><lockdata>false</lockdata></movie>";
-        File.WriteAllText(BunnyNfo, jellyfin);
+        await File.WriteAllTextAsync(BunnyNfo, jellyfin);
         _scans.Reported.Clear();
 
         var report = await _sync.RunAsync(CancellationToken.None);
@@ -435,7 +436,7 @@ public sealed class SyncServiceTests : IDisposable
         report.Written.ShouldBe(0);
         report.Deleted.ShouldBe(0);
         _scans.Reported.ShouldBeEmpty();
-        File.ReadAllText(BunnyNfo).ShouldBe(jellyfin);
+        (await File.ReadAllTextAsync(BunnyNfo)).ShouldBe(jellyfin);
     }
 
     [Fact]
@@ -445,8 +446,8 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
         var seasonDir = Directory.GetDirectories(Path.Combine(ShowsRoot, PioneerDir)).Single();
         var seasonNfo = Path.Combine(seasonDir, "season.nfo");
-        File.WriteAllText(seasonNfo, "<season/>");
-        File.WriteAllText(Path.Combine(ShowsRoot, PioneerDir, "tvshow.nfo"), "<tvshow>rewritten by jellyfin</tvshow>");
+        await File.WriteAllTextAsync(seasonNfo, "<season/>");
+        await File.WriteAllTextAsync(Path.Combine(ShowsRoot, PioneerDir, "tvshow.nfo"), "<tvshow>rewritten by jellyfin</tvshow>");
         _scans.Reported.Clear();
 
         var report = await _sync.RunAsync(CancellationToken.None);
@@ -461,13 +462,13 @@ public sealed class SyncServiceTests : IDisposable
     {
         Offer(Bunny());
         await _sync.RunAsync(CancellationToken.None);
-        File.WriteAllText(BunnyNfo, "<movie>jellyfin</movie>");
+        await File.WriteAllTextAsync(BunnyNfo, "<movie>jellyfin</movie>");
 
         Offer(Bunny() with { Overview = "A new plot" });
         var report = await _sync.RunAsync(CancellationToken.None);
 
         report.Written.ShouldBe(1);
-        File.ReadAllText(BunnyNfo).ShouldContain("A new plot", Case.Sensitive);
+        (await File.ReadAllTextAsync(BunnyNfo)).ShouldContain("A new plot", Case.Sensitive);
     }
 
     [Fact]
@@ -476,7 +477,7 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Pioneer(1, 1));
         await _sync.RunAsync(CancellationToken.None);
         var series = Path.Combine(ShowsRoot, PioneerDir);
-        File.WriteAllText(Path.Combine(Directory.GetDirectories(series).Single(), "season.nfo"), "<season/>");
+        await File.WriteAllTextAsync(Path.Combine(Directory.GetDirectories(series).Single(), "season.nfo"), "<season/>");
 
         Offer();
         await _sync.RunAsync(CancellationToken.None);
@@ -490,7 +491,7 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Pioneer(1, 1), Bunny());
         await _sync.RunAsync(CancellationToken.None);
         var seasonNfo = Path.Combine(Directory.GetDirectories(Path.Combine(ShowsRoot, PioneerDir)).Single(), "season.nfo");
-        File.WriteAllText(seasonNfo, "<season/>");
+        await File.WriteAllTextAsync(seasonNfo, "<season/>");
         File.Delete(Path.Combine(DataDir, "placeholder-ledger.json"));
         _scans.Reported.Clear();
 
@@ -534,7 +535,7 @@ public sealed class SyncServiceTests : IDisposable
         var owner = _tmp.Sub("media", "Movies");
         Directory.CreateDirectory(Path.Combine(owner, "Owned (2001)"));
         var ownerNfo = Path.Combine(owner, "Owned (2001)", "Owned (2001).nfo");
-        File.WriteAllText(ownerNfo, "<movie/>");
+        await File.WriteAllTextAsync(ownerNfo, "<movie/>");
         _library.Locations.Add(owner);
         _config.Settings.MoviesPlaceholderPath = owner;
         Offer(Bunny());
@@ -563,7 +564,7 @@ public sealed class SyncServiceTests : IDisposable
     {
         Directory.CreateDirectory(MoviesRoot);
         var foreign = Path.Combine(MoviesRoot, "someone else.nfo");
-        File.WriteAllText(foreign, "x");
+        await File.WriteAllTextAsync(foreign, "x");
         Offer(Bunny());
 
         var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
@@ -697,7 +698,7 @@ public sealed class SyncServiceTests : IDisposable
 
         _sync.TryStartBackground().ShouldBeTrue();
         await WaitUntil(() => !_sync.IsRunning && _sync.LastError is not null);
-        _sync.LastError.ShouldContain("RelayBaseOverride", Case.Sensitive);
+        _sync.LastError.ShouldNotBeNull().ShouldContain("RelayBaseOverride", Case.Sensitive);
 
         _config.Settings.RelayBaseOverride = null;
         await _sync.RunAsync(CancellationToken.None);

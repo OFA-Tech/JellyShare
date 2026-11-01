@@ -1,3 +1,4 @@
+using System.Xml;
 using System.Xml.Serialization;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Domain.Models.Configuration;
@@ -254,7 +255,7 @@ public sealed class PluginConfigurationTests
         using var writer = new StringWriter();
         serializer.Serialize(writer, cfg);
         var xml = writer.ToString();
-        using var reader = new StringReader(xml);
+        using var reader = XmlReader.Create(new StringReader(xml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
         copy = (PluginConfiguration)serializer.Deserialize(reader)!;
         return xml;
     }

@@ -31,7 +31,7 @@ public sealed class PlaybackInfoTargetCheckTests
     {
         var warning = PlaybackInfoFilter.TargetWarning(new[] { Action("Items/{itemId}/PlaybackInfoV2", "itemId", "enableDirectStream", "enableDirectPlay") });
 
-        warning.ShouldContain("PlaybackInfo", Case.Sensitive);
+        warning.ShouldNotBeNull().ShouldContain("PlaybackInfo", Case.Sensitive);
     }
 
     [Fact]
@@ -39,6 +39,6 @@ public sealed class PlaybackInfoTargetCheckTests
     {
         var warning = PlaybackInfoFilter.TargetWarning(new[] { Action("Items/{itemId}/PlaybackInfo", "id", "directStream", "directPlay") });
 
-        warning.ShouldContain("enableDirectStream", Case.Sensitive);
+        warning.ShouldNotBeNull().ShouldContain("enableDirectStream", Case.Sensitive);
     }
 }

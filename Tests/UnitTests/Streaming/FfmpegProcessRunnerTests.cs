@@ -42,12 +42,12 @@ public sealed class FfmpegProcessRunnerTests
         await output.FirstWrite.Task.WaitAsync(TimeSpan.FromSeconds(10));
         var pid = runner.LastProcessId;
         var clock = Stopwatch.StartNew();
-        cts.Cancel();
+        await cts.CancelAsync();
         await Should.ThrowAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
 
         (clock.Elapsed < TimeSpan.FromSeconds(5)).ShouldBeTrue();
         pid.ShouldNotBeNull();
-        Should.Throw<ArgumentException>(() => Process.GetProcessById(pid!.Value));
+        Should.Throw<ArgumentException>(() => Process.GetProcessById(pid.Value));
     }
 
     [Fact]

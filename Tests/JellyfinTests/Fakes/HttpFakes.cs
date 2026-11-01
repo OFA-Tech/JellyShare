@@ -2,7 +2,7 @@
 namespace JellyShare.JellyfinTests.Fakes;
 
 /// <summary>Request lifetime that cancels <c>RequestAborted</c> on <c>Abort()</c>, as Kestrel does.</summary>
-internal sealed class RecordingLifetime : Microsoft.AspNetCore.Http.Features.IHttpRequestLifetimeFeature
+internal sealed class RecordingLifetime : Microsoft.AspNetCore.Http.Features.IHttpRequestLifetimeFeature, IDisposable
 {
     private readonly CancellationTokenSource _cts;
 
@@ -21,6 +21,8 @@ internal sealed class RecordingLifetime : Microsoft.AspNetCore.Http.Features.IHt
         Aborted = true;
         _cts.Cancel();
     }
+
+    public void Dispose() => _cts.Dispose();
 }
 
 /// <summary>Response feature that records OnCompleted callbacks so tests can finish a response.</summary>

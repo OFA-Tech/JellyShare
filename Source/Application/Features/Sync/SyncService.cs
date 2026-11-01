@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using JellyShare.Application.Features.Placeholders;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Exceptions;
@@ -21,6 +22,7 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.Application.Features.Sync;
 
 /// <summary>Pulls peer catalogs, merges them and maintains the placeholder folders.</summary>
+[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "The gate never exposes a wait handle, so it holds nothing to release; disposing it at host shutdown would race a background run.")]
 public sealed class SyncService : ISyncRunner
 {
     /// <summary>A failing peer's last good catalog is used for at most this long.</summary>
@@ -28,6 +30,8 @@ public sealed class SyncService : ISyncRunner
 
     /// <summary>Maximum directories reported for scanning per run.</summary>
     public const int MaxScansPerRun = 200;
+
+    private const string TypeOnlyLogging = "An expected disk or Jellyfin failure: only the exception type is logged, never its text (paths) or stack.";
 
     private readonly ISettingsProvider _config;
     private readonly IPeerClient _client;
@@ -44,14 +48,12 @@ public sealed class SyncService : ISyncRunner
     private readonly ILogger<SyncService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _lastLock = new();
-    private SyncReport? _last;
     private bool _lastLoaded;
     private readonly object _backgroundLock = new();
     private readonly Dictionary<string, int> _retryCursor = new(StringComparer.Ordinal);
     private int _active;
     private bool _queued;
     private Task? _background;
-    private string? _lastError;
     private List<MergedEntry>? _merged;
     private FileStamp _mergedStamp;
     private PlaceholderLedger? _ledger;
@@ -108,12 +110,12 @@ public sealed class SyncService : ISyncRunner
         {
             lock (_lastLock)
             {
-                if (_last is null && !_lastLoaded)
+                if (field is null && !_lastLoaded)
                 {
                     _lastLoaded = true;
                     try
                     {
-                        _last = _reports.Load();
+                        field = _reports.Load();
                     }
                     catch (InvalidOperationException)
                     {
@@ -121,7 +123,7 @@ public sealed class SyncService : ISyncRunner
                     }
                 }
 
-                return _last;
+                return field;
             }
         }
 
@@ -129,7 +131,7 @@ public sealed class SyncService : ISyncRunner
         {
             lock (_lastLock)
             {
-                _last = value;
+                field = value;
                 _lastLoaded = true;
             }
         }
@@ -151,7 +153,15 @@ public sealed class SyncService : ISyncRunner
         {
             lock (_lastLock)
             {
-                return _lastError;
+                return field;
+            }
+        }
+
+        private set
+        {
+            lock (_lastLock)
+            {
+                field = value;
             }
         }
     }
@@ -185,13 +195,14 @@ public sealed class SyncService : ISyncRunner
         }
         catch (Exception ex)
         {
-            _logger.LogError("JellyShare sync failed: {Error}", ex.Message);
+            _logger.LogError(ex, "JellyShare sync failed: {Error}", ex.Message);
         }
     }
 
     /// <summary>Runs one sync. Concurrent calls are serialised (never overlap).</summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The report.</returns>
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
     public async Task<SyncReport> RunAsync(CancellationToken ct)
     {
         Interlocked.Increment(ref _active);
@@ -264,13 +275,7 @@ public sealed class SyncService : ISyncRunner
         }
     }
 
-    private void SetError(string? error)
-    {
-        lock (_lastLock)
-        {
-            _lastError = error;
-        }
-    }
+    private void SetError(string? error) => LastError = error;
 
     private async Task<(int Images, int Scanned, int? Pending)> FetchImagesAsync(IReadOnlyList<ImageJob> jobs, CancellationToken ct)
     {
@@ -473,13 +478,7 @@ public sealed class SyncService : ISyncRunner
             }
 
             contributing[peer.Id] = peer;
-            foreach (var item in catalog.Items)
-            {
-                if (item.Type is "Movie" or "Episode")
-                {
-                    sources.Add((peer.Id, item));
-                }
-            }
+            sources.AddRange(catalog.Items.Where(item => item.Type is "Movie" or "Episode").Select(item => (peer.Id, item)));
         }
 
         var index = MergeIndex.Build(sources);
@@ -620,12 +619,12 @@ public sealed class SyncService : ISyncRunner
     }
 
     private async Task<(PlaceholderWriteResult Write, int Skipped, ImageJob? Images)> ApplyAsync(
-        IReadOnlyList<MergedEntry> entries,
+        List<MergedEntry> entries,
         ISet<string> localKeys,
         IReadOnlyDictionary<string, LocalSeries>? localSeries,
         string root,
         string relay,
-        IReadOnlyDictionary<Guid, RemotePeer> peers,
+        Dictionary<Guid, RemotePeer> peers,
         CancellationToken ct,
         bool targeted = false)
     {
@@ -820,7 +819,7 @@ public sealed class SyncService : ISyncRunner
     /// <summary>Gets how often the merged index file was parsed (test hook).</summary>
     internal int MergedIndexLoads { get; private set; }
 
-    private IReadOnlyList<MergedEntry>? MergedEntries()
+    private List<MergedEntry>? MergedEntries()
     {
         // The full sync keeps what it saved in memory; the file is parsed again only when it changed on disk.
         var stamp = _mergedIndex.Stamp();
@@ -871,6 +870,7 @@ public sealed class SyncService : ISyncRunner
         _pendingScans.Write(Distinct(_pendingScans.Read().Concat(added)));
     }
 
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = TypeOnlyLogging)]
     private (int Scanned, int Pending) ReportScans()
     {
         if (!_pendingScans.Exists())

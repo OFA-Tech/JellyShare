@@ -206,7 +206,7 @@ public sealed class PeerClientTests
         var (client, _) = Create(new FakeHandler(_ => throw new HttpRequestException("refused with " + Token)));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
         result.Ok.ShouldBeFalse();
-        result.Error.ShouldNotContain(Token, Case.Sensitive);
+        result.Error.ShouldNotBeNull().ShouldNotContain(Token, Case.Sensitive);
         result.Error.ShouldStartWith("connection failed", Case.Sensitive);
     }
 
@@ -218,10 +218,10 @@ public sealed class PeerClientTests
         public DroppingStream(string head, string token)
         {
             _head = Encoding.UTF8.GetBytes(head);
-            Token = token;
+            SecretInError = token;
         }
 
-        public string Token { get; }
+        public string SecretInError { get; }
 
         public override bool CanRead => true;
 
@@ -241,7 +241,7 @@ public sealed class PeerClientTests
         {
             if (_pos >= _head.Length)
             {
-                throw new HttpIOException(HttpRequestError.ResponseEnded, "The response ended prematurely " + Token);
+                throw new HttpIOException(HttpRequestError.ResponseEnded, "The response ended prematurely " + SecretInError);
             }
 
             var n = Math.Min(count, _head.Length - _pos);
@@ -342,7 +342,7 @@ public sealed class PeerClientTests
         {
             _listener.Start();
             BaseUrl = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
-            _ = Task.Run(LoopAsync);
+            _ = Task.Run(LoopAsync, CancellationToken.None);
         }
 
         public string BaseUrl { get; }
@@ -370,9 +370,10 @@ public sealed class PeerClientTests
                     var stream = tcp.GetStream();
                     var reader = new StreamReader(stream, Encoding.ASCII);
                     var requestLine = await reader.ReadLineAsync() ?? string.Empty;
-                    string? line;
-                    while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync()))
+                    var line = await reader.ReadLineAsync();
+                    while (!string.IsNullOrEmpty(line))
                     {
+                        line = await reader.ReadLineAsync();
                     }
 
                     string response;
@@ -388,7 +389,7 @@ public sealed class PeerClientTests
                     }
 
                     var bytes = Encoding.ASCII.GetBytes(response);
-                    await stream.WriteAsync(bytes);
+                    await stream.WriteAsync(bytes, CancellationToken.None);
                 }
             }
         }
@@ -397,6 +398,7 @@ public sealed class PeerClientTests
         {
             _cts.Cancel();
             _listener.Stop();
+            _cts.Dispose();
         }
     }
 

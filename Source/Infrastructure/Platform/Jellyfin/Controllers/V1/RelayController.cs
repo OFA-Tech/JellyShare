@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
@@ -27,11 +28,13 @@ public class RelayController : ControllerBase
     /// <summary>Default time a committed peer may send no bytes before the response is aborted.</summary>
     public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
 
+    private const string RedactedLogging = "Peer errors are logged as a redacted message only: the exception itself could carry the peer token.";
+
 
     // A request that passed through a reverse proxy on this host would otherwise look like loopback.
     // X-Original-* are what ASP.NET's forwarded-headers middleware leaves after consuming X-Forwarded-*.
     // A proxy that sends none of these cannot be told apart (README, "Security notes").
-    private static readonly string[] ForwardingHeaders =
+    private static readonly string[] _forwardingHeaders =
     {
         "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Real-IP", "Forwarded",
         "Via", "X-Original-For", "X-Original-Host", "X-Original-Proto", "CF-Connecting-IP", "True-Client-IP",
@@ -84,6 +87,7 @@ public class RelayController : ControllerBase
     [HttpGet("play/{key}")]
     [HttpHead("play/{key}")]
     [AllowAnonymous]
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
     public async Task<IActionResult> Play(string key)
     {
         if (!IsLocalRequest(HttpContext))
@@ -186,15 +190,7 @@ public class RelayController : ControllerBase
             return false;
         }
 
-        foreach (var header in ForwardingHeaders)
-        {
-            if (context.Request.Headers.ContainsKey(header))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return !_forwardingHeaders.Any(context.Request.Headers.ContainsKey);
     }
 
     private static void CopyHeaders(HttpResponseMessage from, HttpResponse to, int status)
@@ -233,6 +229,7 @@ public class RelayController : ControllerBase
         return ordered.Where(s => s.Peer.Id == active).Concat(ordered.Where(s => s.Peer.Id != active)).ToList();
     }
 
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = RedactedLogging)]
     private async Task CopyBodyAsync(HttpResponseMessage response, RelaySource source, string key, CancellationToken ct)
     {
         var aborted = HttpContext.RequestAborted;

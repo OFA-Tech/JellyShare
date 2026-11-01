@@ -19,7 +19,7 @@ namespace JellyShare.JellyfinTests.Modules;
 
 public sealed class InfrastructureModuleLoaderTests
 {
-    private static readonly InfrastructureModuleContext Context = new(new JellyShareSettings(), () => throw new InvalidOperationException("not resolved at registration"));
+    private static readonly InfrastructureModuleContext _context = new(new JellyShareSettings(), () => throw new InvalidOperationException("not resolved at registration"));
 
     [Fact]
     public void DefaultLoader_ListsPeersFilesAndMedia_InThatOrder()
@@ -41,7 +41,7 @@ public sealed class InfrastructureModuleLoaderTests
         var loader = new InfrastructureModuleLoader([on, off]);
         var services = new ServiceCollection();
 
-        var loaded = loader.Load(services, Context);
+        var loaded = loader.Load(services, _context);
 
         loaded.ShouldBe(["On"]);
         loader.Loaded.ShouldBe(loaded);
@@ -55,7 +55,7 @@ public sealed class InfrastructureModuleLoaderTests
     {
         var services = new ServiceCollection();
 
-        new InfrastructureModuleLoader().Load(services, Context);
+        new InfrastructureModuleLoader().Load(services, _context);
 
         services.ShouldNotBeEmpty();
     }
@@ -64,7 +64,7 @@ public sealed class InfrastructureModuleLoaderTests
     public void LogLoaded_NamesTheEnabledModules()
     {
         var loader = new InfrastructureModuleLoader([new FakeModule("A", true), new FakeModule("B", true)]);
-        loader.Load(new ServiceCollection(), Context);
+        loader.Load(new ServiceCollection(), _context);
         var logger = new LevelLogger<InfrastructureModuleLoader>();
 
         loader.LogLoaded(logger);
@@ -83,8 +83,8 @@ public sealed class InfrastructureModuleLoaderTests
         var module = (IInfrastructureModule)Activator.CreateInstance(moduleType)!;
         var services = new ServiceCollection();
 
-        module.IsEnabled(Context).ShouldBeTrue();
-        module.Register(services, Context);
+        module.IsEnabled(_context).ShouldBeTrue();
+        module.Register(services, _context);
 
         foreach (var port in ports)
         {

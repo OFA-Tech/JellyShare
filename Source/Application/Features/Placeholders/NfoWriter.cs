@@ -10,7 +10,7 @@ namespace JellyShare.Application.Features.Placeholders;
 /// <summary>Writes Kodi-style NFO files for placeholders. Output is deterministic.</summary>
 public static class NfoWriter
 {
-    private static readonly string[] ItemKinds = ["tmdb", "imdb", "tvdb"];
+    private static readonly string[] _itemKinds = ["tmdb", "imdb", "tvdb"];
 
     /// <summary>Writes the <c>movie.nfo</c> content.</summary>
     /// <param name="item">The movie.</param>
@@ -24,7 +24,7 @@ public static class NfoWriter
             Text(w, "year", item.Year?.ToString(CultureInfo.InvariantCulture));
             Text(w, "plot", item.Overview);
             Text(w, "runtime", Minutes(item.RunTimeTicks));
-            UniqueIds(w, OrderedIds(item.ProviderIds, ItemKinds));
+            UniqueIds(w, OrderedIds(item.ProviderIds, _itemKinds));
             StreamDetails(w, item.Media);
         });
     }
@@ -45,7 +45,7 @@ public static class NfoWriter
             Text(w, "year", item.Year?.ToString(CultureInfo.InvariantCulture));
             Text(w, "plot", item.Overview);
             Text(w, "runtime", Minutes(item.RunTimeTicks));
-            UniqueIds(w, OrderedIds(item.ProviderIds, ItemKinds));
+            UniqueIds(w, OrderedIds(item.ProviderIds, _itemKinds));
             StreamDetails(w, item.Media);
         });
     }
@@ -119,7 +119,7 @@ public static class NfoWriter
         var all = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in ids)
         {
-            var id = validate ? MediaKey.NormalizeId(value) : (string.IsNullOrWhiteSpace(value) ? null : value.Trim());
+            var id = validate ? MediaKey.NormalizeId(value) : TrimmedOrNull(value);
             if (id is not null)
             {
                 all.TryAdd(name.Trim(), id);
@@ -144,6 +144,8 @@ public static class NfoWriter
 
         return result;
     }
+
+    private static string? TrimmedOrNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void UniqueIds(XmlWriter w, List<(string Kind, string Id)> ids)
     {
@@ -220,18 +222,23 @@ public static class NfoWriter
     private static string Clean(string value)
     {
         var sb = new StringBuilder(value.Length);
-        for (var i = 0; i < value.Length; i++)
+        var i = 0;
+        while (i < value.Length)
         {
             var c = value[i];
             if (char.IsHighSurrogate(c) && i + 1 < value.Length && char.IsLowSurrogate(value[i + 1]))
             {
                 sb.Append(c).Append(value[i + 1]);
-                i++;
+                i += 2;
+                continue;
             }
-            else if (XmlConvert.IsXmlChar(c))
+
+            if (XmlConvert.IsXmlChar(c))
             {
                 sb.Append(c);
             }
+
+            i++;
         }
 
         return sb.ToString();

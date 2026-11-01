@@ -5,14 +5,14 @@ namespace JellyShare.Data.Files.Stores;
 /// <summary>Writes files so readers see either the old or the new content, never a partial file.</summary>
 internal static class AtomicFile
 {
-    private static readonly UTF8Encoding Utf8 = new(false);
+    private static readonly UTF8Encoding _utf8 = new(false);
 
     /// <summary>Writes UTF-8 text through a temp file in the same directory, then moves it over the target.</summary>
     /// <param name="path">The target path.</param>
     /// <param name="content">The content.</param>
     /// <param name="beforeCommit">Test hook called with (temp path, target path) before the move.</param>
     public static void WriteAllText(string path, string content, Action<string, string>? beforeCommit = null)
-        => Write(path, temp => File.WriteAllText(temp, content, Utf8), beforeCommit);
+        => Write(path, temp => File.WriteAllText(temp, content, _utf8), beforeCommit);
 
     /// <summary>Copies a stream through a temp file in the same directory, then moves it over the target.</summary>
     /// <param name="path">The target path.</param>
@@ -63,16 +63,11 @@ internal static class AtomicFile
     {
         try
         {
-            if (File.Exists(temp))
-            {
-                File.Delete(temp);
-            }
+            File.Delete(temp);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            // Best effort: a leftover temp file is harmless.
         }
     }
 }

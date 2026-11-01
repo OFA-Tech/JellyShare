@@ -1,3 +1,4 @@
+using System.Xml;
 using System.Xml.Linq;
 using System.Xml.Serialization;
 using JellyShare.Domain.Models.Configuration;
@@ -59,7 +60,7 @@ public sealed class PluginConfigurationXmlTests
     {
         var serializer = new XmlSerializer(typeof(PluginConfiguration));
         PluginConfiguration cfg;
-        using (var reader = new StringReader(Sample))
+        using (var reader = XmlReader.Create(new StringReader(Sample), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null }))
         {
             cfg = (PluginConfiguration)serializer.Deserialize(reader)!;
         }

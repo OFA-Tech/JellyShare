@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using JellyShare.Domain.Interfaces.Storage;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,7 @@ public sealed class PendingScanStore : IPendingScanStore
     public bool Exists() => File.Exists(FilePath);
 
     /// <inheritdoc />
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = "An unreadable list is expected after a crash: only the exception type is logged, never its text (paths) or stack.")]
     public List<string> Read()
     {
         var path = FilePath;

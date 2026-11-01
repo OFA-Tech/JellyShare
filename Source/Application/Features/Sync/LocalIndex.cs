@@ -30,7 +30,7 @@ public sealed class LocalIndex : ILocalIndex
     private const int Missing = 2;
     private const int AssumedPresent = 3;
 
-    private static readonly MediaInfo EmptyMedia = new(null, null, null, null, null, [], []);
+    private static readonly MediaInfo _emptyMedia = new(null, null, null, null, null, [], []);
 
     private readonly ILocalLibrary _library;
     private readonly ISettingsProvider _config;
@@ -106,12 +106,20 @@ public sealed class LocalIndex : ILocalIndex
     /// <inheritdoc />
     public IReadOnlyList<string> LibraryLocations() => _library.GetLocations();
 
+    private LocalLibrarySnapshot ReadLibrary(LibraryScope? scope)
+    {
+        if (scope is null)
+        {
+            return _library.Read();
+        }
+
+        return scope.IsEmpty ? new LocalLibrarySnapshot([], []) : _library.Read(scope);
+    }
+
     private async Task<LocalIndexResult> BuildCoreAsync(IReadOnlySet<string>? onlyKeys, LibraryScope? scope, CancellationToken ct)
     {
         var cfg = _config.Current;
-        var snapshot = scope is null
-            ? _library.Read()
-            : scope.IsEmpty ? new LocalLibrarySnapshot([], []) : _library.Read(scope);
+        var snapshot = ReadLibrary(scope);
 
         var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys)>();
         foreach (var media in snapshot.Media)
@@ -232,7 +240,7 @@ public sealed class LocalIndex : ILocalIndex
             m.EpisodeNumber,
             null,
             null,
-            EmptyMedia,
+            _emptyMedia,
             [],
             default);
 

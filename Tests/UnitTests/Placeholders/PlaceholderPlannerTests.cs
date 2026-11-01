@@ -14,8 +14,8 @@ namespace JellyShare.UnitTests.Placeholders;
 public sealed class PlaceholderPlannerTests
 {
     private const string Relay = "http://127.0.0.1:8096/jellyfin";
-    private static readonly HashSet<string> NoLocal = [];
-    private static readonly Dictionary<string, string> NoExisting = [];
+    private static readonly HashSet<string> _noLocal = [];
+    private static readonly Dictionary<string, string> _noExisting = [];
 
     private static CatalogItem Sintel() =>
         TestItems.Movie("Sintel", tmdb: "45745", imdb: "tt1727587") with { Year = 2010 };
@@ -31,7 +31,7 @@ public sealed class PlaceholderPlannerTests
     [Fact]
     public void Plan_WritesStrmAndNfoForMovie()
     {
-        var diff = PlaceholderPlanner.Plan([Entry(Sintel())], NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan([Entry(Sintel())], _noLocal, _noExisting, Relay);
         var paths = diff.Writes.Select(w => w.RelativePath).ToList();
         paths.ShouldBe(["Sintel (2010) [tmdbid-45745]/Sintel (2010).nfo", "Sintel (2010) [tmdbid-45745]/Sintel (2010).strm"]);
         diff.Writes.Single(w => w.RelativePath.EndsWith(".strm", StringComparison.Ordinal)).Content.ShouldBe("http://127.0.0.1:8096/jellyfin/JellyShare/v1/play/movie%3Atmdb%3A45745");
@@ -43,7 +43,7 @@ public sealed class PlaceholderPlannerTests
     public void Plan_SkipsEntriesPresentLocally()
     {
         var diff = PlaceholderPlanner.Plan(
-            [Entry(Sintel())], new HashSet<string> { "movie:imdb:tt1727587" }, NoExisting, Relay);
+            [Entry(Sintel())], new HashSet<string> { "movie:imdb:tt1727587" }, _noExisting, Relay);
         diff.Writes.ShouldBeEmpty();
         diff.Deletes.ShouldBeEmpty();
         diff.TouchedDirs.ShouldBeEmpty();
@@ -53,7 +53,7 @@ public sealed class PlaceholderPlannerTests
     public void Plan_Episodes_WriteTvShowNfoOncePerSeriesDir()
     {
         var wanted = new[] { Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b")), Entry(Pioneer(2, 1, "c")) };
-        var diff = PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay);
         var paths = diff.Writes.Select(w => w.RelativePath).ToList();
         paths.Count.ShouldBe(7);
         paths.Where(p => p == "Pioneer One [tvdbid-153021]/tvshow.nfo").ShouldHaveSingleItem();
@@ -70,7 +70,7 @@ public sealed class PlaceholderPlannerTests
         {
             ["tvdb:153021"] = new("Owner Name", new Dictionary<string, string> { ["Tvdb"] = "153021", ["Imdb"] = "tt1" }),
         };
-        var diff = PlaceholderPlanner.Plan([Entry(item)], NoLocal, NoExisting, Relay, local);
+        var diff = PlaceholderPlanner.Plan([Entry(item)], _noLocal, _noExisting, Relay, local);
 
         foreach (var w in diff.Writes)
         {
@@ -91,7 +91,7 @@ public sealed class PlaceholderPlannerTests
         {
             ["tmdb:77"] = new("Owner", new Dictionary<string, string> { ["Tmdb"] = "77" }),
         };
-        var diff = PlaceholderPlanner.Plan([Entry(item)], NoLocal, NoExisting, Relay, local);
+        var diff = PlaceholderPlanner.Plan([Entry(item)], _noLocal, _noExisting, Relay, local);
         diff.Writes.ShouldContain(w => w.RelativePath == "Owner/tvshow.nfo");
     }
 
@@ -99,10 +99,10 @@ public sealed class PlaceholderPlannerTests
     public void Plan_SecondRunWithSameInput_WritesNothing()
     {
         var wanted = new[] { Entry(Sintel()), Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b")) };
-        var first = PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay);
+        var first = PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay);
         first.Writes.ShouldNotBeEmpty();
 
-        var second = PlaceholderPlanner.Plan(wanted, NoLocal, Hashed(first), Relay);
+        var second = PlaceholderPlanner.Plan(wanted, _noLocal, Hashed(first), Relay);
         second.Writes.ShouldBeEmpty();
         second.Deletes.ShouldBeEmpty();
         second.TouchedDirs.ShouldBeEmpty();
@@ -111,12 +111,12 @@ public sealed class PlaceholderPlannerTests
     [Fact]
     public void Plan_RewritesFilesWhoseHashDiffers()
     {
-        var first = PlaceholderPlanner.Plan([Entry(Sintel())], NoLocal, NoExisting, Relay);
+        var first = PlaceholderPlanner.Plan([Entry(Sintel())], _noLocal, _noExisting, Relay);
         var existing = Hashed(first);
         var nfo = first.Writes.Single(w => w.RelativePath.EndsWith(".nfo", StringComparison.Ordinal)).RelativePath;
         existing[nfo] = "stale";
 
-        var second = PlaceholderPlanner.Plan([Entry(Sintel())], NoLocal, existing, Relay);
+        var second = PlaceholderPlanner.Plan([Entry(Sintel())], _noLocal, existing, Relay);
         second.Writes.Select(w => w.RelativePath).ShouldBe([nfo]);
     }
 
@@ -124,9 +124,9 @@ public sealed class PlaceholderPlannerTests
     public void Plan_DeletesPlaceholdersNoLongerOffered()
     {
         var wanted = new[] { Entry(Sintel()), Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b")) };
-        var existing = Hashed(PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay));
+        var existing = Hashed(PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay));
 
-        var diff = PlaceholderPlanner.Plan([Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b"))], NoLocal, existing, Relay);
+        var diff = PlaceholderPlanner.Plan([Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b"))], _noLocal, existing, Relay);
         diff.Writes.ShouldBeEmpty();
         diff.Deletes.ShouldBe(["Sintel (2010) [tmdbid-45745]/Sintel (2010).nfo", "Sintel (2010) [tmdbid-45745]/Sintel (2010).strm"]);
         diff.TouchedDirs.ShouldBe(["Sintel (2010) [tmdbid-45745]"]);
@@ -136,14 +136,14 @@ public sealed class PlaceholderPlannerTests
     public void Plan_DeletesTvShowNfoOnlyWhenNoEpisodeRemains()
     {
         var wanted = new[] { Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b")) };
-        var existing = Hashed(PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay));
+        var existing = Hashed(PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay));
         const string tvshow = "Pioneer One [tvdbid-153021]/tvshow.nfo";
 
-        var partial = PlaceholderPlanner.Plan([Entry(Pioneer(1, 1, "a"))], NoLocal, existing, Relay);
+        var partial = PlaceholderPlanner.Plan([Entry(Pioneer(1, 1, "a"))], _noLocal, existing, Relay);
         partial.Deletes.ShouldNotContain(tvshow);
         partial.Deletes.Count.ShouldBe(2);
 
-        var none = PlaceholderPlanner.Plan([], NoLocal, existing, Relay);
+        var none = PlaceholderPlanner.Plan([], _noLocal, existing, Relay);
         none.Deletes.ShouldContain(tvshow);
         none.Deletes.Count.ShouldBe(5);
     }
@@ -158,7 +158,7 @@ public sealed class PlaceholderPlannerTests
             ["Sintel (2010) [tmdbid-45745]/folder.png"] = "x",
             ["Pioneer One [tvdbid-153021]/Season 01/Pioneer One S01E01-thumb.jpg"] = "x",
         };
-        var diff = PlaceholderPlanner.Plan([], NoLocal, existing, Relay);
+        var diff = PlaceholderPlanner.Plan([], _noLocal, existing, Relay);
         diff.Deletes.ShouldBeEmpty();
         diff.TouchedDirs.ShouldBeEmpty();
     }
@@ -166,7 +166,7 @@ public sealed class PlaceholderPlannerTests
     [Fact]
     public void Plan_LocalKeyAppearing_DeletesExistingPlaceholder()
     {
-        var existing = Hashed(PlaceholderPlanner.Plan([Entry(Sintel())], NoLocal, NoExisting, Relay));
+        var existing = Hashed(PlaceholderPlanner.Plan([Entry(Sintel())], _noLocal, _noExisting, Relay));
         var diff = PlaceholderPlanner.Plan(
             [Entry(Sintel())], new HashSet<string> { "movie:tmdb:45745" }, existing, Relay);
         diff.Deletes.Count.ShouldBe(2);
@@ -204,7 +204,7 @@ public sealed class PlaceholderPlannerTests
             "ep:tvdb:../..:s1e1", ["ep:tvdb:../..:s1e1"], [(TestItems.PeerA, episode with { SeriesProviderIds = new() { ["Tvdb"] = "../../x", ["Imdb"] = "a/b" } })]);
 
         var wanted = new[] { Entry(movie), handBuiltMovie, handBuiltEpisode, Entry(episode) };
-        var diff = PlaceholderPlanner.Plan(wanted, NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay);
 
         AssertPathsStayInsideRoot(diff);
         diff.Writes.ShouldContain(w => w.RelativePath == "Evil (2020) [imdbid-tt1]/Evil (2020).strm");
@@ -213,7 +213,7 @@ public sealed class PlaceholderPlannerTests
         diff.Skipped.ShouldBe(0);
         MediaKey.For(movieNoValid).ShouldBeEmpty();
 
-        var second = PlaceholderPlanner.Plan(wanted, NoLocal, Hashed(diff), Relay);
+        var second = PlaceholderPlanner.Plan(wanted, _noLocal, Hashed(diff), Relay);
         second.Writes.ShouldBeEmpty();
         AssertPathsStayInsideRoot(second);
     }
@@ -240,7 +240,7 @@ public sealed class PlaceholderPlannerTests
     public void Plan_NamesLikeDotDot_AreSanitizedAndNotSkipped()
     {
         var item = TestItems.Movie("..", tmdb: "1");
-        var diff = PlaceholderPlanner.Plan([Entry(item)], NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan([Entry(item)], _noLocal, _noExisting, Relay);
         AssertPathsStayInsideRoot(diff);
         diff.Skipped.ShouldBe(0);
         diff.Writes.ShouldContain(w => w.RelativePath == "Untitled (2020) [tmdbid-1]/Untitled (2020).strm");
@@ -254,7 +254,7 @@ public sealed class PlaceholderPlannerTests
         var entry = new MergedEntry(
             "ep:tmdb:77:s1e1", ["ep:tmdb:77:s1e1", "ep:tvdb:153021:s1e1"], [(TestItems.PeerA, a), (TestItems.PeerB, b)]);
 
-        var diff = PlaceholderPlanner.Plan([entry], NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan([entry], _noLocal, _noExisting, Relay);
         var show = diff.Writes.Single(w => w.RelativePath == "Pioneer One [tvdbid-153021]/tvshow.nfo");
         var ids = System.Xml.Linq.XDocument.Parse(show.Content).Root!.Elements("uniqueid")
             .ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
@@ -268,8 +268,8 @@ public sealed class PlaceholderPlannerTests
     {
         var a = new[] { Entry(Sintel()), Entry(Pioneer(1, 1, "a")), Entry(Pioneer(1, 2, "b")) };
         var b = a.Reverse().ToArray();
-        var da = PlaceholderPlanner.Plan(a, NoLocal, NoExisting, Relay);
-        var db = PlaceholderPlanner.Plan(b, NoLocal, NoExisting, Relay);
+        var da = PlaceholderPlanner.Plan(a, _noLocal, _noExisting, Relay);
+        var db = PlaceholderPlanner.Plan(b, _noLocal, _noExisting, Relay);
         db.Writes.Select(w => (w.RelativePath, w.Content)).ShouldBe(da.Writes.Select(w => (w.RelativePath, w.Content)));
     }
 
@@ -292,14 +292,14 @@ public sealed class PlaceholderPlannerTests
         index.Entries.Count.ShouldBe(10_000);
 
         var sw = Stopwatch.StartNew();
-        var diff = PlaceholderPlanner.Plan(index.Entries, NoLocal, NoExisting, Relay);
+        var diff = PlaceholderPlanner.Plan(index.Entries, _noLocal, _noExisting, Relay);
         sw.Stop();
 
         (sw.Elapsed < TimeSpan.FromSeconds(2)).ShouldBeTrue($"took {sw.Elapsed}");
         diff.Writes.Count.ShouldBe((10_000 * 2) + 200);
 
         sw.Restart();
-        var again = PlaceholderPlanner.Plan(index.Entries, NoLocal, Hashed(diff), Relay);
+        var again = PlaceholderPlanner.Plan(index.Entries, _noLocal, Hashed(diff), Relay);
         sw.Stop();
         again.Writes.ShouldBeEmpty();
         (sw.Elapsed < TimeSpan.FromSeconds(2)).ShouldBeTrue($"second run took {sw.Elapsed}");

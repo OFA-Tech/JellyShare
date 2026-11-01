@@ -34,6 +34,25 @@ internal sealed class FakeEncoderSettings : IEncoderSettingsSource
     public EncoderSettings? Get() => Settings;
 }
 
+internal static class ProviderFakes
+{
+    public static void InterlockedMax(ref int target, int value)
+    {
+        var current = Volatile.Read(ref target);
+        while (current < value)
+        {
+            var seen = Interlocked.CompareExchange(ref target, value, current);
+            if (seen == current)
+            {
+                return;
+            }
+
+            current = seen;
+        }
+    }
+}
+
+[System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "Test fake: the semaphore never exposes a wait handle, so there is nothing to release.")]
 internal sealed class FakeFfmpegRunner : IFfmpegRunner
 {
     public static readonly byte[] Payload = System.Text.Encoding.ASCII.GetBytes("G-TS-PAYLOAD");
@@ -120,13 +139,7 @@ internal sealed class FakeFfmpegRunner : IFfmpegRunner
         }
     }
 
-    private static void InterlockedMax(ref int target, int value)
-    {
-        int current;
-        while ((current = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, current) != current)
-        {
-        }
-    }
+    private static void InterlockedMax(ref int target, int value) => ProviderFakes.InterlockedMax(ref target, value);
 }
 
 internal sealed class LevelLogger<T> : Microsoft.Extensions.Logging.ILogger<T>

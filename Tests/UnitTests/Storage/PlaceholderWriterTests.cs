@@ -43,11 +43,11 @@ public sealed class PlaceholderWriterTests
                 Movie("strm"),
             ],
             ["../evil.strm", ".jellyshare"]);
-        File.WriteAllText(outside, "keep");
+        await File.WriteAllTextAsync(outside, "keep");
 
         var result = await new PlaceholderWriter().ApplyAsync(diff, root, null, CancellationToken.None);
 
-        File.ReadAllText(outside).ShouldBe("keep");
+        (await File.ReadAllTextAsync(outside)).ShouldBe("keep");
         result.Refused.ShouldBe(9);
         result.Written.ShouldBe(1);
         File.Exists(Path.Combine(root, MovieDir, "Sintel (2010).strm")).ShouldBeTrue();
@@ -82,11 +82,11 @@ public sealed class PlaceholderWriterTests
         ex.InnerException.ShouldBeOfType<IOException>();
 
         seenDuringWrite.ShouldBe(["old"]);
-        File.ReadAllText(target).ShouldBe("old");
+        (await File.ReadAllTextAsync(target)).ShouldBe("old");
         Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).ShouldBeEmpty();
 
         await new PlaceholderWriter().ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None);
-        File.ReadAllText(target).ShouldBe("new content");
+        (await File.ReadAllTextAsync(target)).ShouldBe("new content");
         Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).ShouldBeEmpty();
     }
 
@@ -194,7 +194,7 @@ public sealed class PlaceholderWriterTests
         result.Written.ShouldBe(3);
         result.ImagesWritten.ShouldBe(1);
         calls.OrderBy(c => c.Dir == MovieDir ? 0 : 1).ThenBy(c => c.Type == "Primary" ? 0 : 1).ToList().ShouldBe([(MovieDir, "Primary"), (MovieDir, "Backdrop"), (series, "Primary"), (series, "Backdrop")]);
-        File.ReadAllBytes(Path.Combine(root, series, "poster.jpg")).ShouldBe([1, 2, 3]);
+        (await File.ReadAllBytesAsync(Path.Combine(root, series, "poster.jpg"))).ShouldBe([1, 2, 3]);
         File.Exists(Path.Combine(root, series, "fanart.jpg")).ShouldBeFalse();
 
         calls.Clear();
@@ -216,8 +216,8 @@ public sealed class PlaceholderWriterTests
         using var tmp = new TempDir();
         var root = tmp.Sub("root");
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
-        File.WriteAllText(Path.Combine(root, "Blocked"), "file where a folder should be");
+        await File.WriteAllTextAsync(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
+        await File.WriteAllTextAsync(Path.Combine(root, "Blocked"), "file where a folder should be");
 
         var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
             Diff([Movie("strm"), new FileWrite("Blocked/x.strm", "x")]), root, null, CancellationToken.None));
@@ -271,9 +271,9 @@ public sealed class PlaceholderWriterTests
         var root = tmp.Sub("root");
         var outside = tmp.Sub("outside");
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
+        await File.WriteAllTextAsync(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
         Directory.CreateDirectory(Path.Combine(outside, "Season 01"));
-        File.WriteAllText(Path.Combine(outside, "Season 01", "victim.strm"), "keep");
+        await File.WriteAllTextAsync(Path.Combine(outside, "Season 01", "victim.strm"), "keep");
         if (!TryLink(Path.Combine(root, "Linked"), outside))
         {
             return;
@@ -288,7 +288,7 @@ public sealed class PlaceholderWriterTests
             CancellationToken.None);
 
         result.Refused.ShouldBe(3);
-        File.ReadAllText(Path.Combine(outside, "Season 01", "victim.strm")).ShouldBe("keep");
+        (await File.ReadAllTextAsync(Path.Combine(outside, "Season 01", "victim.strm"))).ShouldBe("keep");
         File.Exists(Path.Combine(outside, "Season 01", "evil.strm")).ShouldBeFalse();
         File.Exists(Path.Combine(outside, "x.nfo")).ShouldBeFalse();
         PlaceholderWriter.ScanExisting(root).Keys.ShouldNotContain("Linked/Season 01/victim.strm");

@@ -9,7 +9,7 @@ namespace JellyShare.Media.Runners;
 public sealed class FfmpegProcessRunner : IFfmpegRunner
 {
     private const int ErrorTailLength = 2048;
-    private static readonly TimeSpan ExitWait = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan _exitWait = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<FfmpegProcessRunner> _logger;
 
@@ -81,6 +81,7 @@ public sealed class FfmpegProcessRunner : IFfmpegRunner
         }
         catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or NotSupportedException)
         {
+            // The process already exited (or cannot be killed); the wait below reports a survivor.
         }
     }
 
@@ -89,7 +90,7 @@ public sealed class FfmpegProcessRunner : IFfmpegRunner
         try
         {
             KillTree(process);
-            if (!process.WaitForExit(ExitWait))
+            if (!process.WaitForExit(_exitWait))
             {
                 _logger.LogWarning("ffmpeg process {Pid} did not exit after kill", process.Id);
             }
@@ -100,24 +101,30 @@ public sealed class FfmpegProcessRunner : IFfmpegRunner
         }
     }
 
+    private static async Task<int> ReadOrEndAsync(StreamReader reader, char[] buffer)
+    {
+        try
+        {
+            return await reader.ReadAsync(buffer).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+        {
+            return 0;
+        }
+    }
+
     private static async Task<string> DrainAsync(StreamReader reader)
     {
         var tail = new System.Text.StringBuilder();
         var buffer = new char[4096];
-        try
+        int read;
+        while ((read = await ReadOrEndAsync(reader, buffer).ConfigureAwait(false)) > 0)
         {
-            int read;
-            while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+            tail.Append(buffer, 0, read);
+            if (tail.Length > ErrorTailLength * 2)
             {
-                tail.Append(buffer, 0, read);
-                if (tail.Length > ErrorTailLength * 2)
-                {
-                    tail.Remove(0, tail.Length - ErrorTailLength);
-                }
+                tail.Remove(0, tail.Length - ErrorTailLength);
             }
-        }
-        catch (Exception ex) when (ex is IOException or ObjectDisposedException)
-        {
         }
 
         return tail.Length > ErrorTailLength ? tail.ToString(tail.Length - ErrorTailLength, ErrorTailLength) : tail.ToString();

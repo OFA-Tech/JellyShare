@@ -8,6 +8,7 @@ using JellyShare.Application.Features.Streaming;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
 using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
@@ -61,7 +62,7 @@ public sealed class AdminControllerTests : IDisposable
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddSingleton<ISettingsProvider>(_config);
         services.AddSingleton<ISettingsStore>(_saver);
-        services.AddSingleton(_tokens);
+        services.AddSingleton<IShareTokenService>(_tokens);
         services.AddSingleton(_limiter);
         services.AddSingleton<IPeerClient>(_peers);
         services.AddSingleton<ISyncRunner>(_sync);
@@ -110,11 +111,11 @@ public sealed class AdminControllerTests : IDisposable
     }
 
     private CreatedShareResponse CreateShare(string name = "bob", int streams = 2, int? bitrate = null, params Guid[] libs)
-        => Value<CreatedShareResponse>(Run(_c.CreateShare(new CreateShareRequest(name, libs.Length == 0 ? [FakeLibraries.MoviesId] : libs.ToList(), streams, bitrate))));
+        => Value<CreatedShareResponse>(Run(_c.CreateShare(new CreateShareRequest(name, libs.Length == 0 ? [FakeLibraries.MoviesId] : libs.ToList(), streams, bitrate), CancellationToken.None)));
 
     private static string Sha256Hex(string s) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(s))).ToLowerInvariant();
 
-    private StatusResponse Status() => Value<StatusResponse>(Run(_c.Status()));
+    private StatusResponse Status() => Value<StatusResponse>(Run(_c.Status(CancellationToken.None)));
 
     private RemotePeer SeedPeer(string name = "alice", int priority = 0, bool enabled = true)
     {
@@ -131,7 +132,7 @@ public sealed class AdminControllerTests : IDisposable
         var type = typeof(AdminController);
         var policy = type.GetCustomAttributes<AuthorizeAttribute>().SingleOrDefault();
         policy.ShouldNotBeNull();
-        policy!.Policy.ShouldBe(Policies.RequiresElevation);
+        policy.Policy.ShouldBe(Policies.RequiresElevation);
         type.GetCustomAttributes<AllowAnonymousAttribute>().ShouldBeEmpty();
 
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
@@ -195,7 +196,7 @@ public sealed class AdminControllerTests : IDisposable
     [InlineData("bob", 2, -5)]
     public void CreateShare_InvalidInput_IsBadRequest_AndStoresNothing(string name, int streams, int? bitrate)
     {
-        var result = Run(_c.CreateShare(new CreateShareRequest(name, [FakeLibraries.MoviesId], streams, bitrate)));
+        var result = Run(_c.CreateShare(new CreateShareRequest(name, [FakeLibraries.MoviesId], streams, bitrate), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.ShouldBeEmpty();
@@ -205,7 +206,7 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void CreateShare_UnknownLibrary_IsBadRequest()
     {
-        var result = Run(_c.CreateShare(new CreateShareRequest("bob", [Guid.NewGuid()], 2, null)));
+        var result = Run(_c.CreateShare(new CreateShareRequest("bob", [Guid.NewGuid()], 2, null), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.ShouldBeEmpty();
@@ -214,7 +215,7 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void CreateShare_NullBody_IsBadRequest()
     {
-        Run(_c.CreateShare(null!)).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.CreateShare(null!, CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -223,7 +224,7 @@ public sealed class AdminControllerTests : IDisposable
         var created = CreateShare();
         var hashBefore = _config.Current.Shares[0].TokenHash;
 
-        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.ShowsId, FakeLibraries.MoviesId], 5, 4_000_000, false)));
+        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.ShowsId, FakeLibraries.MoviesId], 5, 4_000_000, false), CancellationToken.None));
 
         var view = Value<ShareView>(result);
         var share = _config.Current.Shares.Single();
@@ -238,7 +239,7 @@ public sealed class AdminControllerTests : IDisposable
         view.Enabled.ShouldBeFalse();
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldBeNull();
 
-        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.MoviesId], 5, null, true)));
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.MoviesId], 5, null, true), CancellationToken.None));
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
         _config.Current.Shares.Single().MaxBitrate.ShouldBeNull();
     }
@@ -246,7 +247,7 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void UpdateShare_Unknown_IsNotFound()
     {
-        var result = Run(_c.UpdateShare(Guid.NewGuid(), new UpdateShareRequest("x", [], 2, null, true)));
+        var result = Run(_c.UpdateShare(Guid.NewGuid(), new UpdateShareRequest("x", [], 2, null, true), CancellationToken.None));
         result.ShouldBeOfType<NotFoundObjectResult>();
     }
 
@@ -256,7 +257,7 @@ public sealed class AdminControllerTests : IDisposable
         var created = CreateShare();
         var saves = _saver.Saves;
 
-        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("", [FakeLibraries.MoviesId], 2, null, true)));
+        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("", [FakeLibraries.MoviesId], 2, null, true), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.Single().Name.ShouldBe("bob");
@@ -270,7 +271,7 @@ public sealed class AdminControllerTests : IDisposable
         var other = CreateShare("carol");
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
 
-        var result = Run(_c.DeleteShare(created.Id));
+        var result = Run(_c.DeleteShare(created.Id, CancellationToken.None));
 
         result.ShouldBeOfType<NoContentResult>();
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldBeNull();
@@ -282,7 +283,7 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void RevokeShare_Unknown_IsNotFound()
     {
-        Run(_c.DeleteShare(Guid.NewGuid())).ShouldBeOfType<NotFoundObjectResult>();
+        Run(_c.DeleteShare(Guid.NewGuid(), CancellationToken.None)).ShouldBeOfType<NotFoundObjectResult>();
     }
 
     // ---- peers ----
@@ -292,7 +293,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         SeedPeer("alice", 4);
 
-        var result = Run(_c.AddPeer(new AddPeerRequest("  carol ", " http://carol:8096/jellyfin/ ", Token, null)));
+        var result = Run(_c.AddPeer(new AddPeerRequest("  carol ", " http://carol:8096/jellyfin/ ", Token, null), CancellationToken.None));
 
         var view = Value<PeerView>(result);
         view.Name.ShouldBe("carol");
@@ -317,7 +318,7 @@ public sealed class AdminControllerTests : IDisposable
     [InlineData("n", "http://x:8096", "   ")]
     public void AddPeer_Invalid_IsBadRequest(string name, string url, string token)
     {
-        var result = Run(_c.AddPeer(new AddPeerRequest(name, url, token, true)));
+        var result = Run(_c.AddPeer(new AddPeerRequest(name, url, token, true), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Peers.ShouldBeEmpty();
@@ -328,7 +329,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         var peer = SeedPeer();
 
-        var result = Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice2", "http://alice2:8096/", "", false)));
+        var result = Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice2", "http://alice2:8096/", "", false), CancellationToken.None));
 
         var view = Value<PeerView>(result);
         var stored = _config.Current.Peers.Single();
@@ -345,7 +346,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         var peer = SeedPeer();
 
-        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice", peer.BaseUrl, "js1_new", true)));
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice", peer.BaseUrl, "js1_new", true), CancellationToken.None));
 
         _config.Current.Peers.Single().Token.ShouldBe("js1_new");
         _saver.Saved!.Peers.ShouldHaveSingleItem().Token.ShouldBe("js1_new");
@@ -357,7 +358,7 @@ public sealed class AdminControllerTests : IDisposable
         var peer = SeedPeer();
         var listBefore = _config.Current.Peers;
 
-        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("renamed", "http://other:8096", "js1_new", false)));
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("renamed", "http://other:8096", "js1_new", false), CancellationToken.None));
 
         peer.Name.ShouldBe("alice");
         peer.BaseUrl.ShouldBe("http://alice:8096");
@@ -374,7 +375,7 @@ public sealed class AdminControllerTests : IDisposable
         var created = CreateShare();
         var before = _config.Current.Shares.Single();
 
-        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("renamed", [FakeLibraries.ShowsId], 7, 1_000_000, false)));
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("renamed", [FakeLibraries.ShowsId], 7, 1_000_000, false), CancellationToken.None));
 
         before.Name.ShouldBe("bob");
         before.MaxStreams.ShouldBe(2);
@@ -390,7 +391,7 @@ public sealed class AdminControllerTests : IDisposable
         var a = SeedPeer("a", 0);
         var b = SeedPeer("b", 1);
 
-        Run(_c.ReorderPeers(new ReorderPeersRequest([b.Id, a.Id])));
+        Run(_c.ReorderPeers(new ReorderPeersRequest([b.Id, a.Id]), CancellationToken.None));
 
         a.Priority.ShouldBe(0);
         b.Priority.ShouldBe(1);
@@ -402,18 +403,18 @@ public sealed class AdminControllerTests : IDisposable
     [InlineData("js1_bad\u0000token")]
     public void Peer_TokenWithControlCharacters_IsBadRequest(string token)
     {
-        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", token, true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", token, true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Peers.ShouldBeEmpty();
         var peer = SeedPeer();
-        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("n", "http://x:8096", token, true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("n", "http://x:8096", token, true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Peers.Single().Token.ShouldBe(Token);
     }
 
     [Fact]
     public void Peer_TokenLongerThan512_IsBadRequest_512IsFine()
     {
-        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 513), true))).ShouldBeOfType<BadRequestObjectResult>();
-        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 512), true))).ShouldBeOfType<OkObjectResult>();
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 513), true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 512), true), CancellationToken.None)).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
@@ -423,7 +424,7 @@ public sealed class AdminControllerTests : IDisposable
         {
             var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", token), CancellationToken.None));
             response.Ok.ShouldBeFalse();
-            response.Error.ShouldContain("token", Case.Insensitive);
+            response.Error.ShouldNotBeNull().ShouldContain("token", Case.Insensitive);
         }
 
         _peers.PingedUrls.ShouldBeEmpty();
@@ -437,8 +438,8 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare();
 
-        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], streams, null))).ShouldBeOfType<BadRequestObjectResult>();
-        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], streams, null, true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], streams, null), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], streams, null, true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.Single().MaxStreams.ShouldBe(2);
     }
 
@@ -447,17 +448,17 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare();
 
-        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_001))).ShouldBeOfType<BadRequestObjectResult>();
-        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], 2, int.MaxValue, true))).ShouldBeOfType<BadRequestObjectResult>();
-        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_000))).ShouldBeOfType<OkObjectResult>();
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_001), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], 2, int.MaxValue, true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_000), CancellationToken.None)).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
     public void UpdatePeer_Unknown_IsNotFound_InvalidUrl_IsBadRequest()
     {
-        Run(_c.UpdatePeer(Guid.NewGuid(), new UpdatePeerRequest("a", "http://x", null, true))).ShouldBeOfType<NotFoundObjectResult>();
+        Run(_c.UpdatePeer(Guid.NewGuid(), new UpdatePeerRequest("a", "http://x", null, true), CancellationToken.None)).ShouldBeOfType<NotFoundObjectResult>();
         var peer = SeedPeer();
-        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("a", "nope", null, true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("a", "nope", null, true), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -466,11 +467,11 @@ public sealed class AdminControllerTests : IDisposable
         var a = SeedPeer("a", 0);
         var b = SeedPeer("b", 1);
 
-        Run(_c.DeletePeer(a.Id)).ShouldBeOfType<NoContentResult>();
+        Run(_c.DeletePeer(a.Id, CancellationToken.None)).ShouldBeOfType<NoContentResult>();
 
         _config.Current.Peers.ShouldHaveSingleItem().Id.ShouldBe(b.Id);
         _saver.Saved!.Peers.ShouldHaveSingleItem().Id.ShouldBe(b.Id);
-        Run(_c.DeletePeer(a.Id)).ShouldBeOfType<NotFoundObjectResult>();
+        Run(_c.DeletePeer(a.Id, CancellationToken.None)).ShouldBeOfType<NotFoundObjectResult>();
     }
 
     [Fact]
@@ -481,7 +482,7 @@ public sealed class AdminControllerTests : IDisposable
         var c = SeedPeer("c", 2);
         var d = SeedPeer("d", 3);
 
-        var result = Run(_c.ReorderPeers(new ReorderPeersRequest([c.Id, Guid.NewGuid(), a.Id])));
+        var result = Run(_c.ReorderPeers(new ReorderPeersRequest([c.Id, Guid.NewGuid(), a.Id]), CancellationToken.None));
 
         result.ShouldBeOfType<NoContentResult>();
         Status().Peers.Select(p => p.Name).ShouldBe(["c", "a", "b", "d"]);
@@ -529,8 +530,8 @@ public sealed class AdminControllerTests : IDisposable
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, Token), CancellationToken.None));
 
         response.Ok.ShouldBeFalse();
-        response.Error.ShouldContain(expected, Case.Insensitive);
-        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        response.Error.ShouldNotBeNull().ShouldContain(expected, Case.Insensitive);
+        response.Error.ShouldNotContain(Token, Case.Sensitive);
         _peers.Fetches.ShouldBeEmpty();
     }
 
@@ -550,8 +551,8 @@ public sealed class AdminControllerTests : IDisposable
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", Token), CancellationToken.None));
 
         response.Ok.ShouldBeFalse();
-        response.Error.ShouldContain(expected, Case.Insensitive);
-        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        response.Error.ShouldNotBeNull().ShouldContain(expected, Case.Insensitive);
+        response.Error.ShouldNotContain(Token, Case.Sensitive);
         JsonSerializer.Serialize(response).ShouldNotContain(Token, Case.Sensitive);
     }
 
@@ -561,7 +562,7 @@ public sealed class AdminControllerTests : IDisposable
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", "  "), CancellationToken.None));
 
         response.Ok.ShouldBeFalse();
-        response.Error.ShouldContain("token", Case.Insensitive);
+        response.Error.ShouldNotBeNull().ShouldContain("token", Case.Insensitive);
         _peers.PingedUrls.ShouldBeEmpty();
     }
 
@@ -607,8 +608,8 @@ public sealed class AdminControllerTests : IDisposable
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, "", peer.Id), CancellationToken.None));
 
         response.Ok.ShouldBeFalse();
-        response.Error.ShouldContain("token", Case.Insensitive);
-        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        response.Error.ShouldNotBeNull().ShouldContain("token", Case.Insensitive);
+        response.Error.ShouldNotContain(Token, Case.Sensitive);
         _peers.PingedUrls.ShouldBeEmpty();
         _peers.Fetches.ShouldBeEmpty();
     }
@@ -630,7 +631,7 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void Sync_StartsInBackground_Returns202_AndStatusShowsRunning()
     {
-        var result = Run(_c.Sync()).ShouldBeAssignableTo<ObjectResult>();
+        var result = Run(_c.Sync(CancellationToken.None)).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(202);
         result.Value.ShouldBe(new SyncStartResponse(true, false));
@@ -644,7 +645,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         _sync.IsRunning = true;
 
-        var result = Run(_c.Sync()).ShouldBeAssignableTo<ObjectResult>();
+        var result = Run(_c.Sync(CancellationToken.None)).ShouldBeAssignableTo<ObjectResult>();
 
         result.StatusCode.ShouldBe(202);
         result.Value.ShouldBe(new SyncStartResponse(false, true));
@@ -656,7 +657,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         _sync.LastError = "JellyShare: the movie and show placeholder folders must be separate";
 
-        Status().SyncError.ShouldContain("separate", Case.Sensitive);
+        Status().SyncError.ShouldNotBeNull().ShouldContain("separate", Case.Sensitive);
         Status().SyncRunning.ShouldBeFalse();
     }
 
@@ -666,7 +667,7 @@ public sealed class AdminControllerTests : IDisposable
         var peer = SeedPeer();
         _sync.IsRunning = true;
 
-        Run(_c.DeletePeer(peer.Id)).ShouldBeOfType<NoContentResult>();
+        Run(_c.DeletePeer(peer.Id, CancellationToken.None)).ShouldBeOfType<NoContentResult>();
 
         _sync.LastQueueIfRunning.ShouldBe(true);
     }
@@ -842,7 +843,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         var root = _config.Current.MoviesPlaceholderPath;
         Directory.CreateDirectory(root);
-        File.WriteAllText(Path.Combine(root, "owner.mkv"), "x");
+        await File.WriteAllTextAsync(Path.Combine(root, "owner.mkv"), "x", CancellationToken.None);
 
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 

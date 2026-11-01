@@ -12,9 +12,9 @@ public sealed class CatalogBuilderTests
     private const string MoviesRoot = "/data/placeholders/Movies";
     private const string ShowsRoot = "/data/placeholders/Shows";
 
-    private static readonly Guid LibA = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid LibB = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
-    private static readonly DateTime Modified = new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+    private static readonly Guid _libA = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid _libB = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000002");
+    private static readonly DateTime _modified = new(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc);
 
     private static CatalogItem Item(Guid id, string type = "Movie", DateTime? modified = null, string? seriesId = null)
         => new(
@@ -31,7 +31,7 @@ public sealed class CatalogBuilderTests
             null,
             new MediaInfo("mkv", "h264", 1920, 1080, 4000000, Array.Empty<AudioTrack>(), Array.Empty<SubtitleTrack>()),
             new[] { "Primary" },
-            modified ?? Modified,
+            modified ?? _modified,
             seriesId);
 
     private int _materialized;
@@ -48,7 +48,7 @@ public sealed class CatalogBuilderTests
                 return Item(id, type, modified, seriesId);
             })
         {
-            DateModified = modified ?? Modified,
+            DateModified = modified ?? _modified,
         };
 
     private static Guid G(int n) => new(n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
@@ -63,11 +63,11 @@ public sealed class CatalogBuilderTests
     public void Build_ExcludesPlaceholderPaths()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), MoviesRoot + "/B/B.mkv")));
-        source.Items.Add((LibA, Local(G(3), ShowsRoot + "/S/Season 01/S.mkv", "Episode")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), MoviesRoot + "/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(3), ShowsRoot + "/S/Season 01/S.mkv", "Episode")));
 
-        var catalog = Builder(source).Build(Share(LibA));
+        var catalog = Builder(source).Build(Share(_libA));
 
         catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
@@ -76,11 +76,11 @@ public sealed class CatalogBuilderTests
     public void Build_ExcludesStrmFiles()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.STRM")));
-        source.Items.Add((LibA, Local(G(3), "/media/Movies/C/C.strm")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/B/B.STRM")));
+        source.Items.Add((_libA, Local(G(3), "/media/Movies/C/C.strm")));
 
-        var catalog = Builder(source).Build(Share(LibA));
+        var catalog = Builder(source).Build(Share(_libA));
 
         catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
@@ -89,11 +89,11 @@ public sealed class CatalogBuilderTests
     public void Build_ExcludesNullOrEmptyPath()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), null)));
-        source.Items.Add((LibA, Local(G(3), string.Empty)));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), null)));
+        source.Items.Add((_libA, Local(G(3), string.Empty)));
 
-        var catalog = Builder(source).Build(Share(LibA));
+        var catalog = Builder(source).Build(Share(_libA));
 
         catalog.Items.ShouldHaveSingleItem();
     }
@@ -102,10 +102,10 @@ public sealed class CatalogBuilderTests
     public void Build_ExcludesMissingFiles()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/B/B.mkv")));
 
-        var catalog = Builder(source, p => !p.Contains("/B/")).Build(Share(LibA));
+        var catalog = Builder(source, p => !p.Contains("/B/")).Build(Share(_libA));
 
         catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
@@ -114,10 +114,10 @@ public sealed class CatalogBuilderTests
     public void Build_OnlySharedLibraries()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibB, Local(G(2), "/media/Other/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libB, Local(G(2), "/media/Other/B/B.mkv")));
 
-        var catalog = Builder(source).Build(Share(LibA));
+        var catalog = Builder(source).Build(Share(_libA));
 
         catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
@@ -126,7 +126,7 @@ public sealed class CatalogBuilderTests
     public void Build_NoLibraries_ReturnsEmptyCatalog()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
 
         var catalog = Builder(source).Build(Share());
 
@@ -140,9 +140,9 @@ public sealed class CatalogBuilderTests
     {
         var seriesId = G(99).ToString("N");
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: seriesId)));
+        source.Items.Add((_libA, Local(G(1), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: seriesId)));
 
-        var item = Builder(source).Build(Share(LibA)).Items.ShouldHaveSingleItem();
+        var item = Builder(source).Build(Share(_libA)).Items.ShouldHaveSingleItem();
 
         item.Type.ShouldBe("Episode");
         item.SeriesName.ShouldBe("Show");
@@ -154,13 +154,13 @@ public sealed class CatalogBuilderTests
     public void Build_EtagStableForSameInput()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/B/B.mkv")));
 
         var builder = Builder(source);
-        var first = builder.Build(Share(LibA)).Etag;
+        var first = builder.Build(Share(_libA)).Etag;
         source.Items.Reverse();
-        var second = builder.Build(Share(LibA)).Etag;
+        var second = builder.Build(Share(_libA)).Etag;
 
         second.ShouldBe(first);
         first.ShouldMatch("^[0-9a-f]{64}$");
@@ -170,12 +170,12 @@ public sealed class CatalogBuilderTests
     public void Build_EtagChangesWhenItemModified()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        var before = Builder(source).Build(Share(LibA)).Etag;
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        var before = Builder(source).Build(Share(_libA)).Etag;
 
         source.Items.Clear();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv", modified: Modified.AddMinutes(1))));
-        var after = Builder(source).Build(Share(LibA)).Etag;
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv", modified: _modified.AddMinutes(1))));
+        var after = Builder(source).Build(Share(_libA)).Etag;
 
         after.ShouldNotBe(before);
     }
@@ -184,11 +184,11 @@ public sealed class CatalogBuilderTests
     public void Build_EtagIgnoresExcludedItems()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        var before = Builder(source).Build(Share(LibA)).Etag;
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        var before = Builder(source).Build(Share(_libA)).Etag;
 
-        source.Items.Add((LibA, Local(G(2), MoviesRoot + "/B/B.mkv")));
-        var after = Builder(source).Build(Share(LibA)).Etag;
+        source.Items.Add((_libA, Local(G(2), MoviesRoot + "/B/B.mkv")));
+        var after = Builder(source).Build(Share(_libA)).Etag;
 
         after.ShouldBe(before);
     }
@@ -197,9 +197,9 @@ public sealed class CatalogBuilderTests
     public void Build_SerializesToCamelCaseWireShape()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
 
-        var json = JsonSerializer.Serialize(Builder(source).Build(Share(LibA)));
+        var json = JsonSerializer.Serialize(Builder(source).Build(Share(_libA)));
 
         json.ShouldContain("\"protocolVersion\":\"1.0\"", Case.Sensitive);
         json.ShouldContain("\"serverName\":\"Alice\"", Case.Sensitive);
@@ -212,11 +212,11 @@ public sealed class CatalogBuilderTests
     {
         var seriesId = G(99);
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: seriesId.ToString("N"))));
-        source.Items.Add((LibB, Local(G(3), "/media/Other/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: seriesId.ToString("N"))));
+        source.Items.Add((_libB, Local(G(3), "/media/Other/B/B.mkv")));
         var builder = Builder(source);
-        var share = Share(LibA);
+        var share = Share(_libA);
 
         builder.IsExposed(share, G(1)).ShouldBeTrue();
         builder.IsExposed(share, G(2)).ShouldBeTrue();
@@ -229,13 +229,13 @@ public sealed class CatalogBuilderTests
     public void Build_DoesNotMaterializeExcludedItems()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), MoviesRoot + "/B/B.mkv")));
-        source.Items.Add((LibA, Local(G(3), "/media/Movies/C/C.strm")));
-        source.Items.Add((LibA, Local(G(4), null)));
-        source.Items.Add((LibA, Local(G(5), "/media/Movies/missing/M.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), MoviesRoot + "/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(3), "/media/Movies/C/C.strm")));
+        source.Items.Add((_libA, Local(G(4), null)));
+        source.Items.Add((_libA, Local(G(5), "/media/Movies/missing/M.mkv")));
 
-        var catalog = Builder(source, p => !p.Contains("/missing/")).Build(Share(LibA));
+        var catalog = Builder(source, p => !p.Contains("/missing/")).Build(Share(_libA));
 
         catalog.Items.ShouldHaveSingleItem();
         _materialized.ShouldBe(1);
@@ -245,13 +245,13 @@ public sealed class CatalogBuilderTests
     public void IsExposed_NeverMaterializesCatalogItems()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
 
         var builder = Builder(source);
 
-        builder.IsExposed(Share(LibA), G(1)).ShouldBeTrue();
-        builder.IsExposed(Share(LibA), G(99)).ShouldBeTrue();
+        builder.IsExposed(Share(_libA), G(1)).ShouldBeTrue();
+        builder.IsExposed(Share(_libA), G(99)).ShouldBeTrue();
         _materialized.ShouldBe(0);
     }
 
@@ -261,24 +261,24 @@ public sealed class CatalogBuilderTests
         var onlyPlaceholders = G(90);
         var otherLibrary = G(91);
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), ShowsRoot + "/P/Season 01/P.strm", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
-        source.Items.Add((LibA, Local(G(2), ShowsRoot + "/P/Season 01/P2.mkv", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
-        source.Items.Add((LibB, Local(G(3), "/media/Other/S/Season 01/S.mkv", "Episode", seriesId: otherLibrary.ToString("N"))));
+        source.Items.Add((_libA, Local(G(1), ShowsRoot + "/P/Season 01/P.strm", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
+        source.Items.Add((_libA, Local(G(2), ShowsRoot + "/P/Season 01/P2.mkv", "Episode", seriesId: onlyPlaceholders.ToString("N"))));
+        source.Items.Add((_libB, Local(G(3), "/media/Other/S/Season 01/S.mkv", "Episode", seriesId: otherLibrary.ToString("N"))));
         var builder = Builder(source);
 
-        builder.IsExposed(Share(LibA), onlyPlaceholders).ShouldBeFalse();
-        builder.IsExposed(Share(LibA), otherLibrary).ShouldBeFalse();
+        builder.IsExposed(Share(_libA), onlyPlaceholders).ShouldBeFalse();
+        builder.IsExposed(Share(_libA), otherLibrary).ShouldBeFalse();
     }
 
     [Fact]
     public void IsExposed_ChecksOnlyTheRequestedItem_NeverEnumeratesTheLibrary()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/missing/B.mkv")));
-        source.Items.Add((LibA, Local(G(3), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/missing/B.mkv")));
+        source.Items.Add((_libA, Local(G(3), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
         var builder = Builder(source, p => !p.Contains("/missing/"));
-        var share = Share(LibA);
+        var share = Share(_libA);
 
         builder.IsExposed(share, G(1)).ShouldBeTrue();
         builder.IsExposed(share, G(2)).ShouldBeFalse();
@@ -292,7 +292,7 @@ public sealed class CatalogBuilderTests
     public void IsExposed_NoLibraries_IsFalseWithoutQuery()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
 
         Builder(source).IsExposed(Share(), G(1)).ShouldBeFalse();
         source.CandidateCalls.ShouldBe(0);
@@ -302,11 +302,11 @@ public sealed class CatalogBuilderTests
     public void Plan_EtagIsComputedWithoutMaterializingItems()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/B/B.mkv")));
         var builder = Builder(source);
 
-        var plan = builder.Plan(Share(LibA));
+        var plan = builder.Plan(Share(_libA));
 
         plan.Etag.ShouldMatch("^[0-9a-f]{64}$");
         _materialized.ShouldBe(0);
@@ -318,12 +318,12 @@ public sealed class CatalogBuilderTests
     public void Build_SameEtagTwice_IsServedFromCache()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/B/B.mkv")));
         var builder = Builder(source);
 
-        var first = builder.Build(Share(LibA));
-        var second = builder.Build(Share(LibA));
+        var first = builder.Build(Share(_libA));
+        var second = builder.Build(Share(_libA));
 
         second.ShouldBeSameAs(first);
         _materialized.ShouldBe(2);
@@ -333,15 +333,15 @@ public sealed class CatalogBuilderTests
     public void Build_ChangedItem_RebuildsInsteadOfServingCache()
     {
         var source = new FakeSource();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv")));
         var builder = Builder(source);
-        var first = builder.Build(Share(LibA));
+        var first = builder.Build(Share(_libA));
 
         source.Items.Clear();
-        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv", modified: Modified.AddMinutes(1))));
-        var second = builder.Build(Share(LibA));
+        source.Items.Add((_libA, Local(G(1), "/media/Movies/A/A.mkv", modified: _modified.AddMinutes(1))));
+        var second = builder.Build(Share(_libA));
 
         second.Etag.ShouldNotBe(first.Etag);
-        second.Items.ShouldHaveSingleItem().DateModified.ShouldBe(Modified.AddMinutes(1));
+        second.Items.ShouldHaveSingleItem().DateModified.ShouldBe(_modified.AddMinutes(1));
     }
 }

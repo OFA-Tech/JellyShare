@@ -2,6 +2,7 @@ using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Application.Features.Sync;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Peers;
@@ -27,7 +28,7 @@ public static class ApplicationSetup
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddDispatcherSetup();
-        services.AddSingleton<ShareTokenService>();
+        services.AddSingleton<IShareTokenService, ShareTokenService>();
         services.AddSingleton(new StreamLimiter(TimeProvider.System));
         services.AddSingleton(sp => new CappedStreamService(
             sp.GetRequiredService<IEncoderSettingsSource>(),

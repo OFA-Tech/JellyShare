@@ -1,8 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Setup;
 using JellyShare.Application.Features.Streaming;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Platform;
@@ -19,11 +21,12 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.JellyfinTests.Controllers;
 
 /// <summary>Runs the controller in a real Kestrel host to prove the routes, Range handling and HEAD.</summary>
+[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "xUnit disposes the host and client through IAsyncLifetime.DisposeAsync.")]
 public sealed class StreamEndpointHttpTests : IAsyncLifetime
 {
-    private static readonly Guid Lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid MovieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
-    private static readonly Guid CappedId = Guid.Parse("00000001-0000-0000-0000-000000000002");
+    private static readonly Guid _lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid _movieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid _cappedId = Guid.Parse("00000001-0000-0000-0000-000000000002");
 
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "jellyshare-test-" + Guid.NewGuid().ToString("N"));
     private readonly FakeConfig _config = new();
@@ -36,16 +39,16 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     {
         Directory.CreateDirectory(_tempDir);
         var file = Path.Combine(_tempDir, "a.mkv");
-        File.WriteAllBytes(file, Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray());
+        await File.WriteAllBytesAsync(file, Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray());
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { Lib } });
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { _lib } });
 
         var source = new FakeSource();
-        source.Items.Add((Lib, new LocalItem(MovieId, "Movie", file, null, () => throw new InvalidOperationException())));
-        source.Streams[MovieId] = new StreamInfo("Movie", "Movie", file, 1_000_000);
-        source.Items.Add((Lib, new LocalItem(CappedId, "Movie", file, null, () => throw new InvalidOperationException())));
-        source.Streams[CappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
+        source.Items.Add((_lib, new LocalItem(_movieId, "Movie", file, null, () => throw new InvalidOperationException())));
+        source.Streams[_movieId] = new StreamInfo("Movie", "Movie", file, 1_000_000);
+        source.Items.Add((_lib, new LocalItem(_cappedId, "Movie", file, null, () => throw new InvalidOperationException())));
+        source.Streams[_cappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
         _config.Settings.Shares[0].MaxBitrate = 2_000_000;
         _config.Settings.Shares[0].MaxStreams = 1;
 
@@ -55,7 +58,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         builder.Services.AddControllers().AddApplicationPart(typeof(FederationController).Assembly);
         builder.Services.AddSingleton<IServerIdentity>(new FakeIdentity());
         builder.Services.AddSingleton<ISettingsProvider>(_config);
-        builder.Services.AddSingleton(_tokens);
+        builder.Services.AddSingleton<IShareTokenService>(_tokens);
         builder.Services.AddSingleton(new StreamLimiter(TimeProvider.System));
         builder.Services.AddSingleton<ILocalItemSource>(source);
         builder.Services.AddSingleton(FakeCapped.Create());
@@ -75,9 +78,9 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         Directory.Delete(_tempDir, true);
     }
 
-    private HttpRequestMessage Request(HttpMethod method, string? token, Action<HttpRequestMessage>? tweak = null)
+    private static HttpRequestMessage Request(HttpMethod method, string? token, Action<HttpRequestMessage>? tweak = null)
     {
-        var request = new HttpRequestMessage(method, "/JellyShare/v1/stream/" + MovieId.ToString("N"));
+        var request = new HttpRequestMessage(method, "/JellyShare/v1/stream/" + _movieId.ToString("N"));
         if (token is not null)
         {
             request.Headers.Add("X-JellyShare-Token", token);
@@ -120,7 +123,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     [Fact]
     public async Task Capped_GetWithRange_Returns200TransportStream_WithoutRanges()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + CappedId.ToString("N") + "?start=10");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + _cappedId.ToString("N") + "?start=10");
         request.Headers.Add("X-JellyShare-Token", _token);
         request.Headers.Range = new RangeHeaderValue(100, null);
 
@@ -136,7 +139,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     [Fact]
     public async Task Capped_InvalidStart_Returns400()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + CappedId.ToString("N") + "?start=-3");
+        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + _cappedId.ToString("N") + "?start=-3");
         request.Headers.Add("X-JellyShare-Token", _token);
 
         ((await _client.SendAsync(request)).StatusCode).ShouldBe(HttpStatusCode.BadRequest);

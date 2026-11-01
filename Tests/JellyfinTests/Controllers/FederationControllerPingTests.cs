@@ -36,7 +36,7 @@ public sealed class FederationControllerPingTests
         var result = (await controller.Ping());
 
         result.Value.ShouldNotBeNull();
-        result.Value!.ProtocolVersion.ShouldBe("1.0");
+        result.Value.ProtocolVersion.ShouldBe("1.0");
         result.Value.ServerName.ShouldBe("Alice");
     }
 
@@ -56,12 +56,12 @@ public sealed class FederationControllerPingTests
         var type = typeof(FederationController);
         var route = type.GetCustomAttribute<RouteAttribute>();
         route.ShouldNotBeNull();
-        route!.Template.ShouldBe("JellyShare/v1");
+        route.Template.ShouldBe("JellyShare/v1");
 
         var method = type.GetMethod(nameof(FederationController.Ping))!;
         method.GetCustomAttribute<AllowAnonymousAttribute>().ShouldNotBeNull();
         var get = method.GetCustomAttribute<HttpGetAttribute>();
         get.ShouldNotBeNull();
-        get!.Template.ShouldBe("ping");
+        get.Template.ShouldBe("ping");
     }
 }

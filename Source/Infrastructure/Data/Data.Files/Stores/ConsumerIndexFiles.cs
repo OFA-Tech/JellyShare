@@ -14,14 +14,14 @@ public sealed class ConsumerIndexFiles : IConsumerIndex
     /// <summary>The peer state file name (same as <see cref="PeerStateStore"/>).</summary>
     public const string PeerStateFileName = PeerStateStore.FileName;
 
-    private static readonly IReadOnlyDictionary<Guid, PeerState> NoStates = new Dictionary<Guid, PeerState>();
+    private static readonly IReadOnlyDictionary<Guid, PeerState> _noStates = new Dictionary<Guid, PeerState>();
 
     private readonly Func<string> _dataDir;
     private readonly object _lock = new();
     private (DateTime Stamp, long Length) _indexVersion;
     private Dictionary<string, MergedEntry> _byKey = new(StringComparer.Ordinal);
     private (DateTime Stamp, long Length) _stateVersion;
-    private IReadOnlyDictionary<Guid, PeerState> _states = NoStates;
+    private IReadOnlyDictionary<Guid, PeerState> _states = _noStates;
 
     /// <summary>Initializes a new instance of the <see cref="ConsumerIndexFiles"/> class.</summary>
     /// <param name="dataDir">Returns the plugin data folder.</param>

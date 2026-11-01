@@ -7,7 +7,7 @@ namespace JellyShare.Application.Dispatching;
 /// <summary>Resolves the handler of a request and runs it inside the registered pipeline behaviors (template sender).</summary>
 public sealed class Sender : ISender
 {
-    private static readonly ConcurrentDictionary<Type, object> Wrappers = new();
+    private static readonly ConcurrentDictionary<Type, object> _wrappers = new();
 
     private readonly IServiceProvider _serviceProvider;
 
@@ -23,7 +23,7 @@ public sealed class Sender : ISender
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var wrapper = (IRequestHandlerWrapper<TResponse>)Wrappers.GetOrAdd(
+        var wrapper = (IRequestHandlerWrapper<TResponse>)_wrappers.GetOrAdd(
             request.GetType(),
             static (type, responseType) =>
             {

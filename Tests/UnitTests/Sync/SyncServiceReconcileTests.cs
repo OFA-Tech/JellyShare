@@ -143,7 +143,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
         File.Exists(Path.Combine(series, "tvshow.nfo")).ShouldBeTrue();
 
         AddLocalPioneer(1, 1);
-        var key = MediaKey.For(Pioneer(1, 1)).First();
+        var key = MediaKey.For(Pioneer(1, 1))[0];
         var report = await _sync.ReconcileAsync([key], CancellationToken.None);
 
         report.Deleted.ShouldBe(2);
@@ -196,7 +196,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
         AddLocalPioneer(1, 1);
 
-        var report = await _sync.ReconcileAsync([MediaKey.For(Pioneer(1, 1)).First()], CancellationToken.None);
+        var report = await _sync.ReconcileAsync([MediaKey.For(Pioneer(1, 1))[0]], CancellationToken.None);
 
         report.Deleted.ShouldBe(2);
         _library.LastScope!.SeriesIds["tvdb"].ShouldContain("153021");

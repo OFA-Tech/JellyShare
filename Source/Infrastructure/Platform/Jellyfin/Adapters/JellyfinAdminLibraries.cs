@@ -57,7 +57,7 @@ public sealed class JellyfinAdminLibraries : IAdminLibraries
             _monitor.Start,
             () => _libraryManager.AddMediaPath(libraryName, new MediaPathInfo(path)),
             _libraryManager.QueueLibraryScan,
-            work => _ = Task.Run(work),
+            work => _ = Task.Run(work, CancellationToken.None),
             ex => _logger.LogWarning(ex, "JellyShare admin: could not queue the library scan after adding a placeholder folder"));
         return Task.CompletedTask;
     }

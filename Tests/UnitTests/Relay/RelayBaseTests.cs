@@ -37,5 +37,5 @@ public sealed class RelayBaseTests
     [InlineData("not a url")]
     [InlineData("http://127.0.0.1:8096/?x=1")]
     public void RelayBase_OverrideError_NonLoopback_IsClearError(string value)
-        => RelayBase.OverrideError(value).ShouldContain("RelayBaseOverride", Case.Sensitive);
+        => RelayBase.OverrideError(value).ShouldNotBeNull().ShouldContain("RelayBaseOverride", Case.Sensitive);
 }

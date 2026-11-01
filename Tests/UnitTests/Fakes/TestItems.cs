@@ -8,7 +8,7 @@ internal static class TestItems
     public static readonly Guid PeerB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     public static readonly Guid PeerC = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
 
-    private static readonly MediaInfo EmptyMedia = new(null, null, null, null, null, [], []);
+    private static readonly MediaInfo _emptyMedia = new(null, null, null, null, null, [], []);
 
     public static CatalogItem Movie(string name, string? tmdb = null, string? imdb = null, string id = "m1")
     {
@@ -24,7 +24,7 @@ internal static class TestItems
         }
 
         return new CatalogItem(
-            id, "Movie", name, 2020, ids, null, null, null, null, null, null, EmptyMedia, [], DateTime.UnixEpoch);
+            id, "Movie", name, 2020, ids, null, null, null, null, null, null, _emptyMedia, [], DateTime.UnixEpoch);
     }
 
     public static CatalogItem Episode(
@@ -35,5 +35,5 @@ internal static class TestItems
         string id = "e1")
         => new(
             id, "Episode", "Ep", 2020, new Dictionary<string, string>(), series, seriesIds, season, episode,
-            null, null, EmptyMedia, [], DateTime.UnixEpoch, "s1");
+            null, null, _emptyMedia, [], DateTime.UnixEpoch, "s1");
 }

@@ -2,7 +2,6 @@ using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
-using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Relay;
 using JellyShare.Domain.Models.Sync;
 
@@ -40,12 +39,9 @@ public static class SourceSelector
         ArgumentNullException.ThrowIfNull(states);
 
         var byId = new Dictionary<Guid, RemotePeer>();
-        foreach (var peer in peers)
+        foreach (var peer in peers.OfType<RemotePeer>())
         {
-            if (peer is not null)
-            {
-                byId.TryAdd(peer.Id, peer);
-            }
+            byId.TryAdd(peer.Id, peer);
         }
 
         return entry.Sources

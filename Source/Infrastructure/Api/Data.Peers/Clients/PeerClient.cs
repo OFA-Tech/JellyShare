@@ -24,7 +24,7 @@ public sealed class PeerClient : IPeerClient
     /// <summary>The <see cref="HttpClient.Timeout"/> for peer clients; above every per-request timeout used here.</summary>
     public static readonly TimeSpan HttpClientTimeout = TimeSpan.FromSeconds(150);
 
-    private static readonly ProductInfoHeaderValue UserAgent = new(
+    private static readonly ProductInfoHeaderValue _userAgent = new(
         "JellyShare",
         typeof(PeerClient).Assembly.GetName().Version?.ToString() ?? "0");
 
@@ -32,15 +32,15 @@ public sealed class PeerClient : IPeerClient
     private const long MaxPingBytes = 64 * 1024;
     private const int MaxServerNameLength = 100;
 
-    private static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan _pingTimeout = TimeSpan.FromSeconds(15);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
+    private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowReadingFromString,
     };
 
-    private static readonly MediaInfo EmptyMedia = new(null, null, null, null, null, [], []);
+    private static readonly MediaInfo _emptyMedia = new(null, null, null, null, null, [], []);
 
     private readonly Func<HttpClient> _client;
     private readonly TimeSpan _timeout;
@@ -87,11 +87,11 @@ public sealed class PeerClient : IPeerClient
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(_timeout < PingTimeout ? _timeout : PingTimeout);
+        cts.CancelAfter(_timeout < _pingTimeout ? _timeout : _pingTimeout);
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
-            request.Headers.UserAgent.Add(UserAgent);
+            request.Headers.UserAgent.Add(_userAgent);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var response = await _client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
             var code = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
@@ -113,7 +113,7 @@ public sealed class PeerClient : IPeerClient
                 int read;
                 while (limited.Length < MaxPingBytes && (read = await stream.ReadAsync(chunk, cts.Token).ConfigureAwait(false)) > 0)
                 {
-                    limited.Write(chunk, 0, read);
+                    await limited.WriteAsync(chunk.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                 }
 
                 limited.Position = 0;
@@ -208,7 +208,7 @@ public sealed class PeerClient : IPeerClient
             var stream = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
             await using (stream.ConfigureAwait(false))
             {
-                var catalog = await JsonSerializer.DeserializeAsync<CatalogResponse>(stream, JsonOptions, cts.Token).ConfigureAwait(false);
+                var catalog = await JsonSerializer.DeserializeAsync<CatalogResponse>(stream, _jsonOptions, cts.Token).ConfigureAwait(false);
                 if (catalog is null)
                 {
                     return Fail("invalid catalog");
@@ -275,7 +275,7 @@ public sealed class PeerClient : IPeerClient
                         return null;
                     }
 
-                    buffer.Write(chunk, 0, read);
+                    await buffer.WriteAsync(chunk.AsMemory(0, read), cts.Token).ConfigureAwait(false);
                 }
             }
 
@@ -323,7 +323,7 @@ public sealed class PeerClient : IPeerClient
     private static HttpRequestMessage CreateRequest(RemotePeer peer, Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
-        request.Headers.UserAgent.Add(UserAgent);
+        request.Headers.UserAgent.Add(_userAgent);
         request.Headers.TryAddWithoutValidation(ProtocolInfo.TokenHeader, peer.Token ?? string.Empty);
         return request;
     }
@@ -357,7 +357,7 @@ public sealed class PeerClient : IPeerClient
                 Name = i.Name ?? string.Empty,
                 ProviderIds = i.ProviderIds ?? new Dictionary<string, string>(),
                 Media = i.Media is null
-                    ? EmptyMedia
+                    ? _emptyMedia
                     : i.Media with
                     {
                         Audio = (i.Media.Audio ?? []).Where(a => a is not null).ToArray(),

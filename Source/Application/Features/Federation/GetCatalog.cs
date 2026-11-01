@@ -1,4 +1,5 @@
 using JellyShare.Application.Features.Catalog;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Models.Federation;
@@ -16,7 +17,7 @@ public sealed class GetCatalogQueryHandler : IQueryHandler<GetCatalogQuery, Cata
     /// <summary>The error for a missing, unknown or disabled share token (401, body <c>{"error":"unauthorized"}</c>).</summary>
     public static readonly Error Unauthorized = Error.Unauthorized("Federation.Unauthorized", "unauthorized");
 
-    private readonly ShareTokenService _tokens;
+    private readonly IShareTokenService _tokens;
     private readonly ISettingsProvider _config;
     private readonly CatalogBuilder _catalog;
 
@@ -24,7 +25,7 @@ public sealed class GetCatalogQueryHandler : IQueryHandler<GetCatalogQuery, Cata
     /// <param name="tokens">The share token verifier.</param>
     /// <param name="config">The settings (shares).</param>
     /// <param name="catalog">The catalog builder.</param>
-    public GetCatalogQueryHandler(ShareTokenService tokens, ISettingsProvider config, CatalogBuilder catalog)
+    public GetCatalogQueryHandler(IShareTokenService tokens, ISettingsProvider config, CatalogBuilder catalog)
     {
         _tokens = tokens;
         _config = config;

@@ -1,26 +1,23 @@
 using System.Security.Cryptography;
 using System.Text;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Models.Configuration;
 
 namespace JellyShare.Application.Features.Catalog;
 
-/// <summary>Creates share tokens and verifies presented tokens against stored hashes.</summary>
-public class ShareTokenService
+/// <inheritdoc />
+public sealed class ShareTokenService : IShareTokenService
 {
     private const string Prefix = "js1_";
 
-    /// <summary>Creates a new random token and its storage hash.</summary>
-    /// <returns>The plaintext token (shown once) and its lowercase hex SHA-256 hash.</returns>
+    /// <inheritdoc />
     public (string Token, string Hash) Create()
     {
         var token = Prefix + Base64Url(RandomNumberGenerator.GetBytes(32));
         return (token, Hash(token));
     }
 
-    /// <summary>Finds the enabled share whose hash matches the presented token.</summary>
-    /// <param name="presentedToken">The token from the request.</param>
-    /// <param name="shares">The configured shares.</param>
-    /// <returns>The matching share, or <c>null</c>.</returns>
+    /// <inheritdoc />
     public PeerShare? Verify(string? presentedToken, IEnumerable<PeerShare> shares)
     {
         ArgumentNullException.ThrowIfNull(shares);

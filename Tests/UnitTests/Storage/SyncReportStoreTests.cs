@@ -36,7 +36,7 @@ public sealed class SyncReportStoreTests : IDisposable
         var loaded = SyncReportStore.Load(_tmp.Sub("data"));
 
         loaded.ShouldNotBeNull();
-        loaded!.Offered.ShouldBe(report.Offered);
+        loaded.Offered.ShouldBe(report.Offered);
         loaded.Unmatched.ShouldBe(report.Unmatched);
         loaded.SkippedLocal.ShouldBe(report.SkippedLocal);
         loaded.Written.ShouldBe(report.Written);
@@ -86,7 +86,7 @@ public sealed class SyncReportStoreTests : IDisposable
         var restarted = Create();
 
         restarted.LastReport.ShouldNotBeNull();
-        restarted.LastReport!.Offered.ShouldBe(report.Offered);
+        restarted.LastReport.Offered.ShouldBe(report.Offered);
         restarted.LastReport.FinishedUtc.ShouldBe(report.FinishedUtc);
     }
 }

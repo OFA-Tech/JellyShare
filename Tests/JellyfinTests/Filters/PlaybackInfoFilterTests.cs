@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
 using System.Text.Json;
 using JellyShare.Application.Features.Relay;
@@ -25,6 +26,7 @@ namespace JellyShare.JellyfinTests.Filters;
 /// Runs <see cref="PlaybackInfoFilter"/> in a real MVC pipeline against a controller with the same routes and
 /// parameter names as Jellyfin 12.4's <c>MediaInfoController</c> (which copies query values over the body).
 /// </summary>
+[SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "xUnit disposes the host and client through IAsyncLifetime.DisposeAsync.")]
 public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 {
     internal const string RelayUrl = "http://127.0.0.1:8096/JellyShare/v1/play/movie%3Atmdb%3A10378";
@@ -35,7 +37,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     internal static readonly Guid Local = Guid.Parse("22222222-0000-0000-0000-000000000002");
     internal static readonly Guid OtherStrm = Guid.Parse("33333333-0000-0000-0000-000000000003");
 
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
     private readonly FakePlaceholders _placeholders = new();
     private readonly FakeAuthorization _auth = new();
@@ -71,14 +73,14 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var response = await _client.PostAsJsonAsync("/Items/" + item + "/PlaybackInfo" + query, body);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<PlaybackInfoResponse>(Json))!;
+        return (await response.Content.ReadFromJsonAsync<PlaybackInfoResponse>(_json))!;
     }
 
     private async Task<T> Get<T>(string url)
     {
         var response = await _client.GetAsync(url);
         response.EnsureSuccessStatusCode();
-        return (await response.Content.ReadFromJsonAsync<T>(Json))!;
+        return (await response.Content.ReadFromJsonAsync<T>(_json))!;
     }
 
     private static object Body(int? maxStreamingBitrate = null, int? profileMax = null)
@@ -322,9 +324,10 @@ public sealed class FakePlaybackInfoDto
 
 /// <summary>Same routes and parameter names as Jellyfin 12.4's MediaInfoController / item endpoints.</summary>
 [Route("")]
+[SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "MVC actions must be instance methods.")]
 public sealed class FakeMediaInfoController : ControllerBase
 {
-    private static readonly Dictionary<Guid, string> Paths = new()
+    private static readonly Dictionary<Guid, string> _paths = new()
     {
         [PlaybackInfoFilterTests.Placeholder] = PlaybackInfoFilterTests.RelayUrl,
         [PlaybackInfoFilterTests.Local] = PlaybackInfoFilterTests.LocalPath,
@@ -362,7 +365,7 @@ public sealed class FakeMediaInfoController : ControllerBase
 
     [HttpGet("Items")]
     public ActionResult<QueryResult<BaseItemDto>> GetItems()
-        => new QueryResult<BaseItemDto>(Paths.Keys.Order().Select(Dto).ToList());
+        => new QueryResult<BaseItemDto>(_paths.Keys.Order().Select(Dto).ToList());
 
     public static int LazyEnumerations { get; set; }
 
@@ -373,12 +376,12 @@ public sealed class FakeMediaInfoController : ControllerBase
 
     [HttpGet("Items/Latest")]
     public ActionResult<IEnumerable<BaseItemDto>> GetLatest()
-        => Paths.Keys.Order().Select(Dto).ToList();
+        => _paths.Keys.Order().Select(Dto).ToList();
 
     private static IEnumerable<BaseItemDto> Lazy()
     {
         LazyEnumerations++;
-        foreach (var id in Paths.Keys.Order())
+        foreach (var id in _paths.Keys.Order())
         {
             yield return Dto(id);
         }
@@ -391,8 +394,8 @@ public sealed class FakeMediaInfoController : ControllerBase
         => new()
         {
             Id = itemId.ToString("N"),
-            Path = Paths[itemId],
-            Protocol = Paths[itemId].StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
+            Path = _paths[itemId],
+            Protocol = _paths[itemId].StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
             SupportsDirectPlay = directPlay,
             SupportsDirectStream = directStream,
             SupportsTranscoding = true,

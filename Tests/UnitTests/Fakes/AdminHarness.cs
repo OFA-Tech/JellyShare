@@ -3,6 +3,7 @@ using JellyShare.Application.Features.Streaming;
 using JellyShare.Application.Setup;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Messaging;
@@ -32,7 +33,7 @@ internal sealed class AdminHarness : IDisposable
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
         services.AddSingleton<ISettingsProvider>(Config);
         services.AddSingleton<ISettingsStore>(Saver);
-        services.AddSingleton(Tokens);
+        services.AddSingleton<IShareTokenService>(Tokens);
         services.AddSingleton(Limiter);
         services.AddSingleton<IPeerClient>(Peers);
         services.AddSingleton<ISyncRunner>(Sync);

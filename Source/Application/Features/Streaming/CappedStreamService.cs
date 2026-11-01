@@ -29,6 +29,7 @@ public sealed class TranscodeSlot : IDisposable
         if (Interlocked.Exchange(ref _released, 1) == 0)
         {
             _owner.Release(this);
+            _cts.Dispose();
         }
     }
 
@@ -171,20 +172,20 @@ public sealed class CappedStreamService
         }
         catch (System.ComponentModel.Win32Exception ex)
         {
-            _logger.LogWarning("Could not start ffmpeg for a capped stream: {Error}", ex.Message);
+            _logger.LogWarning(ex, "Could not start ffmpeg for a capped stream: {Error}", ex.Message);
             return CappedStreamOutcome.FailedWithoutOutput;
         }
-        catch (OperationCanceledException) when (cancel.IsCancellationRequested)
+        catch (OperationCanceledException ex) when (cancel.IsCancellationRequested)
         {
             if (!requestAborted.IsCancellationRequested)
             {
                 // A newer request for the same session took over: the caller cuts this response so the client does
                 // not take the end of the body for the end of the title.
-                _logger.LogDebug("Capped stream replaced by a newer request for the same title");
+                _logger.LogDebug(ex, "Capped stream replaced by a newer request for the same title");
                 return CappedStreamOutcome.Superseded;
             }
 
-            _logger.LogDebug("Capped stream client disconnected");
+            _logger.LogDebug(ex, "Capped stream client disconnected");
             return CappedStreamOutcome.ClientDisconnected;
         }
         catch (IOException ex)

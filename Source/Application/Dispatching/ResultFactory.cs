@@ -7,9 +7,9 @@ namespace JellyShare.Application.Dispatching;
 /// <summary>Creates a failed <c>Result</c> or <c>Result&lt;T&gt;</c> when only the response type is known (behaviors).</summary>
 internal static class ResultFactory
 {
-    private static readonly ConcurrentDictionary<Type, MethodInfo> FailureMethods = new();
+    private static readonly ConcurrentDictionary<Type, MethodInfo> _failureMethods = new();
 
-    private static readonly MethodInfo GenericFailureMethod = typeof(Result)
+    private static readonly MethodInfo _genericFailureMethod = typeof(Result)
         .GetMethods(BindingFlags.Public | BindingFlags.Static)
         .Single(method => method is { Name: nameof(Result.Failure), IsGenericMethodDefinition: true }
             && method.GetParameters().Length == 1);
@@ -26,9 +26,9 @@ internal static class ResultFactory
             return (TResponse)Result.Failure(error);
         }
 
-        var method = FailureMethods.GetOrAdd(
+        var method = _failureMethods.GetOrAdd(
             typeof(TResponse),
-            static responseType => GenericFailureMethod.MakeGenericMethod(responseType.GetGenericArguments()[0]));
+            static responseType => _genericFailureMethod.MakeGenericMethod(responseType.GetGenericArguments()[0]));
         return (TResponse)method.Invoke(null, [error])!;
     }
 }

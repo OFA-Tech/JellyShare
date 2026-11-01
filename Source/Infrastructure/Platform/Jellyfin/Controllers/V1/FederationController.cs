@@ -1,6 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Federation;
 using JellyShare.Application.Features.Streaming;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Messaging;
@@ -26,14 +28,16 @@ public class FederationController : JellyShareControllerBase
     /// <summary>Name of the request header carrying the share token.</summary>
     public const string TokenHeader = ProtocolInfo.TokenHeader;
 
-    private static readonly string[] ImageTypes = { "Primary", "Backdrop", "Logo", "Thumb" };
-    private static readonly FileExtensionContentTypeProvider ContentTypes = new();
-    private static readonly FileExtensionContentTypeProvider VideoContentTypes = CreateVideoContentTypes();
+    private const string RawHeaders = "The token and If-None-Match headers are read where they are checked; binding them as action parameters would change every action's signature for no behaviour change.";
+
+    private static readonly string[] _imageTypes = { "Primary", "Backdrop", "Logo", "Thumb" };
+    private static readonly FileExtensionContentTypeProvider _contentTypes = new();
+    private static readonly FileExtensionContentTypeProvider _videoContentTypes = CreateVideoContentTypes();
 
     private readonly CatalogBuilder _catalog;
     private readonly ILocalItemSource _source;
     private readonly ISettingsProvider _config;
-    private readonly ShareTokenService _tokens;
+    private readonly IShareTokenService _tokens;
     private readonly StreamLimiter _limiter;
     private readonly CappedStreamService _capped;
     private readonly ILogger<FederationController> _logger;
@@ -52,7 +56,7 @@ public class FederationController : JellyShareControllerBase
         CatalogBuilder catalog,
         ILocalItemSource source,
         ISettingsProvider config,
-        ShareTokenService tokens,
+        IShareTokenService tokens,
         StreamLimiter limiter,
         CappedStreamService capped,
         ILogger<FederationController> logger)
@@ -85,6 +89,7 @@ public class FederationController : JellyShareControllerBase
     [HttpGet("catalog")]
     [AllowAnonymous]
     [Produces("application/json")]
+    [SuppressMessage("Minor Code Smell", "S6932:Use model binding instead of accessing the raw request data", Justification = RawHeaders)]
     public async Task<IActionResult> Catalog(CancellationToken ct = default)
     {
         var query = new GetCatalogQuery(Request.Headers[TokenHeader].ToString(), Request.Headers.IfNoneMatch.ToArray());
@@ -114,7 +119,7 @@ public class FederationController : JellyShareControllerBase
             return Unauthorized401();
         }
 
-        var canonicalType = ImageTypes.FirstOrDefault(t => string.Equals(t, imageType, StringComparison.OrdinalIgnoreCase));
+        var canonicalType = _imageTypes.FirstOrDefault(t => string.Equals(t, imageType, StringComparison.OrdinalIgnoreCase));
         if (canonicalType is null)
         {
             return StatusCode(StatusCodes.Status400BadRequest, new ErrorResponse("unknown image type"));
@@ -131,7 +136,7 @@ public class FederationController : JellyShareControllerBase
             return NotFound();
         }
 
-        if (!ContentTypes.TryGetContentType(path, out var contentType))
+        if (!_contentTypes.TryGetContentType(path, out var contentType))
         {
             contentType = "application/octet-stream";
         }
@@ -229,7 +234,7 @@ public class FederationController : JellyShareControllerBase
             return new CappedStreamResult(_capped, encoder, info.Path, cap!.Value, startSeconds, lease, slot);
         }
 
-        if (!VideoContentTypes.TryGetContentType(info.Path, out var contentType))
+        if (!_videoContentTypes.TryGetContentType(info.Path, out var contentType))
         {
             contentType = "application/octet-stream";
         }
@@ -261,6 +266,7 @@ public class FederationController : JellyShareControllerBase
         }
     }
 
+    [SuppressMessage("Minor Code Smell", "S6932:Use model binding instead of accessing the raw request data", Justification = RawHeaders)]
     private PeerShare? Authenticate()
     {
         var presented = Request.Headers[TokenHeader].ToString();

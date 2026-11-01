@@ -15,6 +15,13 @@ public static class CappedStreamArgs
     /// <summary>Upper bound for <c>start</c> (seconds) when the runtime is unknown: 7 days.</summary>
     public const double MaxStartWithoutRuntime = 7 * 24 * 3600;
 
+    private static readonly string[] _nvencArgs = ["-c:v", "h264_nvenc", "-preset", "p4"];
+    private static readonly string[] _qsvArgs = ["-c:v", "h264_qsv", "-preset", "veryfast"];
+    private static readonly string[] _vaapiArgs = ["-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi"];
+    private static readonly string[] _videoToolboxArgs = ["-c:v", "h264_videotoolbox"];
+    private static readonly string[] _amfArgs = ["-c:v", "h264_amf"];
+    private static readonly string[] _softwareArgs = ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"];
+
     /// <summary>
     /// Whether a file must be transcoded to respect a share's bitrate cap. An unknown (missing or non-positive)
     /// bitrate cannot be shown to be within the cap, so it counts as over.
@@ -56,27 +63,15 @@ public static class CappedStreamArgs
 
         // "file:" keeps a path from being read as an option ("-…") or another protocol ("concat:…", "http:…").
         args.AddRange(new[] { "-i", "file:" + inputPath, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn" });
-        switch (hardware)
+        args.AddRange(hardware switch
         {
-            case HardwareEncoder.Nvenc:
-                args.AddRange(new[] { "-c:v", "h264_nvenc", "-preset", "p4" });
-                break;
-            case HardwareEncoder.Qsv:
-                args.AddRange(new[] { "-c:v", "h264_qsv", "-preset", "veryfast" });
-                break;
-            case HardwareEncoder.Vaapi:
-                args.AddRange(new[] { "-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi" });
-                break;
-            case HardwareEncoder.VideoToolbox:
-                args.AddRange(new[] { "-c:v", "h264_videotoolbox" });
-                break;
-            case HardwareEncoder.Amf:
-                args.AddRange(new[] { "-c:v", "h264_amf" });
-                break;
-            default:
-                args.AddRange(new[] { "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p" });
-                break;
-        }
+            HardwareEncoder.Nvenc => _nvencArgs,
+            HardwareEncoder.Qsv => _qsvArgs,
+            HardwareEncoder.Vaapi => _vaapiArgs,
+            HardwareEncoder.VideoToolbox => _videoToolboxArgs,
+            HardwareEncoder.Amf => _amfArgs,
+            _ => _softwareArgs,
+        });
 
         args.AddRange(new[]
         {

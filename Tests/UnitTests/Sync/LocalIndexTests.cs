@@ -7,7 +7,7 @@ namespace JellyShare.UnitTests.Sync;
 
 public sealed class LocalIndexTests
 {
-    private static readonly Dictionary<string, string> PioneerIds = new() { ["Tvdb"] = "153021" };
+    private static readonly Dictionary<string, string> _pioneerIds = new() { ["Tvdb"] = "153021" };
 
     private static (LocalIndex Index, FakeLocalLibrary Library, ConsumerConfig Config) Create(
         Func<string, bool> exists, TimeSpan? budget = null)
@@ -37,7 +37,7 @@ public sealed class LocalIndexTests
         using var tmp = new TempDir();
         var root = tmp.Sub("Movies");
         Directory.CreateDirectory(Path.Combine(root, "A"));
-        File.WriteAllText(Path.Combine(root, "A", "a.mkv"), "x");
+        await File.WriteAllTextAsync(Path.Combine(root, "A", "a.mkv"), "x");
         var (index, library) = Real();
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "A", "a.mkv"), Tmdb("1"), null, null, null));
         library.Media.Add(new LocalMedia("Movie", Path.Combine(root, "B", "b.mkv"), Tmdb("2"), null, null, null));
@@ -117,7 +117,7 @@ public sealed class LocalIndexTests
     {
         var (index, library, _) = Create(_ => true);
         library.Media.Add(Sintel("/media/Movies/Sintel.mkv"));
-        library.Media.Add(new LocalMedia("Episode", "/media/Shows/p/s01e01.mkv", null, PioneerIds, 1, 1));
+        library.Media.Add(new LocalMedia("Episode", "/media/Shows/p/s01e01.mkv", null, _pioneerIds, 1, 1));
 
         var result = await index.BuildAsync(CancellationToken.None);
 
@@ -149,7 +149,7 @@ public sealed class LocalIndexTests
         library.Media.Add(Sintel("/ph/Movies/Sintel (2010) [tmdbid-45745]/Sintel (2010).mkv"));
         library.Media.Add(Sintel("/elsewhere/Sintel.strm"));
         library.Media.Add(Sintel(""));
-        library.Media.Add(new LocalMedia("Episode", "/ph/Shows/Pioneer One/Season 01/x.strm", null, PioneerIds, 1, 1));
+        library.Media.Add(new LocalMedia("Episode", "/ph/Shows/Pioneer One/Season 01/x.strm", null, _pioneerIds, 1, 1));
 
         var result = await index.BuildAsync(CancellationToken.None);
 

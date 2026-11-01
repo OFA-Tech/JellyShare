@@ -12,9 +12,9 @@ namespace JellyShare.UnitTests.Relay;
 
 public sealed class SourceSelectorTests
 {
-    private static readonly Guid A = TestItems.PeerA;
-    private static readonly Guid B = TestItems.PeerB;
-    private static readonly Guid C = TestItems.PeerC;
+    private static readonly Guid _a = TestItems.PeerA;
+    private static readonly Guid _b = TestItems.PeerB;
+    private static readonly Guid _c = TestItems.PeerC;
 
     private static MergedEntry Entry(params Guid[] peers)
         => new(
@@ -30,67 +30,67 @@ public sealed class SourceSelectorTests
     [Fact]
     public void Order_PrefersLowerPriority()
     {
-        var peers = new[] { Peer(A, "alice", priority: 5), Peer(B, "bob", priority: 1), Peer(C, "carol", priority: 3) };
+        var peers = new[] { Peer(_a, "alice", priority: 5), Peer(_b, "bob", priority: 1), Peer(_c, "carol", priority: 3) };
 
-        var order = SourceSelector.Order(Entry(A, B, C), peers, NoState());
+        var order = SourceSelector.Order(Entry(_a, _b, _c), peers, NoState());
 
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, C, A });
-        order[0].Item.Id.ShouldBe("item-" + B.ToString("N")[..4]);
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _b, _c, _a });
+        order[0].Item.Id.ShouldBe("item-" + _b.ToString("N")[..4]);
     }
 
     [Fact]
     public void Order_SkipsDisabled_SortsFailingLast()
     {
-        var peers = new[] { Peer(A, "alice", priority: 5), Peer(B, "bob", enabled: false), Peer(C, "carol", priority: 1) };
+        var peers = new[] { Peer(_a, "alice", priority: 5), Peer(_b, "bob", enabled: false), Peer(_c, "carol", priority: 1) };
         var states = new Dictionary<Guid, PeerState>
         {
-            [C] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch, LastError = "HTTP 500" },
-            [A] = new() { LastSuccessUtc = DateTimeOffset.UnixEpoch },
+            [_c] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch, LastError = "HTTP 500" },
+            [_a] = new() { LastSuccessUtc = DateTimeOffset.UnixEpoch },
         };
 
-        var order = SourceSelector.Order(Entry(A, B, C), peers, states);
+        var order = SourceSelector.Order(Entry(_a, _b, _c), peers, states);
 
-        // A peer that failed its last sync may be back already: it is still tried, after the healthy ones.
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { A, C });
+        // _a peer that failed its last sync may be back already: it is still tried, after the healthy ones.
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _a, _c });
     }
 
     [Fact]
     public void Order_OnlyFailingPeer_IsStillOffered()
     {
-        var peers = new[] { Peer(A, "alice") };
-        var states = new Dictionary<Guid, PeerState> { [A] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } };
+        var peers = new[] { Peer(_a, "alice") };
+        var states = new Dictionary<Guid, PeerState> { [_a] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } };
 
-        SourceSelector.Order(Entry(A), peers, states).Select(s => s.Peer.Id).ShouldBe(new[] { A });
+        SourceSelector.Order(Entry(_a), peers, states).Select(s => s.Peer.Id).ShouldBe(new[] { _a });
     }
 
     [Fact]
     public void Order_TieBreaksByName()
     {
-        var peers = new[] { Peer(A, "Zed"), Peer(B, "anna"), Peer(C, "Bob") };
+        var peers = new[] { Peer(_a, "Zed"), Peer(_b, "anna"), Peer(_c, "Bob") };
 
-        var order = SourceSelector.Order(Entry(A, B, C), peers, NoState());
+        var order = SourceSelector.Order(Entry(_a, _b, _c), peers, NoState());
 
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, C, A });
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _b, _c, _a });
     }
 
     [Fact]
     public void Order_SameNameAndPriority_TieBreaksByPeerId()
     {
-        var peers = new[] { Peer(C, "same"), Peer(A, "same"), Peer(B, "SAME") };
+        var peers = new[] { Peer(_c, "same"), Peer(_a, "same"), Peer(_b, "SAME") };
 
-        var order = SourceSelector.Order(Entry(C, B, A), peers, NoState());
+        var order = SourceSelector.Order(Entry(_c, _b, _a), peers, NoState());
 
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { A, B, C });
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _a, _b, _c });
     }
 
     [Fact]
     public void Order_DropsPeersMissingFromConfig()
     {
-        var peers = new[] { Peer(B, "bob") };
+        var peers = new[] { Peer(_b, "bob") };
 
-        var order = SourceSelector.Order(Entry(A, B), peers, NoState());
+        var order = SourceSelector.Order(Entry(_a, _b), peers, NoState());
 
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { B });
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _b });
     }
 
     [Fact]
@@ -98,11 +98,11 @@ public sealed class SourceSelectorTests
     {
         using var dir = new TempDir();
         var store = new PeerStateStore(dir.Sub("peer-state.json"));
-        store.Save(new Dictionary<Guid, PeerState> { [A] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } });
-        var peers = new[] { Peer(A, "alice"), Peer(B, "bob", priority: 9) };
+        store.Save(new Dictionary<Guid, PeerState> { [_a] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } });
+        var peers = new[] { Peer(_a, "alice"), Peer(_b, "bob", priority: 9) };
 
-        var order = SourceSelector.Order(Entry(A, B), peers, store);
+        var order = SourceSelector.Order(Entry(_a, _b), peers, store);
 
-        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, A });
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _b, _a });
     }
 }

@@ -16,7 +16,7 @@ public sealed record MergedEntry(
 /// </summary>
 public sealed class MergeIndex
 {
-    private static readonly string[] KindPreference = ["tmdb", "imdb", "tvdb"];
+    private static readonly string[] _kindPreference = ["tmdb", "imdb", "tvdb"];
 
     private readonly Dictionary<string, MergedEntry> _byKey;
 
@@ -129,15 +129,7 @@ public sealed class MergeIndex
     private static bool HasConflictingIds(List<string> keys)
     {
         var kinds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var key in keys)
-        {
-            if (!kinds.Add(MediaKey.KindOf(key)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return keys.Exists(key => !kinds.Add(MediaKey.KindOf(key)));
     }
 
     /// <summary>Finds the entry containing a key.</summary>
@@ -148,14 +140,11 @@ public sealed class MergeIndex
 
     private static string PickCanonical(List<string> sortedKeys)
     {
-        foreach (var kind in KindPreference)
+        foreach (var kind in _kindPreference)
         {
-            foreach (var key in sortedKeys)
+            if (sortedKeys.Find(key => string.Equals(MediaKey.KindOf(key), kind, StringComparison.Ordinal)) is { } match)
             {
-                if (string.Equals(MediaKey.KindOf(key), kind, StringComparison.Ordinal))
-                {
-                    return key;
-                }
+                return match;
             }
         }
 

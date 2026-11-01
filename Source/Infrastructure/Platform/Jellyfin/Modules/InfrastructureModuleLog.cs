@@ -10,12 +10,12 @@ namespace JellyShare.Jellyfin.Modules;
 public sealed class InfrastructureModuleLog : IHostedService
 {
     private readonly InfrastructureModuleLoader _loader;
-    private readonly ILogger<InfrastructureModuleLoader> _logger;
+    private readonly ILogger<InfrastructureModuleLog> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="InfrastructureModuleLog"/> class.</summary>
     /// <param name="loader">The loader that registered the modules.</param>
     /// <param name="logger">The logger.</param>
-    public InfrastructureModuleLog(InfrastructureModuleLoader loader, ILogger<InfrastructureModuleLoader> logger)
+    public InfrastructureModuleLog(InfrastructureModuleLoader loader, ILogger<InfrastructureModuleLog> logger)
     {
         _loader = loader;
         _logger = logger;

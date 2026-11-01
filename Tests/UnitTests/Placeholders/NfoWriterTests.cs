@@ -9,7 +9,7 @@ namespace JellyShare.UnitTests.Placeholders;
 
 public sealed class NfoWriterTests
 {
-    private static readonly MediaInfo Media = new(
+    private static readonly MediaInfo _media = new(
         "mkv", "h264", 1920, 1080, 5_000_000,
         [new AudioTrack("eng", "aac", 2, "English"), new AudioTrack("por", "ac3", 6, null)],
         [new SubtitleTrack("eng", "srt", null)]);
@@ -20,7 +20,7 @@ public sealed class NfoWriterTests
             Year = 2010,
             Overview = "A girl & her <dragon>.",
             RunTimeTicks = 52L * 600_000_000L + 100,
-            Media = Media,
+            Media = _media,
         };
 
     [Fact]

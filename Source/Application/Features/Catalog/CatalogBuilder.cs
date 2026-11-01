@@ -114,12 +114,9 @@ public class CatalogBuilder
         }
 
         var cfg = _config.Current;
-        foreach (var local in _source.GetItems(share.LibraryIds.ToArray()))
+        foreach (var local in _source.GetItems(share.LibraryIds.ToArray()).Where(l => IsServable(l, cfg)))
         {
-            if (IsServable(local, cfg))
-            {
-                yield return local;
-            }
+            yield return local;
         }
     }
 

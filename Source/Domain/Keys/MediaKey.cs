@@ -8,8 +8,8 @@ namespace JellyShare.Domain.Keys;
 /// </summary>
 public static class MediaKey
 {
-    private static readonly string[] MovieKinds = ["tmdb", "imdb"];
-    private static readonly string[] EpisodeKinds = ["tvdb", "tmdb"];
+    private static readonly string[] _movieKinds = ["tmdb", "imdb"];
+    private static readonly string[] _episodeKinds = ["tvdb", "tmdb"];
 
     /// <summary>Returns all keys of an item. An empty list means the item cannot be matched.</summary>
     /// <param name="item">The catalog item.</param>
@@ -21,14 +21,14 @@ public static class MediaKey
         var keys = new List<string>();
         if (string.Equals(item.Type, "Movie", StringComparison.Ordinal))
         {
-            AddKeys(keys, item.ProviderIds, MovieKinds, "movie", string.Empty);
+            AddKeys(keys, item.ProviderIds, _movieKinds, "movie", string.Empty);
         }
         else if (string.Equals(item.Type, "Episode", StringComparison.Ordinal)
             && item.SeasonNumber is { } season
             && item.EpisodeNumber is { } episode)
         {
             var suffix = string.Create(CultureInfo.InvariantCulture, $":s{season}e{episode}");
-            AddKeys(keys, item.SeriesProviderIds, EpisodeKinds, "ep", suffix);
+            AddKeys(keys, item.SeriesProviderIds, _episodeKinds, "ep", suffix);
         }
 
         return keys;
@@ -53,15 +53,7 @@ public static class MediaKey
             return null;
         }
 
-        foreach (var c in normalized)
-        {
-            if (c is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-'))
-            {
-                return null;
-            }
-        }
-
-        return normalized;
+        return normalized.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-') ? normalized : null;
     }
 
     /// <summary>Returns the provider kind (<c>tmdb</c>, <c>imdb</c>, <c>tvdb</c>) of a key.</summary>

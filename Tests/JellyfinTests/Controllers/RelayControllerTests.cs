@@ -24,8 +24,8 @@ public sealed class RelayControllerTests
     private const string TokenA = "js1_ALICE-secret-token";
     private const string TokenB = "js1_BOB-secret-token";
 
-    private static readonly Guid A = TestItems.PeerA;
-    private static readonly Guid B = TestItems.PeerB;
+    private static readonly Guid _a = TestItems.PeerA;
+    private static readonly Guid _b = TestItems.PeerB;
 
     private readonly ConsumerConfig _config = new();
     private readonly FakeConsumerIndex _index = new();
@@ -38,19 +38,19 @@ public sealed class RelayControllerTests
     public RelayControllerTests()
     {
         _sessions = new RelaySessions(_clock);
-        _config.Settings.Peers.Add(new RemotePeer { Id = A, Name = "alice", BaseUrl = "http://alice:8101", Token = TokenA, Priority = 0 });
-        _config.Settings.Peers.Add(new RemotePeer { Id = B, Name = "bob", BaseUrl = "http://bob/jellyfin", Token = TokenB, Priority = 1 });
+        _config.Settings.Peers.Add(new RemotePeer { Id = _a, Name = "alice", BaseUrl = "http://alice:8101", Token = TokenA, Priority = 0 });
+        _config.Settings.Peers.Add(new RemotePeer { Id = _b, Name = "bob", BaseUrl = "http://bob/jellyfin", Token = TokenB, Priority = 1 });
         _index.Entries[Key] = new MergedEntry(
             Key,
             new[] { Key },
             new List<(Guid, CatalogItem)>
             {
-                (B, TestItems.Movie("BBB", tmdb: "10378", id: "bob-item")),
-                (A, TestItems.Movie("BBB", tmdb: "10378", id: "alice-item")),
+                (_b, TestItems.Movie("BBB", tmdb: "10378", id: "bob-item")),
+                (_a, TestItems.Movie("BBB", tmdb: "10378", id: "alice-item")),
             });
     }
 
-    private static HttpResponseMessage Video(byte[] body, HttpStatusCode code = HttpStatusCode.OK, string? contentRange = null, long? total = null)
+    private static HttpResponseMessage Video(byte[] body, HttpStatusCode code = HttpStatusCode.OK, string? contentRange = null)
     {
         var response = new HttpResponseMessage(code) { Content = new ByteArrayContent(body) };
         response.Content.Headers.ContentType = new MediaTypeHeaderValue("video/x-matroska");
@@ -324,7 +324,7 @@ public sealed class RelayControllerTests
     [Fact]
     public async Task Relay_FailingPeerIsTriedLast()
     {
-        _index.States[A] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
+        _index.States[_a] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
         Host("alice", _ => Video(new byte[] { 1 }));
         Host("bob", _ => Video(new byte[] { 2 }));
         var context = Context();
@@ -338,7 +338,7 @@ public sealed class RelayControllerTests
     [Fact]
     public async Task Relay_PeerThatFailedLastSync_IsStillUsedWhenOthersFail()
     {
-        _index.States[A] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
+        _index.States[_a] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
         Host("alice", _ => Video(new byte[] { 1 }));
         Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
         var context = Context();
@@ -392,7 +392,7 @@ public sealed class RelayControllerTests
 
         var play = CreateController(context).Play(Key);
         await upstreamBody.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        abort.Cancel();
+        await abort.CancelAsync();
         await play.WaitAsync(TimeSpan.FromSeconds(5));
 
         upstreamBody.ReadCancelled.ShouldBeTrue();

@@ -11,8 +11,8 @@ namespace JellyShare.UnitTests.Federation;
 
 public sealed class FederationHandlerTests
 {
-    private static readonly Guid Lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
-    private static readonly Guid MovieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid _lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+    private static readonly Guid _movieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
 
     private readonly FakeSource _source = new();
     private readonly FakeConfig _config = new();
@@ -25,11 +25,11 @@ public sealed class FederationHandlerTests
     {
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, Enabled = true, LibraryIds = [Lib] });
-        _source.Items.Add((Lib, new LocalItem(MovieId, "Movie", "/media/A.mkv", null, () =>
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, Enabled = true, LibraryIds = [_lib] });
+        _source.Items.Add((_lib, new LocalItem(_movieId, "Movie", "/media/A.mkv", null, () =>
         {
             _built++;
-            return TestItems.Movie("A", tmdb: "1", id: MovieId.ToString("N"));
+            return TestItems.Movie("A", tmdb: "1", id: _movieId.ToString("N"));
         })
         { DateModified = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc) }));
         _handler = new GetCatalogQueryHandler(_tokens, _config, new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true));

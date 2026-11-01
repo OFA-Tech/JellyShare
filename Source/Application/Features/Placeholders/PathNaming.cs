@@ -18,7 +18,7 @@ public static class PathNaming
 {
     private const int MaxLength = 120;
 
-    private static readonly HashSet<string> Reserved = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly HashSet<string> _reserved = new(StringComparer.OrdinalIgnoreCase)
     {
         "CON", "PRN", "AUX", "NUL",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -68,7 +68,7 @@ public static class PathNaming
 
         var dot = result.IndexOf('.', StringComparison.Ordinal);
         var stem = dot < 0 ? result : result[..dot];
-        return Reserved.Contains(stem.TrimEnd()) ? result + "_" : result;
+        return _reserved.Contains(stem.TrimEnd()) ? result + "_" : result;
     }
 
     /// <summary>Computes the placeholder location of a merged entry.</summary>
@@ -87,9 +87,7 @@ public static class PathNaming
         var name = Safe(item.Name);
         var baseName = item.Year is { } year ? string.Create(CultureInfo.InvariantCulture, $"{name} ({year})") : name;
         var ids = ItemIds(e, item);
-        var tag = ids.TryGetValue("tmdb", out var tmdb) ? "[tmdbid-" + tmdb + "]"
-            : ids.TryGetValue("imdb", out var imdb) ? "[imdbid-" + imdb + "]"
-            : string.Empty;
+        var tag = FirstTag(("tmdb", ids.GetValueOrDefault("tmdb")), ("imdb", ids.GetValueOrDefault("imdb")));
         return new PlaceholderFile(tag.Length == 0 ? baseName : baseName + " " + tag, baseName, "Movie");
     }
 
@@ -146,15 +144,14 @@ public static class PathNaming
     {
         if (local is not null)
         {
-            return local.IdOf("tvdb") is { } ltvdb ? "[tvdbid-" + ltvdb + "]"
-                : local.IdOf("imdb") is { } limdb ? "[imdbid-" + limdb + "]"
-                : string.Empty;
+            return FirstTag(("tvdb", local.IdOf("tvdb")), ("imdb", local.IdOf("imdb")));
         }
 
-        return ids.TryGetValue("tvdb", out var tvdb) ? "[tvdbid-" + tvdb + "]"
-            : ids.TryGetValue("tmdb", out var tmdb) ? "[tmdbid-" + tmdb + "]"
-            : string.Empty;
+        return FirstTag(("tvdb", ids.GetValueOrDefault("tvdb")), ("tmdb", ids.GetValueOrDefault("tmdb")));
     }
+
+    private static string FirstTag(params (string Kind, string? Id)[] candidates)
+        => candidates.FirstOrDefault(c => c.Id is not null) is { Id: { } id } found ? "[" + found.Kind + "id-" + id + "]" : string.Empty;
 
     private static Dictionary<string, string> ItemIds(MergedEntry e, CatalogItem item)
     {

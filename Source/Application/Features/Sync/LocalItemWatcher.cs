@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using JellyShare.Application.Features.Placeholders;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
@@ -76,6 +77,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private readonly SemaphoreSlim _processGate = new(1, 1);
     private readonly SemaphoreSlim _sweepGate = new(1, 1);
     private readonly HashSet<string> _missingKeys = new(StringComparer.Ordinal);
+    [SuppressMessage("Major Bug", "S2930:IDisposables should be disposed", Justification = "Cancelled, never disposed: a timer callback racing with Dispose may still read its token.")]
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, byte> _probing = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<TaskCompletionSource, byte> _passes = new();
@@ -170,7 +172,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         _sweepTimer?.Dispose();
         _processTimer = null;
         _sweepTimer = null;
-        _cts.Cancel();
+        await _cts.CancelAsync().ConfigureAwait(false);
 
         // In-flight passes observe the cancelled token; wait for them, bounded by the host's stop token.
         var running = _passes.Keys.Select(p => p.Task).ToArray();
@@ -180,9 +182,9 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
             {
                 await Task.WhenAll(running).WaitAsync(cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException ex)
             {
-                _logger.LogWarning("JellyShare watcher: stopped before {Count} background passes finished", running.Length);
+                _logger.LogWarning(ex, "JellyShare watcher: stopped before {Count} background passes finished", running.Length);
             }
         }
     }
@@ -595,12 +597,9 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         // so a present local copy next to a leftover placeholder (restart, dropped event) is reconciled away.
         var placeholders = ReadPlaceholderKeys(cfg);
         _missingKeys.Clear();
-        foreach (var candidate in candidates)
+        foreach (var candidate in candidates.Where(c => c.Canonicals.Any(placeholders.Contains)))
         {
-            if (candidate.Canonicals.Any(placeholders.Contains))
-            {
-                _missingKeys.UnionWith(candidate.Keys);
-            }
+            _missingKeys.UnionWith(candidate.Keys);
         }
 
         _candidates = candidates;
@@ -612,16 +611,16 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
     private HashSet<string> ReadPlaceholderKeys(JellyShareSettings cfg)
     {
-        const string Marker = "/JellyShare/v1/play/";
+        const string marker = "/JellyShare/v1/play/";
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var root in new[] { cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath })
         {
             foreach (var content in _placeholders.ReadStrmContents(root))
             {
-                var at = content.LastIndexOf(Marker, StringComparison.Ordinal);
+                var at = content.LastIndexOf(marker, StringComparison.Ordinal);
                 if (at >= 0)
                 {
-                    keys.Add(Uri.UnescapeDataString(content[(at + Marker.Length)..]));
+                    keys.Add(Uri.UnescapeDataString(content[(at + marker.Length)..]));
                 }
             }
         }
@@ -765,10 +764,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                     {
                         await action(token).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (token.IsCancellationRequested)
-                    {
-                    }
-                    catch (Exception ex)
+                    catch (Exception ex) when (ex is not OperationCanceledException || !token.IsCancellationRequested)
                     {
                         _logger.LogWarning(ex, "JellyShare watcher: background pass failed");
                     }

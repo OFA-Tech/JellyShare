@@ -38,6 +38,7 @@ internal sealed class TempDir : IDisposable
         }
         catch (IOException)
         {
+            // Best effort: a leftover temp folder does not fail a test.
         }
     }
 }
@@ -105,10 +106,7 @@ internal sealed class FakePeerClient : IPeerClient
         }
 
         var now = Interlocked.Increment(ref _images);
-        int seen;
-        while ((seen = Volatile.Read(ref _maxImages)) < now && Interlocked.CompareExchange(ref _maxImages, now, seen) != seen)
-        {
-        }
+        ProviderFakes.InterlockedMax(ref _maxImages, now);
 
         try
         {
@@ -144,15 +142,15 @@ internal sealed class FakeLocalLibrary : ILocalLibrary
 
     public int Reads { get; private set; }
 
+    public int ScopedReads { get; private set; }
+
+    public LibraryScope? LastScope { get; private set; }
+
     public LocalLibrarySnapshot Read()
     {
         Reads++;
         return new(Media.ToList(), Series.ToList()) { Locations = Locations.ToList() };
     }
-
-    public int ScopedReads { get; private set; }
-
-    public LibraryScope? LastScope { get; private set; }
 
     public LocalLibrarySnapshot Read(LibraryScope scope)
     {

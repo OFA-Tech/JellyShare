@@ -31,10 +31,9 @@ public sealed class PlaybackInfoTargetCheck : IHostedService
     }
 
     /// <inheritdoc />
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _registration.Dispose();
-        return Task.CompletedTask;
+        await _registration.DisposeAsync().ConfigureAwait(false);
     }
 
     private void Check()

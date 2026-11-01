@@ -11,7 +11,7 @@ public sealed class PeerStateStore : IPeerStateStore
     /// <summary>The file name in the plugin data folder.</summary>
     public const string FileName = "peer-state.json";
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
+    private static readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = false };
 
     private readonly Func<string> _pathOf;
 
@@ -52,7 +52,7 @@ public sealed class PeerStateStore : IPeerStateStore
         try
         {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return JsonSerializer.Deserialize<Dictionary<Guid, PeerState>>(stream, JsonOptions)
+            return JsonSerializer.Deserialize<Dictionary<Guid, PeerState>>(stream, _jsonOptions)
                 ?? throw new PeerStateUnreadableException("JellyShare peer state file is empty: " + path);
         }
         catch (FileNotFoundException)
@@ -68,5 +68,5 @@ public sealed class PeerStateStore : IPeerStateStore
     /// <summary>Saves the states atomically.</summary>
     /// <param name="states">Peer id to state.</param>
     public void Save(IReadOnlyDictionary<Guid, PeerState> states)
-        => AtomicFile.WriteAllText(_pathOf(), JsonSerializer.Serialize(states, JsonOptions));
+        => AtomicFile.WriteAllText(_pathOf(), JsonSerializer.Serialize(states, _jsonOptions));
 }

@@ -87,7 +87,8 @@ public static class PlaybackBitrateRule
     public static int? CatalogBitrate(MergedEntry entry, IReadOnlyList<RemotePeer> peers, IReadOnlyDictionary<Guid, PeerState> states)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        var preferred = SourceSelector.Order(entry, peers, states).FirstOrDefault();
+        var ordered = SourceSelector.Order(entry, peers, states);
+        var preferred = ordered.Count > 0 ? ordered[0] : null;
         return preferred?.Item.Media?.BitRate
             ?? entry.Sources.Select(s => s.Item.Media?.BitRate).Where(b => b is > 0).DefaultIfEmpty().Max();
     }

@@ -1,5 +1,5 @@
 using JellyShare.Application.Features.Admin;
-using JellyShare.Application.Features.Catalog;
+using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Messaging;
@@ -44,7 +44,7 @@ public sealed class CreateShareCommandHandler : ICommandHandler<CreateShareComma
 {
     private readonly ISettingsProvider _config;
     private readonly ISettingsStore _store;
-    private readonly ShareTokenService _tokens;
+    private readonly IShareTokenService _tokens;
     private readonly ILogger<CreateShareCommandHandler> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="CreateShareCommandHandler"/> class.</summary>
@@ -52,7 +52,7 @@ public sealed class CreateShareCommandHandler : ICommandHandler<CreateShareComma
     /// <param name="store">Persists settings changes.</param>
     /// <param name="tokens">Creates the token and its hash.</param>
     /// <param name="logger">The logger.</param>
-    public CreateShareCommandHandler(ISettingsProvider config, ISettingsStore store, ShareTokenService tokens, ILogger<CreateShareCommandHandler> logger)
+    public CreateShareCommandHandler(ISettingsProvider config, ISettingsStore store, IShareTokenService tokens, ILogger<CreateShareCommandHandler> logger)
     {
         _config = config;
         _store = store;

@@ -53,7 +53,7 @@ public static class PlaceholderPlanner
                 continue;
             }
 
-            var strmPath = file.RelativeDir + "/" + file.BaseName + ".strm";
+            var strmPath = string.Join('/', file.RelativeDir, file.BaseName + ".strm");
             if (desired.ContainsKey(strmPath))
             {
                 continue;

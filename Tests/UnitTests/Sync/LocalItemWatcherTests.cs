@@ -1,3 +1,4 @@
+using System.Globalization;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
 using JellyShare.Domain.Exceptions;
@@ -145,7 +146,7 @@ public sealed class LocalItemWatcherTests : IDisposable
 
     private static CatalogItem Sintel() => TestItems.Movie("Sintel", tmdb: "45745", id: "sintel") with { Year = 2010 };
 
-    private static CatalogItem Numbered(int n) => TestItems.Movie("Movie " + n, tmdb: (100000 + n).ToString(), id: "m" + n) with { Year = 2000 };
+    private static CatalogItem Numbered(int n) => TestItems.Movie("Movie " + n, tmdb: (100000 + n).ToString(CultureInfo.InvariantCulture), id: "m" + n) with { Year = 2000 };
 
     private static LocalMedia LocalMovie(string path, string tmdb)
         => new("Movie", path, new Dictionary<string, string> { ["Tmdb"] = tmdb }, null, null, null);
@@ -310,7 +311,7 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         for (var i = 0; i < 501; i++)
         {
-            _events.Raise(new LocalItemEvent(true, LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString())));
+            _events.Raise(new LocalItemEvent(true, LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString(CultureInfo.InvariantCulture))));
         }
 
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
@@ -333,7 +334,7 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         for (var i = 0; i < 500; i++)
         {
-            _events.Raise(new LocalItemEvent(true, LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString())));
+            _events.Raise(new LocalItemEvent(true, LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString(CultureInfo.InvariantCulture))));
         }
 
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
@@ -385,7 +386,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         _missing.Add(SintelPath);
         _scans.FailFor = _ => false;
         var blocker = Path.Combine(MoviesRoot, SintelDir);
-        File.WriteAllText(blocker, "a file where the folder must go");
+        await File.WriteAllTextAsync(blocker, "a file where the folder must go");
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
 
         var failed = await _watcher.ProcessPendingAsync(CancellationToken.None);
@@ -473,7 +474,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         for (var i = 0; i < 501; i++)
         {
             items.Add(Numbered(i));
-            _library.Media.Add(LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString()));
+            _library.Media.Add(LocalMovie("/media/Movies/m" + i + "/m.mkv", (100000 + i).ToString(CultureInfo.InvariantCulture)));
         }
 
         Offer(items.ToArray());
@@ -493,7 +494,7 @@ public sealed class LocalItemWatcherTests : IDisposable
     }
 
     private void OfferNumbered(params int[] tmdb)
-        => Offer(tmdb.Select(t => TestItems.Movie("T" + t, tmdb: t.ToString(), id: "t" + t) with { Year = 2000 }).ToArray());
+        => Offer(tmdb.Select(t => TestItems.Movie("T" + t, tmdb: t.ToString(CultureInfo.InvariantCulture), id: "t" + t) with { Year = 2000 }).ToArray());
 
     [Fact]
     public async Task Sweep_RespectsTimeBudget()
@@ -580,7 +581,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         _library.Locations.Add("/media/Movies");
         for (var i = 1; i <= 5; i++)
         {
-            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString()));
+            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString(CultureInfo.InvariantCulture)));
         }
 
         _library.Media.Add(LocalMovie(gone, "9"));
@@ -624,7 +625,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         _library.Locations.Add("/mnt/dead/Movies");
         for (var i = 1; i <= 3; i++)
         {
-            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString()));
+            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString(CultureInfo.InvariantCulture)));
         }
 
         OfferNumbered(1, 2, 3);

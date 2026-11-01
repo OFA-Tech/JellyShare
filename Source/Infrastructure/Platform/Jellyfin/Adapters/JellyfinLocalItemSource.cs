@@ -14,7 +14,7 @@ namespace JellyShare.Jellyfin.Adapters;
 /// <summary><see cref="ILocalItemSource"/> backed by the Jellyfin library.</summary>
 public sealed class JellyfinLocalItemSource : ILocalItemSource
 {
-    private static readonly ImageType[] SharedImageTypes = { ImageType.Primary, ImageType.Backdrop, ImageType.Logo, ImageType.Thumb };
+    private static readonly ImageType[] _sharedImageTypes = { ImageType.Primary, ImageType.Backdrop, ImageType.Logo, ImageType.Thumb };
 
     private readonly ILibraryManager _libraryManager;
     private readonly IMediaSourceManager _mediaSourceManager;
@@ -143,7 +143,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
     /// <inheritdoc />
     public string? GetImagePath(Guid itemId, string imageType)
     {
-        if (!Enum.TryParse<ImageType>(imageType, true, out var type) || !SharedImageTypes.Contains(type))
+        if (!Enum.TryParse<ImageType>(imageType, true, out var type) || !_sharedImageTypes.Contains(type))
         {
             return null;
         }
@@ -205,7 +205,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             item.RunTimeTicks,
             item.Overview,
             new MediaInfo(item.Container, video?.Codec, video?.Width, video?.Height, bitRate, audio, subtitles),
-            SharedImageTypes
+            _sharedImageTypes
                 .Where(t => item.ImageInfos?.Any(i => i.Type == t && i.IsLocalFile) == true)
                 .Select(t => t.ToString())
                 .ToArray(),

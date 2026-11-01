@@ -19,7 +19,7 @@ public static class PeerUri
             return null;
         }
 
-        return new Uri(b.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/" + relative.TrimStart('/'));
+        return new Uri(string.Join('/', b.GetLeftPart(UriPartial.Path).TrimEnd('/'), relative.TrimStart('/')));
     }
 
     /// <summary>Normalizes a peer base URL the way it is stored: absolute http(s), no user info, no trailing slash.</summary>

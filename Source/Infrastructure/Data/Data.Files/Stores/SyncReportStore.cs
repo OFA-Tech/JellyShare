@@ -10,7 +10,7 @@ public sealed class SyncReportStore : ISyncReportStore
     /// <summary>The file name inside the data folder.</summary>
     public const string FileName = "last-sync-report.json";
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
+    private static readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = false };
 
     private readonly Func<string> _dataDir;
 
@@ -33,7 +33,7 @@ public sealed class SyncReportStore : ISyncReportStore
     public static void Save(string dataDir, SyncReport report)
     {
         ArgumentNullException.ThrowIfNull(report);
-        AtomicFile.WriteAllText(Path.Combine(dataDir, FileName), JsonSerializer.Serialize(report, JsonOptions));
+        AtomicFile.WriteAllText(Path.Combine(dataDir, FileName), JsonSerializer.Serialize(report, _jsonOptions));
     }
 
     /// <summary>Loads the persisted report.</summary>
@@ -44,7 +44,7 @@ public sealed class SyncReportStore : ISyncReportStore
         try
         {
             var path = Path.Combine(dataDir, FileName);
-            return File.Exists(path) ? JsonSerializer.Deserialize<SyncReport>(File.ReadAllText(path), JsonOptions) : null;
+            return File.Exists(path) ? JsonSerializer.Deserialize<SyncReport>(File.ReadAllText(path), _jsonOptions) : null;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
         {
