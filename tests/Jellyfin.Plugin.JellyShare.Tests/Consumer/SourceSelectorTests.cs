@@ -35,9 +35,9 @@ public class SourceSelectorTests
     }
 
     [Fact]
-    public void Order_SkipsDisabledAndFailing()
+    public void Order_SkipsDisabled_SortsFailingLast()
     {
-        var peers = new[] { Peer(A, "alice"), Peer(B, "bob", enabled: false), Peer(C, "carol") };
+        var peers = new[] { Peer(A, "alice", priority: 5), Peer(B, "bob", enabled: false), Peer(C, "carol", priority: 1) };
         var states = new Dictionary<Guid, PeerState>
         {
             [C] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch, LastError = "HTTP 500" },
@@ -46,7 +46,17 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B, C), peers, states);
 
-        Assert.Equal(new[] { A }, order.Select(s => s.Peer.Id));
+        // A peer that failed its last sync may be back already: it is still tried, after the healthy ones.
+        Assert.Equal(new[] { A, C }, order.Select(s => s.Peer.Id));
+    }
+
+    [Fact]
+    public void Order_OnlyFailingPeer_IsStillOffered()
+    {
+        var peers = new[] { Peer(A, "alice") };
+        var states = new Dictionary<Guid, PeerState> { [A] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } };
+
+        Assert.Equal(new[] { A }, SourceSelector.Order(Entry(A), peers, states).Select(s => s.Peer.Id));
     }
 
     [Fact]
@@ -89,6 +99,6 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B), peers, store);
 
-        Assert.Equal(new[] { B }, order.Select(s => s.Peer.Id));
+        Assert.Equal(new[] { B, A }, order.Select(s => s.Peer.Id));
     }
 }

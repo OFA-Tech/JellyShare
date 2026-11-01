@@ -318,7 +318,7 @@ public class RelayControllerTests
     }
 
     [Fact]
-    public async Task Relay_FailingPeerIsSkipped()
+    public async Task Relay_FailingPeerIsTriedLast()
     {
         _index.States[A] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
         Host("alice", _ => Video(new byte[] { 1 }));
@@ -329,6 +329,20 @@ public class RelayControllerTests
 
         Assert.Equal(new byte[] { 2 }, Body(context));
         Assert.Equal("bob", Assert.Single(_upstream).RequestUri!.Host);
+    }
+
+    [Fact]
+    public async Task Relay_PeerThatFailedLastSync_IsStillUsedWhenOthersFail()
+    {
+        _index.States[A] = new PeerState { FailingSinceUtc = DateTimeOffset.UnixEpoch };
+        Host("alice", _ => Video(new byte[] { 1 }));
+        Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var context = Context();
+
+        await CreateController(context).Play(Key);
+
+        Assert.Equal(new byte[] { 1 }, Body(context));
+        Assert.Equal(new[] { "bob", "alice" }, _upstream.Select(r => r.RequestUri!.Host));
     }
 
     [Fact]
