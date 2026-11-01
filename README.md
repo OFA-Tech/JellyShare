@@ -275,7 +275,8 @@ behaves. After a Jellyfin update, recheck them:
   `.strm` items are still scanned, still expose their URL, and that a client bitrate limit is still not applied to them
   (that last point is what `PlaybackInfoFilter` works around).
 - **Library merge setting**: episodes of a shared series join the user's own series only while Jellyfin's "merge series
-  spread across multiple folders" library option (LibraryOptions.EnableAutomaticSeriesGrouping, read in\n  Adapters/JellyfinAdminLibraries.cs) exists and is on; the admin page warns when it is off.
+  spread across multiple folders" library option (LibraryOptions.EnableAutomaticSeriesGrouping, read in
+  Adapters/JellyfinAdminLibraries.cs) exists and is on; the admin page warns when it is off.
 
 ## Build and test
 
