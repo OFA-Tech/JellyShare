@@ -1,0 +1,7 @@
+# Task 10: simulate bob's media drive being offline (empty dir mounted at /media).
+#   docker compose -f docker-compose.yml -f spike/docker-compose.offline-bob.yml up -d bob
+# Restore (remount) with: docker compose -f docker-compose.yml up -d bob
+services:
+  bob:
+    volumes:
+      - ./media/empty-bob:/media

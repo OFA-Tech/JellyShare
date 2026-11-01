@@ -1,0 +1,493 @@
+# Spike results
+
+Findings recorded while building; later tasks rely on them. Verified against
+`Jellyfin.Controller` / `Jellyfin.Model` **12.0.0** (assemblies `MediaBrowser.Controller`,
+`MediaBrowser.Model`, `MediaBrowser.Common` 12.0.0.0, inspected by reflection) and a running
+`jellyfin/jellyfin:12.4` container (server version 12.4.0).
+
+## Jellyfin 12 API names
+
+NuGet: stable 12.x packages are `12.0.0`, `12.1.0`, `12.2.0`, `12.3.0`, `12.4.0` (plus `12.0.0-rc*`).
+The lowest stable 12 package, `12.0.0`, is referenced for both `Jellyfin.Controller` and
+`Jellyfin.Model`. Plugin `targetAbi` is `12.0.0.0`.
+
+| Concept | Name in 12.x | Namespace / assembly |
+| --- | --- | --- |
+| Plugin base | `BasePlugin<TConfigurationType>` (ctor `(IApplicationPaths, IXmlSerializer)`; overrides `Name`, `Id`) | `MediaBrowser.Common.Plugins` / `MediaBrowser.Common` |
+| Config base | `BasePluginConfiguration` | `MediaBrowser.Model.Plugins` / `MediaBrowser.Model` |
+| Web pages | `IHasWebPages.GetPages() : IEnumerable<PluginPageInfo>` (`PluginPageInfo`: `Name`, `DisplayName`, `EmbeddedResourcePath`, `EnableInMainMenu`, `MenuSection`, `MenuIcon`) | `MediaBrowser.Model.Plugins` / `MediaBrowser.Model` |
+| DI registration | `IPluginServiceRegistrator.RegisterServices(IServiceCollection, IServerApplicationHost)` | `MediaBrowser.Controller.Plugins` / `MediaBrowser.Controller` |
+| Scheduled task | `IScheduledTask`: `Name`, `Key`, `Description`, `Category`, `ExecuteAsync(IProgress<double>, CancellationToken)`, `GetDefaultTriggers() : IEnumerable<TaskTriggerInfo>` | `MediaBrowser.Model.Tasks` / `MediaBrowser.Model` |
+| Library item events | `ILibraryManager.ItemAdded`, `ItemUpdated`, `ItemRemoved`, all `EventHandler<ItemChangeEventArgs>` | `MediaBrowser.Controller.Library` / `MediaBrowser.Controller` |
+| Library queries | `ILibraryManager.GetItemList(InternalItemsQuery)`, `QueryItems`, `GetItemById(Guid)`, `FindByPath`, `QueueLibraryScan()`, `ValidateMediaLibrary(IProgress<double>, CancellationToken)` | same |
+| Library monitor | `ILibraryMonitor.ReportFileSystemChanged(string path)` (also `ReportFileSystemChangeBeginning(string)`, `ReportFileSystemChangeComplete(string, bool)`) | `MediaBrowser.Controller.Library` |
+| Server config | `IServerConfigurationManager.Configuration : ServerConfiguration` (`ServerName`, `MetadataPath`, ...) and `.ApplicationPaths` | `MediaBrowser.Controller.Configuration` |
+| Network config | `ServerConfiguration` has **no** network settings. Use the extension `IConfigurationManager.GetNetworkConfiguration() : NetworkConfiguration` (`BaseUrl`, `InternalHttpPort`, `InternalHttpsPort`, `PublicHttpPort`, `EnableHttps`, `RequireHttps`, `LocalNetworkSubnets`, `KnownProxies`, ...) | `MediaBrowser.Common.Net.NetworkConfigurationExtensions` / `MediaBrowser.Common` |
+| Application host | `IServerApplicationHost`: `FriendlyName`, `HttpPort`, `HttpsPort`, `ListenWithHttps`, `GetSmartApiUrl(...)`, `GetLocalApiUrl(string host, string? scheme, int? port)`, `GetApiUrlForLocalAccess(IPAddress, bool)` | `MediaBrowser.Controller` |
+
+All of these match their 10.x names; nothing had to be renamed.
+
+### Authorization policy for admin-only endpoints (needed by Task 11)
+
+`[Authorize(Policy = Policies.RequiresElevation)]`, where
+`MediaBrowser.Common.Api.Policies.RequiresElevation` is the const string `"RequiresElevation"`
+(unchanged from 10.x). Related constants in the same class: `LocalAccessOnly`,
+`LocalAccessOrRequiresElevation`, `FirstTimeSetupOrElevated`, `FirstTimeSetupOrDefault`,
+`Download`, `IgnoreParentalControl`, `AnonymousLanAccessPolicy`.
+Anonymous endpoints use `[AllowAnonymous]` (verified in the harness: `/JellyShare/v1/ping` answers
+without credentials).
+
+### Internal HTTP port and BaseUrl (to build `http://127.0.0.1:{port}{BaseUrl}`)
+
+- Port: `IServerApplicationHost.HttpPort` (or `GetNetworkConfiguration().InternalHttpPort`). This is the
+  port **inside** the server's network namespace, e.g. `8096` in the harness containers, not the
+  published `8101`/`8102`. Use `HttpsPort` / `ListenWithHttps` for TLS.
+- BaseUrl: `IServerConfigurationManager.GetNetworkConfiguration().BaseUrl`. Stored as written in
+  `network.xml` (bob: `/jellyfin`, alice: empty). Jellyfin's own `LocalAddress`
+  (`/System/Info/Public`) is `http://<ip>:8096/jellyfin` for bob, i.e. host + port + BaseUrl, so the
+  loopback URL is `http://127.0.0.1:{HttpPort}{BaseUrl}` (normalise: no trailing slash, empty when unset).
+- Not yet exercised from plugin code: `GetLocalApiUrl("127.0.0.1", "http", HttpPort)` is the host's own
+  helper and probably yields the same string; verify when Task 11 needs it.
+
+## Task 2 spike (risky assumptions)
+
+Run on 2026-10-31 against the harness (alice 12.4.0). Throwaway scripts are in `harness/spike/`
+(usage in each file's header); source references are to `jellyfin/jellyfin` tag `v12.4` and
+`jellyfin/jellyfin-web` tag `v12.4`. For the spike, alice got a harness-owned folder
+`harness/media/alice-placeholders` mounted at `/placeholders` and a sidecar `spike-http`
+(Range-capable file server that logs request headers) sharing alice's network namespace, so
+`http://127.0.0.1:8900/...` inside alice reaches it exactly like the plugin's loopback relay
+(`harness/spike/docker-compose.spike.yml`). All of it was removed afterwards (see "Harness state").
+
+### Step 1/2 — series split across two folders: **MERGES (gate passed)**
+
+Setup: `/placeholders/Shows` added as a **second path of the existing "Shows" library**; placeholder
+`<series folder>/Season 02/Pioneer One S02E01.strm`; owner's `/media/Shows/Pioneer One [tvdbid-153021]/Season 01`
+has no `tvshow.nfo` (its Tvdb id comes from the folder name). Each variant used a fresh folder
+name, one scan, and was checked through `/Items?IncludeItemTypes=Series&Recursive=true`,
+`/Shows/{id}/Seasons`, `/Shows/{id}/Episodes` (`harness/spike/step1_merge.py`, `step1_inspect.py`).
+
+| Placeholder series folder | `tvshow.nfo` | Placeholder ProviderIds | Result |
+| --- | --- | --- | --- |
+| `Pioneer One [tvdbid-153021]` (same name) | `<uniqueid type="tvdb">` + `<tvdbid>` | Tvdb 153021 | **1 series, seasons 1+2, episodes S01E01+S02E01** |
+| `Pioneer One [tvdbid-153021]` | none | Tvdb 153021 | **merged** |
+| `Pioneer One (shared) [tvdbid-153021]` (different name) | none | Tvdb 153021 | **merged** |
+| `Pioneer One (shared)` | `<uniqueid type="tvdb">` + `<tvdbid>` | Tvdb 153021 | **merged** |
+| `Pioneer One (shared u)` | `<uniqueid type="tvdb">` only | Tvdb 153021 | **merged** |
+| `Pioneer One (shared t)` | `<tvdbid>` only | **none** | 2 series (not merged) |
+| `Pioneer One` (same name, no id) | none | none | 2 series (not merged) |
+| `Pioneer One (control)` | none | none | 2 series (not merged) |
+
+Mechanism (verified in source and by toggling the option):
+
+- Library option **`EnableAutomaticSeriesGrouping`** ("merge series spread across folders";
+  model default `true`, shown as `true` in `/Library/VirtualFolders` for the harness libraries).
+  Setting it to `false` + scan → the same placeholder shows as a second series; back to `true` +
+  scan → one series again.
+- `Series.CreatePresentationUniqueKey()` (`MediaBrowser.Controller/Entities/TV/Series.cs`): when
+  grouping is on, key = **first user-data key** (`Custom` > `Tvdb` > `Imdb` provider id; **Tmdb is
+  not used**) or, when the series has none of those, `"series-" + lower(Name)`; then
+  `-{metadata language}-{ids of the collection folders}`. So both folders must be **in the same
+  library** and the placeholder's highest-priority id must equal the owner's (owner Tvdb +
+  placeholder Imdb-only, or owner Tvdb + placeholder no-id, does not merge).
+- `<tvdbid>` alone in `tvshow.nfo` is **not read** as a provider id in 12.4; `<uniqueid type="tvdb">`
+  or the `[tvdbid-…]` folder tag is.
+- The merged list shows **one surviving Series item = the lowest item Id** of the group
+  (`BaseItemRepository.QueryBuilding.cs`, `Min(Id)`; Id is a hash of the path, i.e. arbitrary).
+  Here the survivor was the placeholder series (name "Pioneer One" from the nfo, path
+  `/placeholders/...`). `/Shows/{id}/Seasons|Episodes` return both seasons for **either** series
+  Id. So the show page may display the placeholder's series metadata/images.
+- Reusing a deleted folder path brings back the old DB item and its ProviderIds even after the nfo
+  is gone (the item Id is path-based) — tests must use fresh names.
+- Not needed, so not tried: Merge Versions plugin (Step 2 only applies if the gate fails).
+
+**Empty library folder is never cleaned:** when the last show folder under `/placeholders/Shows`
+was deleted, scans kept the old series forever; the log says
+`Library folder "/placeholders/Shows" is inaccessible or empty, skipping` (`Folder.IsLibraryFolderAccessible`).
+With one file in the root (`.jellyshare` marker) the next scan removed it. The same rule protects
+offline drives (Step 5).
+
+**Decision:** keep the design (placeholder folder = extra path of the owner's Shows library).
+Write series placeholders as `<Name> [tvdbid-<id>]/Season NN/...` plus a `tvshow.nfo` with
+`<uniqueid type="...">` for **every** id known, and — when the owner already has the series — copy
+the **owner's local series ProviderIds and title** into the placeholder `tvshow.nfo` so the
+grouping key is guaranteed equal and the surviving series looks like the owner's. Keep a marker
+file in each placeholder root. Warn in the admin page when the target Shows library has
+`EnableAutomaticSeriesGrouping = false`.
+
+### Step 3 — `.strm` → HTTP with Range: **works**
+
+`.strm` content `http://127.0.0.1:8900/bob/Shows/.../Pioneer%20One%20S02E01.mkv` (the clip is
+h264 1080p + aac, 120 s). Evidence (`harness/spike/step3_play.py`, ffprobe in the container):
+
+- After a scan the `.strm` episode has **no media info** (`RunTimeTicks` null, no streams): scans
+  do not probe `.strm`. The first `PlaybackInfo` probes the URL (one `GET Range: bytes=0-` by
+  `Lavf`) and stores it: afterwards `RunTimeTicks=1200210000`, h264 1920x1080 + aac.
+- `PlaybackInfo` (no profile) → `Protocol: Http`, `IsRemote: true`, `Path: <the .strm URL>`,
+  `SupportsDirectPlay/DirectStream/Transcoding: true`, `Container: mkv`, `Size: 107` (the .strm file).
+- Static stream `GET /Videos/{id}/stream?static=true` (header auth): `Range: bytes=0-1048575` → 206,
+  1048576 bytes, `Content-Range: bytes 0-1048575/19691603`; mid-file range → 206; full → 200, 19691603
+  bytes, ffprobe = original (h264 1920x1080, 120.02 s). Jellyfin proxies the client's `Range`.
+- Forced transcode (HLS `master.m3u8`, h264 900 kbps, 640 wide): segment 0 → 200 (ffprobe h264
+  640x360 + aac); **seek to 90 s** = request segment 30 of the playlist → server restarts ffmpeg,
+  segment start_time 99.98 s (10 s mpegts offset, i.e. 90 s); progressive `stream.ts` with
+  `startTimeTicks=900000000` → 30.0 s of h264 640x360. ffmpeg seeks via Range
+  (`bytes=14824749-` ≈ 75 % of the file).
+- Web client (headless Chromium + jellyfin-web 12.4) also played and seeked to 90 s (see Step 4).
+- **User/client max bitrate does not force a transcode for `.strm` items**: `StreamBuilder.IsBitrateLimitExceeded`
+  returns false when `IsRemote`. With `MaxStreamingBitrate=1000000` and an mkv/h264/aac
+  direct-play profile, the `.strm` item still gets `SupportsDirectPlay: true`, while a local file
+  gets a transcode (`ContainerBitrateExceedsLimit`). The brief's "set user max bitrate 1 Mbps"
+  check therefore cannot pass for `.strm`; a transcode only happens when the client cannot play
+  the format (proved with an HLS-only profile above).
+- **Fix proven (review follow-up, `harness/spike/bitrate_test.py`, `web_play_capped.js`):** if the
+  `PlaybackInfo` **request** carries `EnableDirectPlay=false` and `EnableDirectStream=false`
+  (what a request-side filter sets when `MaxStreamingBitrate` < source bitrate, here 1 000 000 <
+  1 312 543), Jellyfin returns `SupportsDirectPlay/DirectStream: false` and a working
+  `TranscodingUrl` (`master.m3u8?...VideoBitrate=808000&AudioBitrate=192000...`). Fetching 4 HLS
+  segments: HTTP 200, ffprobe h264 1280x720 + aac, 12.0 s, **978 kbps**. In headless Chromium
+  (request rewritten the same way, `Path` hidden) jellyfin-web played via HLS (`currentTime 13.8`),
+  ffmpeg ran `libx264 ... -maxrate 808000`, and no browser request went to 127.0.0.1. Clearing
+  the flags only in the **response** does not work: the default response has
+  `TranscodingUrl: null` (computed before), so the filter must change the request before the
+  action runs.
+
+Request headers seen by the test server (relay must accept all of these):
+
+| Caller | Headers | Range forms |
+| --- | --- | --- |
+| Jellyfin's ffmpeg (probe and transcode) | `User-Agent: Lavf/62.12.103`, `Accept: */*`, `Range`, `Connection: close`, `Host: 127.0.0.1:8900`, `Icy-MetaData: 1` | `bytes=0-`, `bytes=N-` (open-ended), never closed ranges |
+| Jellyfin static-stream proxy | `User-Agent: Jellyfin-Server/12.4.0`, `Accept`, `Accept-Encoding`, `traceparent`, `Host`, client's `Range` (or none) | whatever the client sent (`bytes=0-1048575`, `bytes=19660800-`, none) |
+
+No auth headers can be added (a `.strm` holds only a URL); the source IP was `127.0.0.1`.
+
+### Step 4 — do clients open the `.strm` URL themselves? **YES (jellyfin-web)** — design change needed
+
+- `PlaybackInfo` hands the raw `.strm` URL to clients in `MediaSources[].Path` with
+  `IsRemote: true`, `Protocol: Http`, `SupportsDirectPlay: true` (`BaseItem.GetVersionInfo` sets
+  `IsRemote`/`Path` from `ShortcutPath`).
+- jellyfin-web 12.4 `playbackmanager.js`: `supportsDirectPlay()` → for `IsRemote` + `Http`
+  sources it returns true when the app host supports `RemoteVideo` (every browser except
+  Tizen/webOS/Opera TV/Edge UWP), and `isHostReachable()` returns true for any `IsRemote` source
+  (the localhost/127.0.0.1 guard only applies to non-remote sources); then `mediaUrl = mediaSource.Path`.
+- Proven in a real browser (headless Chromium, `harness/spike/web_play.js`): after `PlaybackInfo`
+  the browser itself requested `http://127.0.0.1:8900/bob/Shows/...S02E01.mkv` →
+  `net::ERR_CONNECTION_REFUSED`, then retried `PlaybackInfo` with direct play disabled and played
+  through a full **libx264 re-encode** (`FFmpeg.Transcode-*.log`: `-codec:v:0 libx264 ...`), although
+  the source was browser-playable h264. So it "works" in the web client only through an
+  unnecessary transcode, and a browser on the server machine would hit its own 127.0.0.1.
+- Proposed fix, proven client-side (`harness/spike/web_play_rewrite.js`, which rewrites the
+  `PlaybackInfo` response in the browser the way a server-side filter would): for sources whose
+  Path starts with the relay base set `SupportsDirectPlay=false` and `Path=""`. The web client
+  then used `GET /Videos/{id}/stream.mkv?Static=true&...` → Jellyfin proxied the relay with Range
+  (`Jellyfin-Server/12.4.0`, `bytes=0-`), **no transcode**, and seeking to 90 s worked
+  (`currentTime 94.9`, server sent `bytes=14811136-`). No request went to 127.0.0.1 from the browser.
+- Native apps (Android, Android TV, Swiftfin, Kodi add-ons, Infuse, ...) could not be tested here
+  (no GUI/device). Inferred from `PlaybackInfo`: any client that direct-plays `Path` for remote
+  HTTP sources has the same problem; with the filter they only see server URLs. **The owner must
+  confirm with a real phone/TV app** (Task 14).
+- Signed relay URLs (the spec's fallback) do not fit: a `.strm` is a static file and cannot
+  carry short-lived signatures, so the URL would have to be rewritten per request in
+  `PlaybackInfo` anyway (the same hook as the filter). The relay would also have to accept
+  non-loopback requests (giving up the loopback-only rule) and need a stable public host that
+  every client can reach (LAN IP, public domain, sub-path vary per client).
+
+**Decision (accepted by the controller; signed URLs rejected):** keep the loopback-only relay and
+`.strm` with no secrets; add a server-side `PlaybackInfo` filter in the plugin that hides the URL,
+disables direct play, and forces a transcode when the client's max bitrate is below the source
+bitrate (see Plan corrections 9).
+
+### Step 5 — missing-file behaviour and the hook
+
+- Hook: **`ILibraryManager.ItemRemoved`** (and `ItemAdded` for re-appearing files). Fired
+  synchronously from `LibraryManager.DeleteItem` → `ReportItemRemoved(item, parent)` while a
+  scan/refresh validates the folder; `ItemChangeEventArgs.Item` still has Path and ProviderIds.
+  Observed through the WebSocket `LibraryChanged` message (`LibraryChangedNotifier` subscribes to
+  the same three events and batches them for `LibraryUpdateDuration` = 30 s):
+  `ItemsRemoved: ["40ef…"]` for the deleted movie.
+- Timing, file deleted (Big Buck Bunny):
+  - `EnableRealtimeMonitor=false` (harness default): the item stays indefinitely (polled 60 s);
+    removed by the next library scan (2 s after `POST /Library/Refresh`). Default scheduled scan
+    interval is 12 h.
+  - `EnableRealtimeMonitor=true` on a native Linux filesystem (container overlay dir added as
+    library path): removed **~61 s** after `rm` (= `LibraryMonitorDelay` default 60 s).
+    The watcher only starts after the option is saved **and** a scan runs (`LibraryMonitor.Start`
+    runs at startup and after each scan).
+  - On the harness bind mounts (Docker Desktop/WSL2 `9p` drvfs) inotify never fires, even for
+    `rm` inside the container — the harness needs explicit scans.
+  - Deleting only the video leaves the empty movie folder, which then appears as a **`Folder`
+    item** in the Movies library until the folder is removed.
+- Drive offline (alice restarted with an empty dir mounted at `/media`, `spike/docker-compose.offline.yml`):
+  after startup and after a full scan **all items are kept** as `LocationType: FileSystem`
+  (nothing removed, nothing marked missing, no `ItemRemoved` storm), because an inaccessible or
+  empty library root is skipped. After remounting, everything was unchanged.
+  In the same offline state a stat of the owner's file inside the container
+  (`docker exec jellyshare-alice test -f "/media/Movies/Sintel (2010) [tmdbid-45745]/Sintel (2010).mkv"`)
+  reports **MISSING**, and **EXISTS** again after remounting. .NET `File.Exists` uses the same
+  `stat`, so it returns false here (assumed, not run from .NET). Caveat: on a hung network mount
+  (NFS hard mount, stale SMB) `stat` can block instead of failing, so the sweep must run off the
+  request path, with a per-pass time budget.
+- `ILibraryMonitor.ReportFileSystemChanged(path)` has no `EnableRealtimeMonitor` check (source):
+  it debounces `LibraryMonitorDelay` (60 s) and refreshes that path. Not exercised from plugin code
+  yet (needs Task 8).
+
+**Decision for Task 10:** subscribe to `ILibraryManager.ItemRemoved` / `ItemAdded`, filter
+`Movie`/`Episode` (ignore `Folder`/`Series`/`Season` and items under the placeholder roots).
+Expect removals only after a scan or ~60 s with realtime monitoring. Offline drives produce **no**
+events and keep every item, so events alone cannot meet the spec's goal "drive offline → peer
+copy appears". Both sides therefore check the file itself: the provider skips missing files
+(catalog/stream), and the consumer counts an item as "local" only if its file exists
+(`LocalIndex`). Task 10's watcher also runs a periodic **presence sweep** that writes placeholders
+for local files that are gone and removes them when the files come back (see corrections 11/12).
+
+### Step 6 — user data carry-over: **free**
+
+- Sintel on alice: `Played`, `PlaybackPositionTicks=600000000`, favourite, play count 1 →
+  `UserData.Key = "45745"` (the Tmdb id).
+- Deleted the owner's Sintel folder, scanned (item gone), then created
+  `/placeholders/Movies/Sintel shared (2010) [tmdbid-45745]/Sintel shared (2010).strm` (new path →
+  new item Id `2136…`), scanned: the new item had **Played, resume 60 s, favourite, play count**
+  and appeared in `/UserItems/Resume`. Also true when both happen in one scan.
+- Keys: movies use the provider id (Tmdb here), episodes `<series key><season:000><episode:000>`
+  (`153021002001`), series the series key. Items without provider ids use their Guid (no carry-over).
+
+**Decision:** keep — no plugin code needed, as long as placeholders carry the same provider ids.
+
+### Step 7 — anonymous endpoint behind a sub-path
+
+Proven in Task 1 (`/JellyShare/v1/ping` anonymous on bob under `/jellyfin`). No local HTTPS
+nginx was set up; the owner's NPM `/jellyfin` path is tested in Task 14.
+
+### Harness state after the spike
+
+Both servers up, libraries back to `/media/Movies` and `/media/Shows` only, `EnableRealtimeMonitor`
+false, `EnableAutomaticSeriesGrouping` true, Big Buck Bunny/Sintel files restored (copies of
+`.base.mkv`), Sintel user data reset, `harness/media/alice-placeholders` deleted, `spike-http`
+removed, alice recreated from `docker-compose.yml` only. To rerun the spike:
+`docker compose -f docker-compose.yml -f spike/docker-compose.spike.yml up -d` (from `harness/`).
+
+## Plan corrections
+
+1. **Docker tag `jellyfin/jellyfin:12.4.0` does not exist** on Docker Hub (`docker pull` returns
+   "not found"). Tags are `12`, `12.4`, `12.3`, ... (and `12.4.<date>-<time>` builds). The harness uses
+   `jellyfin/jellyfin:12.4`; the running server reports version `12.4.0`.
+2. **`Jellyfin.Controller` / `Jellyfin.Model` 12.0.x**: only `12.0.0` exists (plus rc builds). Used `12.0.0`.
+3. **No ffmpeg on the host**: `harness/make-media.sh` runs inside the Jellyfin image using its bundled
+   `/usr/lib/jellyfin-ffmpeg/ffmpeg` (command in the root `README.md`).
+4. **`/System/Restart` cannot be used after changing BaseUrl.** In 12.4, once `network.xml` has a new
+   BaseUrl the running server answers 404 on both the old and the new root until it restarts (only the
+   root redirect follows the new value), so the API restart is unreachable. `harness/setup.py` therefore
+   restarts the container with `docker restart`. (A plain `POST /System/Restart` works fine otherwise.)
+5. **Online metadata makes the "no IDs" movie get IDs.** With default library settings and internet access,
+   Jellyfin matched `Movies/Home Video` to a TMDB entry and resolved `tvdbid-153021` to *The Walking Dead*
+   (not Pioneer One) and replaced names. `setup.py` creates the libraries with empty `MetadataFetchers` /
+   `ImageFetchers` for every type, so items keep only the provider IDs written in their folder names
+   (`Tmdb`/`Tvdb`), `Home Video` stays ID-less, and item names stay as the raw folder names
+   (e.g. `Sintel (2010) [tmdbid-45745]`). Later tasks and e2e checks must key on `ProviderIds`, not on names.
+   Note also that file-based episodes get no `ProviderIds` in this mode (episodes are matched by series +
+   season/episode numbers).
+6. **Startup wizard / provisioning notes**: right after container start the API answers 503 for a few
+   seconds; `setup.py` retries. Authentication uses the `Authorization: MediaBrowser ... Token="..."`
+   header only.
+7. **Home Video** exists only on alice (the brief lists "one movie without IDs"); bob has none.
+
+From the Task 2 spike (details above):
+
+8. **Task 4 (NFO / naming) — series ids.** `NfoWriter.Series` must write `<uniqueid type="tvdb">`,
+   `type="imdb"`, `type="tmdb"` for every id known (not only `tmdb`; `<tvdbid>` alone is ignored).
+   Series grouping uses Custom > **Tvdb** > Imdb, never Tmdb. Add an optional "local series"
+   input: when the owner already has the series, the placeholder `tvshow.nfo` copies the **local
+   series' ProviderIds and title** (so the grouping key is identical and the surviving merged
+   series looks like the owner's). Folder tag stays `[tvdbid-…]`; when the series has no Tvdb id,
+   the folder tag must not add an id the owner's series lacks (use `[imdbid-…]` if that is the
+   owner's top id; Tmdb-only series merge only by name, so then use the owner's series name).
+   New tests: `Nfo_Series_WritesAllUniqueIds`, `Nfo_Series_UsesLocalSeriesIdsAndTitle`.
+9. **Task 9 (relay) — clients DO open `.strm` URLs; PlaybackInfo filter (accepted; signed URLs
+   rejected).** Add `Consumer/PlaybackInfoFilter.cs`, an MVC **action** filter
+   (`IAsyncActionFilter`, registered in `IPluginServiceRegistrator` via
+   `services.Configure<MvcOptions>(o => o.Filters.Add<PlaybackInfoFilter>())` or `IStartupFilter`)
+   on `GET /Items/{id}/PlaybackInfo` and `POST /Items/{id}/PlaybackInfo`, applied only when the
+   item is a JellyShare placeholder (path under a placeholder root / `.strm` starting with the relay base):
+   - **Before the action (request):** when the effective max bitrate (`MaxStreamingBitrate` from
+     query/body, else `DeviceProfile.MaxStreamingBitrate`, else the user's remote/LAN limit) is
+     below the source bitrate (stored media info, or the catalog bitrate from the peer), set
+     `EnableDirectPlay=false` **and** `EnableDirectStream=false` in the request so Jellyfin builds a
+     transcode at that bitrate. Spike proof: 1 Mbps request on a 1.31 Mbps `.strm` →
+     `TranscodingUrl` with `VideoBitrate=808000`, HLS output 978 kbps 720p, and jellyfin-web played it
+     (Step 3). Changing only the response does not work (`TranscodingUrl` would be null).
+   - **After the action (response):** for every `MediaSourceInfo` whose `Path` starts with the
+     relay base: `SupportsDirectPlay = false`, `Path = ""` (keep `SupportsDirectStream` /
+     `SupportsTranscoding` unless cleared above). Clients then use
+     `/Videos/{id}/stream.{container}?Static=true` (Jellyfin proxies the relay) or the transcode URL.
+   - Also hide `Path` in item DTOs: `MediaSources` returned by `/Items`, `/Items/{id}`,
+     `/Users/{u}/Items/{id}` with `Fields=MediaSources` (same filter on those actions, or a DTO hook).
+   - **Task 9 gate (new step):** in the harness prove (a) the filter is registered and runs on
+     **both** GET and POST PlaybackInfo, (b) `Fields=MediaSources` item responses contain no relay
+     URL, (c) `web_play.js` without the client-side rewrite → no browser request to 127.0.0.1 and
+     no libx264 in the FFmpeg log, (d) a 1 Mbps request gives a `TranscodingUrl` and ffprobe of the
+     output ≈ 1 Mbps. Tests: `Filter_HidesRelayPathAndDisablesDirectPlay`,
+     `Filter_LowMaxBitrate_DisablesDirectStream`, `Filter_HighMaxBitrate_KeepsDirectStream`,
+     `Filter_IgnoresNonPlaceholderItems`, `Filter_RunsOnGetAndPostPlaybackInfo`.
+   - Relay: keep loopback-only (`RemoteIpAddress` loopback) **and** reject (403) any request
+     carrying `X-Forwarded-For`, `X-Real-IP` or `Forwarded` (a reverse proxy on the same host would
+     otherwise look like loopback). Handle `bytes=N-` open-ended ranges, no Range, and the
+     `Icy-MetaData`/`Connection: close` headers ffmpeg sends.
+   - Stream slots: the first `PlaybackInfo` ffprobe of a `.strm` (`Lavf`, `Range: bytes=0-`) goes
+     through the relay to the peer. It belongs to the same playback (probe, then
+     playback/transcode requests, and HLS seeks reopen the URL), so per-peer limits must not count
+     each relay request as a new stream. Count a stream per (consumer, item) with a short grace
+     window (e.g. 30 s after the last request), not per HTTP request (Task 7 limit + Task 9 relay).
+   - Task 9 Step 5 "forced transcode at 1 Mbps" is done through the request-side rule above (set
+     the client's quality to 1 Mbps). The provider-side cap (Task 12) stays as the provider's own
+     control. Task 14 must test one native phone/TV app.
+10. **Task 8 (writer) — keep a marker file.** An empty placeholder root is skipped by scans, so the
+    last removed placeholder would never disappear. `PlaceholderWriter` creates `.jellyshare` in
+    each root and never deletes it ("remove empty dirs" stops at the root). Movie placeholders are
+    removed as a whole folder (`.strm` + nfo + images), otherwise Jellyfin shows an empty `Folder`
+    item. Placeholder roots must be added as extra paths of the chosen Movies/Shows library (not
+    a separate library) — the series grouping key includes the collection folder ids.
+    Admin page (Task 11): warn when the chosen Shows library has `EnableAutomaticSeriesGrouping=false`.
+11. **Task 10 (watcher) — hook and timing.** Use `ILibraryManager.ItemRemoved` / `ItemAdded`
+    (as planned). They fire only when a scan or the realtime monitor (≈60 s,
+    `LibraryMonitorDelay`) notices the change; with `EnableRealtimeMonitor=false` or on mounts
+    without inotify (the harness, NFS/SMB) only at the next scan. Ignore `Folder` items. Task 10
+    Step 5 in the harness must `POST /Library/Refresh` after deleting the file instead of waiting
+    "~1 min". Drive-offline does **not** produce events (items are kept), so events alone cannot
+    meet spec goal 3. **Add a presence sweep** to `LocalItemWatcher`: every **60 s** (configurable),
+    run off the request path, stat (`LocalIndex.ProbeFile`, see 12) the files of local (non-placeholder)
+    Movie/Episode items **whose keys appear in the merged index**, i.e. only titles a peer could
+    replace (bounded set). Local file missing → write that entry's placeholder (same path as the
+    event path) and scan its dir. File back → delete the placeholder and scan. Keep per-key state
+    so each title is written/removed once. The 15 s batching and the >500 storm rule apply (a
+    whole drive offline → hand to a full `SyncService.RunAsync`, which uses the same
+    `LocalIndex` rule below). Cap each pass by a time budget (e.g. 10 s) and continue next pass,
+    because `stat` on a hung network mount can block. While the drive is offline the owner's stale
+    item stays in the library next to the placeholder (two entries for movies; one series for
+    shows); accepted, the placeholder plays.
+    Tests: `Sweep_LocalFileMissing_WritesPlaceholder`, `Sweep_FileBack_RemovesPlaceholder`,
+    `Sweep_OnlyChecksKeysInMergedIndex`, `Sweep_ManyMissing_DelegatesToFullSync`,
+    `Sweep_RespectsTimeBudget`. Harness check: start alice with
+    `spike/docker-compose.offline.yml` → within ~1–2 min placeholders appear for titles a peer has;
+    remount → they are removed.
+12. **Offline files stay in the DB: "local" must mean the file exists (Tasks 6/7 and 8).**
+    With the media drive offline Jellyfin keeps every item as present (stat of the file in the
+    container says missing; .NET `File.Exists` assumed to agree).
+    - Provider (Task 6/7): the catalog skips items whose `Path` does not exist, and the stream
+      endpoint answers **503** (not 500) when the file cannot be opened, so the consumer fails
+      over to the next peer.
+    - Consumer (Task 8): `LocalIndex.GetLocalKeys` counts an item as local **only if its file
+      exists**, so a sync during an outage writes placeholders for the missing titles. Tests:
+      `LocalIndex_MissingFile_NotLocal`, `LocalIndex_ExistingFile_IsLocal`, `Sync_LocalFileMissing_WritesPlaceholder`.
+    - **As implemented (Task 8 review, controller ruling):** not `File.Exists` (it returns `false` for every
+      error) but `LocalIndex.ProbeFile` = `File.GetAttributes`: `FileNotFoundException` /
+      `DirectoryNotFoundException` → **missing** (deleted file, offline drive, missing library folder, empty
+      mount point → peer fallback, spec goal 3; the 200-scans-per-run batching absorbs a whole-drive storm);
+      any other error (EACCES, EIO, ESTALE) and files not checked within the time budget → **present**.
+      There is deliberately no "library root missing/empty → present" guard. Task 10's sweep should use the
+      same probe. Tests: `LocalIndex_MissingRoot_ItemsAreMissing`, `LocalIndex_EmptyMountPoint_ItemsAreMissing`,
+      `LocalIndex_IoErrorOtherThanNotFound_IsPresent`, `LocalIndex_DefaultProbe_DistinguishesNotFoundFromErrors`,
+      `LocalIndex_ExistenceBudgetExceeded_TreatsUncheckedAsPresent`.
+13. **Task 10 user data:** watched/resume/favourite carry over automatically between a local item
+    and a placeholder with the same provider id (movie key = provider id, episode key = series key
+    + season/episode numbers). No plugin code; Task 10 Step 5 just records it.
+
+From Task 8 (harness, 12.4.0):
+
+14. **Targeted scans need a `Folder` item for the placeholder root.** `ILibraryMonitor.ReportFileSystemChanged(dir)`
+    works for new, changed and deleted placeholder folders: after `LibraryMonitorDelay` (60 s) its `FileRefresher`
+    walks up from `dir` with `ILibraryManager.FindByPath` to the nearest existing item and refreshes it (log:
+    `Movies (/config/plugins/.../placeholders/Movies) will be refreshed.`). For a brand new movie or series folder
+    that item is the `Folder` Jellyfin keeps for each library path (`Type=Folder`, `Path=<root>`); siblings are
+    batched into one refresh of that root. Verified: alice got Tears of Steel, Pioneer One S01E02 + S02E01 (one
+    merged series) and bob lost the Big Buck Bunny placeholder (whole folder removed, no leftover `Folder` item),
+    each without a library scan. **But** the root's `Folder` item only exists after one library scan following
+    `POST /Library/VirtualFolders/Paths`; with `refreshLibrary=false` the walk finds nothing and the change is
+    silently dropped (bob's first sync). So adding a placeholder root to a library must use `refreshLibrary=true`
+    (or be followed by one library refresh): a one-time setup step, done by `harness/add_peer.py` and to be done by
+    the Task 11 admin page. The plugin itself never triggers a full refresh. The root must not be empty at that
+    scan (`harness/add_peer.py` creates the `.jellyshare` marker before adding the path; the writer creates it too).
+15. **Harness naming artefact:** with metadata fetchers disabled (correction 5) peer item names are raw folder
+    names (`Big Buck Bunny (2008) [tmdbid-10378]`), so placeholder folders get the year/id tag twice
+    (`Big Buck Bunny (2008) [tmdbid-10378] (2008) [tmdbid-10378]`, series `Pioneer One [tvdbid-153021] [tvdbid-153021]`).
+    Jellyfin still parses the right id and the titles merge; real servers with metadata have clean names.
+    `PathNaming` was not changed.
+
+From Task 9 (harness, 12.4.0, `harness/relay_gate.py`, `harness/relay_web_play.js`):
+
+16. **PlaybackInfo filter registration:** `services.Configure<MvcOptions>(o => o.Filters.AddService<PlaybackInfoFilter>())`
+    from `IPluginServiceRegistrator` applies to Jellyfin's own controllers (proved by behaviour: GET/POST
+    `PlaybackInfo` and `/Items`, `/Items/{id}`, `/Users/{u}/Items/{id}` return `Path: ""` for the placeholder). No
+    `IStartupFilter` needed. In 12.4 `PlaybackInfoDto` lives in `Jellyfin.Api` (not referenced by plugins); the
+    request rule therefore sets the action arguments `enableDirectPlay`/`enableDirectStream` (the controller does
+    `enableDirectStream ??= dto.EnableDirectStream`, so they win) and reads the body by reflection. `GET PlaybackInfo`
+    takes no device profile, so it never builds a transcode; only the response rule applies to it. The effective
+    max bitrate is `maxStreamingBitrate` (query) ?? body ?? the profile's `MaxStreamingBitrate`, where the profile is
+    the body `DeviceProfile` or, when the body has none, the one Jellyfin stored for the caller's device
+    (`IDeviceManager.GetCapabilities(deviceId)`, device id from `IAuthorizationContext`, as `MediaInfoController`
+    does). The result is capped by the remote-client limit (user, else server) when the caller is outside the LAN,
+    as `MediaInfoHelper.GetMaxBitrate` does. The response rule also materializes lazy `IEnumerable<BaseItemDto>`
+    results (12.4 `UserLibraryController` returns `Select`s for LocalTrailers / SpecialFeatures) and puts the array
+    back into the `ObjectResult`; otherwise the serializer would re-enumerate and emit fresh DTOs with the relay URL.
+17. **Provider stream slots and long requests (Task 7/12 follow-up):** `StreamLimiter` refreshes a session only
+    when a request arrives. A static direct stream is often one long Range request, so after 30 s the provider
+    no longer counts it and a second title can start while the first still plays. The relay keeps one playback on
+    one peer (`RelaySessions`, same 30 s grace) but cannot fix the provider count; the limiter should hold the slot
+    for as long as a response is being sent. (Read from the code, not measured.) **Fixed in Task 12:** requests hold
+    a `StreamLease` until the response ends (`Response.RegisterForDispose`; capped transcodes release it when ffmpeg
+    stops); measured in the harness with a 50 s rate-limited download from inside the Docker network (a second title
+    got 429 at 42 s). Downloads through Docker Desktop's host port forward finish early on the container side because
+    the forwarder buffers, so that path cannot show the hold.
+18. **Relay behind a reverse proxy on the same host (controller ruling).** The relay answers only loopback requests
+    without any proxy header: `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`,
+    `X-Real-IP`, `Forwarded`, `Via`, `X-Original-For`, `X-Original-Host`, `X-Original-Proto`, `CF-Connecting-IP`,
+    `True-Client-IP` → 403. A reverse proxy running on the same host as Jellyfin (or in its network namespace) that
+    forwards requests **without** any of these headers looks exactly like a local caller, so the relay would be
+    reachable from outside through it. Such a proxy must send `X-Forwarded-For` (most do by default; nginx needs
+    `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Documented in the README ("Security notes");
+    the Task 11 admin page must repeat the hint. Once a peer is committed, the relay aborts the response after 60 s
+    without upstream bytes, and a client that disconnects while the relay writes is not logged as a peer failure.
+
+From Task 10 (harness, 12.4.0):
+
+19. **Item events for new items arrive before their ids / season / episode numbers are set.** `ItemAdded` for a new
+    episode fires with `ParentIndexNumber`/`IndexNumber` still empty (set by the metadata refresh right after), so keys
+    computed at event time are empty. `LocalItemWatcher` therefore re-reads added items (`LocalItemEvent.Refresh`)
+    when the 15 s window is processed. The episode `SeriesId` is also unset at that moment; use `Episode.Series`
+    (parent chain). Observed: delete + `POST /Library/Refresh` → placeholder written at the next 15 s tick; restore +
+    refresh → placeholder removed at the next tick; a placeholder appears in the library ~60 s after the write
+    (`ReportFileSystemChanged` debounce). Sweep path (file deleted, no scan): placeholder written within 30–45 s,
+    visible ~60 s later, while the owner's stale item stays until the next scan (its stream answers 404, the
+    placeholder plays).
+20. **User data (correction 13, recorded).** Watched/resume/favourite carried over to the placeholder for the Pioneer
+    One episode (event path, new placeholder item id) and in the second Sintel sweep run; one earlier Sintel run showed
+    the new placeholder as unwatched while the owner's stale item was still in the library. When the local file comes
+    back, the local item keeps its user data (same item id). No plugin code.
+21. **Deploy to the harness with `docker cp` + restart, not just `dotnet build`.** After a rebuild the container
+    process keeps running the old code from the bind-mounted Release folder although the file looks updated. Verify
+    new code by behaviour or by `docker cp` + hash.
+
+
+From the final whole-branch review (fix wave):
+
+22. **Jellyfin's NFO saver vs. the planner.** With the "Nfo" metadata saver on, Jellyfin rewrites placeholder `.nfo`
+    files and adds `season.nfo`. The planner therefore no longer compares desired content with the disk: the plugin
+    keeps `placeholder-ledger.json` (per root, relative path → hash of what it last wrote), rewrites a file only when the
+    desired content differs from that record (or the file is gone), and deletes only files it wrote; foreign files go
+    only with their whole placeholder folder. An install without a ledger seeds it from disk (`.strm`, same-name `.nfo`,
+    `tvshow.nfo`).
+23. **Placeholder roots must be the plugin's own.** Sync and reconcile refuse to run when a root equals, contains or is
+    inside a library location that is not itself a plugin root, or when a root is non-empty without the `.jellyshare`
+    marker; the marker is only created in a new or empty folder (writer and admin attach).
+24. **"Sync now" is asynchronous.** `POST admin/sync` answers 202 `{started, alreadyRunning}`; `admin/status` carries
+    `syncRunning` and `syncError`. Images are downloaded after the sync lock is released (4 folders at a time), and up to
+    50 folders still missing images are retried per full sync. Removing a peer starts (or queues) a sync.
+25. **Targeted reconcile is key-scoped.** It uses the in-memory merged index (re-read only when the file changes), stats
+    only the affected placeholder paths against the ledger, and reads the library with provider-id queries
+    (`InternalItemsQuery.HasAnyProviderIds` for movies/series, `AncestorIds` = those series for episodes) instead of
+    the two full queries.
+26. **Provider catalog.** The ETag is computed from item ids + `DateModified` before any catalog entry is built (a 304
+    builds none), the built catalog is cached per share and ETag, and `IsExposed` looks up only the requested item (or
+    the series' episodes) in the shared libraries. Catalog fetches get 120 s (images 30 s, ping 15 s; the named
+    HttpClient timeout is 150 s). A container bitrate of 0 counts as unknown, so a capped share transcodes it.
+27. **Relay source order.** Peers whose last sync failed are tried last instead of being skipped; disabled or removed
+    peers stay excluded. A `RelayBaseOverride` must be a loopback URL, otherwise the sync stops with an error.
