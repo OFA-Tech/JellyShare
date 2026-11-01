@@ -47,5 +47,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             () => Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("JellyShare plugin not loaded"),
             TimeProvider.System,
             sp.GetRequiredService<ILogger<SyncService>>()));
+
+        serviceCollection.AddSingleton<IConsumerIndex>(new ConsumerIndexFiles(
+            () => Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("JellyShare plugin not loaded")));
+        serviceCollection.AddSingleton(new RelaySessions(TimeProvider.System));
+        serviceCollection.AddSingleton<IPlaceholderLookup, JellyfinPlaceholderLookup>();
+        PlaybackInfoFilter.Register(serviceCollection);
     }
 }

@@ -411,3 +411,21 @@ From Task 8 (harness, 12.4.0):
     (`Big Buck Bunny (2008) [tmdbid-10378] (2008) [tmdbid-10378]`, series `Pioneer One [tvdbid-153021] [tvdbid-153021]`).
     Jellyfin still parses the right id and the titles merge; real servers with metadata have clean names.
     `PathNaming` was not changed.
+
+From Task 9 (harness, 12.4.0, `harness/relay_gate.py`, `harness/relay_web_play.js`):
+
+16. **PlaybackInfo filter registration:** `services.Configure<MvcOptions>(o => o.Filters.AddService<PlaybackInfoFilter>())`
+    from `IPluginServiceRegistrator` applies to Jellyfin's own controllers (proved by behaviour: GET/POST
+    `PlaybackInfo` and `/Items`, `/Items/{id}`, `/Users/{u}/Items/{id}` return `Path: ""` for the placeholder). No
+    `IStartupFilter` needed. In 12.4 `PlaybackInfoDto` lives in `Jellyfin.Api` (not referenced by plugins); the
+    request rule therefore sets the action arguments `enableDirectPlay`/`enableDirectStream` (the controller does
+    `enableDirectStream ??= dto.EnableDirectStream`, so they win) and reads the body by reflection. `GET PlaybackInfo`
+    takes no device profile, so it never builds a transcode; only the response rule applies to it. The effective
+    max bitrate is `maxStreamingBitrate` (query) ?? body ?? body `DeviceProfile`, capped by the remote-client limit
+    (user, else server) when the caller is outside the LAN, as `MediaInfoHelper.GetMaxBitrate` does. Not covered:
+    a client that sends no profile and relies on its stored device capabilities.
+17. **Provider stream slots and long requests (Task 7/12 follow-up):** `StreamLimiter` refreshes a session only
+    when a request arrives. A static direct stream is often one long Range request, so after 30 s the provider
+    no longer counts it and a second title can start while the first still plays. The relay keeps one playback on
+    one peer (`RelaySessions`, same 30 s grace) but cannot fix the provider count; the limiter should hold the slot
+    for as long as a response is being sent. (Read from the code, not measured.)

@@ -58,7 +58,7 @@ public sealed class SyncService
     public const int MaxScansPerRun = 200;
 
     private const string PendingScansFile = "pending-scans.json";
-    private const string PeerStateFile = "peer-state.json";
+    private const string PeerStateFile = ConsumerIndexFiles.PeerStateFileName;
 
     private readonly IConfigProvider _config;
     private readonly IPeerClient _client;
