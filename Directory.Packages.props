@@ -8,6 +8,7 @@
     <PackageVersion Include="Jellyfin.Model" Version="12.0.0" />
   </ItemGroup>
   <ItemGroup Label="Host-provided abstractions (Jellyfin 12 runs on .NET 10; compile-only in Domain/Application)">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.11" />

@@ -26,6 +26,7 @@ public static class ApplicationSetup
     {
         ArgumentNullException.ThrowIfNull(services);
 
+        services.AddDispatcherSetup();
         services.AddSingleton<ShareTokenService>();
         services.AddSingleton(new StreamLimiter(TimeProvider.System));
         services.AddSingleton(sp => new CappedStreamService(
