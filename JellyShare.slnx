@@ -24,6 +24,7 @@
     <Project Path="Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="Tests/ArchitectureTests/JellyShare.ArchitectureTests.csproj" />
     <Project Path="Tests/JellyfinTests/JellyShare.JellyfinTests.csproj" />
     <Project Path="Tests/UnitTests/JellyShare.UnitTests.csproj" />
   </Folder>
