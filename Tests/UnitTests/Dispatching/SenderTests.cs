@@ -204,14 +204,14 @@ public sealed class LoggingBehaviorTests
     }
 
     [Fact]
-    public async Task Exception_IsLoggedAsError_AndRethrown()
+    public async Task Exception_IsRethrown_AndLeftToTheHostToLog()
     {
         var logger = new LevelLogger<LoggingBehavior<EchoQuery, Result<string>>>();
         var behavior = new LoggingBehavior<EchoQuery, Result<string>>(logger);
 
         await Should.ThrowAsync<IOException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new IOException("disk"), CancellationToken.None));
 
-        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
+        logger.Entries.ShouldBeEmpty();
     }
 
     [Fact]

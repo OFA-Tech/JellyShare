@@ -6,15 +6,15 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.Application.Behaviors;
 
 /// <summary>
-/// Logs each request by type name only (never its content, which may hold a token) at debug level, failures with their
-/// code, and exceptions, which are rethrown unchanged.
+/// Logs each request by type name only (never its content, which may hold a token) at debug level and failures with their
+/// code. Exceptions pass through unchanged and unlogged: the host logs them once.
 /// </summary>
 /// <typeparam name="TRequest">The request type.</typeparam>
 /// <typeparam name="TResponse">The response type.</typeparam>
 public sealed class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : IRequest<TResponse>
 {
-    private static readonly string RequestName = typeof(TRequest).Name;
+    private static readonly string _requestName = typeof(TRequest).Name;
 
     private readonly ILogger<LoggingBehavior<TRequest, TResponse>> _logger;
 
@@ -36,23 +36,18 @@ public sealed class LoggingBehavior<TRequest, TResponse> : IPipelineBehavior<TRe
             var elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             if (response is Result { IsFailure: true } failure)
             {
-                _logger.LogDebug("JellyShare: {RequestName} failed in {ElapsedMs}ms with {ErrorCode}", RequestName, elapsedMs, failure.Error.Code);
+                _logger.LogDebug("JellyShare: {RequestName} failed in {ElapsedMs}ms with {ErrorCode}", _requestName, elapsedMs, failure.Error.Code);
             }
             else
             {
-                _logger.LogDebug("JellyShare: {RequestName} completed in {ElapsedMs}ms", RequestName, elapsedMs);
+                _logger.LogDebug("JellyShare: {RequestName} completed in {ElapsedMs}ms", _requestName, elapsedMs);
             }
 
             return response;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogDebug("JellyShare: {RequestName} was cancelled after {ElapsedMs}ms", RequestName, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "JellyShare: {RequestName} threw after {ElapsedMs}ms", RequestName, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+            _logger.LogDebug("JellyShare: {RequestName} was cancelled after {ElapsedMs}ms", _requestName, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             throw;
         }
     }
