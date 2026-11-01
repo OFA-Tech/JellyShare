@@ -432,7 +432,11 @@ From Task 9 (harness, 12.4.0, `harness/relay_gate.py`, `harness/relay_web_play.j
     when a request arrives. A static direct stream is often one long Range request, so after 30 s the provider
     no longer counts it and a second title can start while the first still plays. The relay keeps one playback on
     one peer (`RelaySessions`, same 30 s grace) but cannot fix the provider count; the limiter should hold the slot
-    for as long as a response is being sent. (Read from the code, not measured.)
+    for as long as a response is being sent. (Read from the code, not measured.) **Fixed in Task 12:** requests hold
+    a `StreamLease` until the response ends (`Response.RegisterForDispose`; capped transcodes release it when ffmpeg
+    stops); measured in the harness with a 50 s rate-limited download from inside the Docker network (a second title
+    got 429 at 42 s). Downloads through Docker Desktop's host port forward finish early on the container side because
+    the forwarder buffers, so that path cannot show the hold.
 18. **Relay behind a reverse proxy on the same host (controller ruling).** The relay answers only loopback requests
     without any proxy header: `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`,
     `X-Real-IP`, `Forwarded`, `Via`, `X-Original-For`, `X-Original-Host`, `X-Original-Proto`, `CF-Connecting-IP`,

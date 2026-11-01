@@ -26,6 +26,27 @@ Status: skeleton. The plugin currently exposes the anonymous `GET /JellyShare/v1
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   ```
 
+## Stream limits and the bitrate cap
+
+- **Streams at once (per share):** a stream is one (share, title) session. It stays counted while any response for it
+  is still being sent, and for 30 s after the last one ends. Extra titles get `429` with `Retry-After: 30`; a request
+  for a file that turns out to be unreadable (`503`) gives its new slot back at once.
+- **Max bitrate (per share):** when a title's bitrate is above the cap, the provider does not send the file. It runs
+  a live transcode with Jellyfin's own ffmpeg (Dashboard → Playback → Transcoding: the ffmpeg path, and the hardware
+  encoder when hardware encoding is on: NVENC, QSV, VA-API, VideoToolbox or AMF; otherwise software x264 `veryfast`) to
+  MPEG-TS: H.264 at cap − 192 kbps (`-maxrate`/`-bufsize` at that rate) and AAC stereo at 192 kbps. If a hardware
+  encoder fails before sending any data, the provider retries in software. A title with an unknown bitrate is sent as
+  is. If Jellyfin has no ffmpeg path, or the cap is below 292 kbps (no room for video after the audio), the provider
+  answers `409` and the consumer tries another peer.
+- The transcode counts as a stream like any other, and ffmpeg is killed (whole process tree) as soon as the
+  consumer disconnects or the transcode finishes.
+- **Seeking a capped title:** the transcode has no byte ranges (`Accept-Ranges: none`, Range requests get the whole
+  stream from the start, status 200). A peer can start at an offset with `?start=<seconds>` (cut to the runtime).
+  On the consumer, Jellyfin sees a live MPEG-TS without a duration: the web client plays it through the consumer's
+  own HLS transcode. Seeking works within what the consumer has already received (in the harness a 2-minute clip
+  at a 500 kbps cap arrived in ~10 s and a seek to 1:30 played); a seek beyond that waits for the stream to catch up
+  or, in clients that reopen the URL, restarts it from the beginning. Uncapped titles keep full byte-range seeking.
+
 ## Build and test
 
 Requires the .NET 10 SDK.

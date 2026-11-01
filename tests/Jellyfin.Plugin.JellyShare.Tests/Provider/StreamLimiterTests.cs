@@ -127,6 +127,88 @@ public sealed class StreamLimiterTests
     }
 
     [Fact]
+    public void Session_HeldWhileBodyInFlight_DoesNotExpire()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+
+        _clock.Advance(TimeSpan.FromMinutes(10));
+
+        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        Assert.Equal(1, limiter.Active(ShareA));
+        lease!.Dispose();
+    }
+
+    [Fact]
+    public void Session_ReleasedAfterBody_ExpiresAfter30s()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+        _clock.Advance(TimeSpan.FromMinutes(10));
+
+        lease!.Dispose();
+        _clock.Advance(TimeSpan.FromSeconds(29));
+        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+    }
+
+    [Fact]
+    public void Session_WithTwoLeases_StaysHeldUntilBothDisposed()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var first));
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var second));
+        Assert.True(first!.IsNewSession);
+        Assert.False(second!.IsNewSession);
+
+        first.Dispose();
+        first.Dispose();
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+
+        second.Dispose();
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+    }
+
+    [Fact]
+    public void Abort_OfNewSession_ReleasesSlotImmediately()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+
+        lease!.Abort();
+
+        Assert.Equal(0, limiter.Active(ShareA));
+        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+    }
+
+    [Fact]
+    public void Abort_OfExistingSession_KeepsIt()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+
+        lease!.Abort();
+
+        Assert.Equal(1, limiter.Active(ShareA));
+        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+    }
+
+    [Fact]
+    public void TryAcquireLease_OverLimit_ReturnsNoLease()
+    {
+        var limiter = new StreamLimiter(_clock);
+        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out _));
+
+        Assert.False(limiter.TryAcquireLease(ShareA, Item2, 1, out var rejected));
+        Assert.Null(rejected);
+    }
+
+    [Fact]
     public void ParallelDistinctItems_NeverExceedLimit()
     {
         const int max = 3;

@@ -28,6 +28,7 @@ public class FederationController : ControllerBase
     private readonly IConfigProvider _config;
     private readonly ShareTokenService _tokens;
     private readonly StreamLimiter _limiter;
+    private readonly CappedStreamService _capped;
     private readonly ILogger<FederationController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="FederationController"/> class.</summary>
@@ -37,6 +38,7 @@ public class FederationController : ControllerBase
     /// <param name="config">The plugin configuration provider.</param>
     /// <param name="tokens">The share token verifier.</param>
     /// <param name="limiter">The per-share concurrent stream limiter.</param>
+    /// <param name="capped">The capped (transcoded) stream service.</param>
     /// <param name="logger">The logger.</param>
     public FederationController(
         IServerIdentity identity,
@@ -45,9 +47,11 @@ public class FederationController : ControllerBase
         IConfigProvider config,
         ShareTokenService tokens,
         StreamLimiter limiter,
+        CappedStreamService capped,
         ILogger<FederationController> logger)
     {
         _limiter = limiter;
+        _capped = capped;
         _logger = logger;
         _identity = identity;
         _catalog = catalog;
@@ -129,14 +133,18 @@ public class FederationController : ControllerBase
         return PhysicalFile(path, contentType);
     }
 
-    /// <summary>Streams the file of a movie or episode in the calling peer's catalog, with Range support.</summary>
+    /// <summary>
+    /// Streams the file of a movie or episode in the calling peer's catalog, with Range support. When the share has
+    /// a bitrate cap below the file's bitrate, serves a live MPEG-TS transcode within the cap instead (no Range).
+    /// </summary>
     /// <param name="itemId">The item id.</param>
-    /// <returns>The file, or 401/404/409/429/503.</returns>
+    /// <param name="start">Start offset in seconds for a capped transcode (ignored for the original file).</param>
+    /// <returns>The file or transcode, or 400/401/404/409/429/503.</returns>
     [HttpGet("stream/{itemId}")]
     [HttpHead("stream/{itemId}")]
     
     [AllowAnonymous]
-    public IActionResult Stream(string itemId)
+    public IActionResult Stream(string itemId, [FromQuery] string? start = null)
     {
         var share = Authenticate();
         if (share is null)
@@ -157,13 +165,26 @@ public class FederationController : ControllerBase
             return NotFound();
         }
 
-        var overCap = CheckBitrateCap(share, info);
-        if (overCap is not null)
+        EncoderSettings? encoder = null;
+        double? startSeconds = null;
+        var cap = share.MaxBitrate;
+        var overCap = cap is { } c && info.Bitrate is { } bitrate && bitrate > c;
+        if (overCap)
         {
-            return overCap;
+            if (!CappedStreamArgs.TryParseStart(start, info.RunTimeTicks, out startSeconds))
+            {
+                return StatusCode(StatusCodes.Status400BadRequest, new ErrorResponse("invalid start"));
+            }
+
+            encoder = _capped.Prepare(cap!.Value);
+            if (encoder is null)
+            {
+                // No usable ffmpeg or a cap too low to fit audio + video: the consumer tries another peer.
+                return StatusCode(StatusCodes.Status409Conflict, new ErrorResponse("over cap"));
+            }
         }
 
-        if (!_limiter.TryAcquire(share.Id, id, share.MaxStreams, out var isNewSession))
+        if (!_limiter.TryAcquireLease(share.Id, id, share.MaxStreams, out var lease))
         {
             Response.Headers.RetryAfter = "30";
             return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("stream limit reached"));
@@ -171,12 +192,20 @@ public class FederationController : ControllerBase
 
         if (!IsReadable(info.Path))
         {
+            lease.Abort();
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse("file unavailable"));
         }
 
-        if (isNewSession)
+        if (lease.IsNewSession)
         {
-            _logger.LogInformation("Stream started for share {Share}: {Item}", share.Name, info.Name);
+            _logger.LogInformation("Stream started for share {Share}: {Item}{Mode}", share.Name, info.Name, encoder is null ? string.Empty : " (capped transcode)");
+        }
+
+        // The session stays held until the response has been sent (Kestrel runs this when the request ends).
+        Response.RegisterForDispose(lease);
+        if (encoder is not null)
+        {
+            return _capped.CreateResult(encoder, info.Path, cap!.Value, startSeconds, lease);
         }
 
         if (!VideoContentTypes.TryGetContentType(info.Path, out var contentType))
@@ -196,17 +225,6 @@ public class FederationController : ControllerBase
         provider.Mappings[".m2ts"] = "video/mp2t";
         provider.Mappings[".ogv"] = "video/ogg";
         return provider;
-    }
-
-    // Placeholder until Task 12: a capped stream service replaces the 409 so the provider transcodes instead.
-    private ObjectResult? CheckBitrateCap(PeerShare share, StreamInfo info)
-    {
-        if (share.MaxBitrate is { } cap && info.Bitrate is { } bitrate && bitrate > cap)
-        {
-            return StatusCode(StatusCodes.Status409Conflict, new ErrorResponse("over cap"));
-        }
-
-        return null;
     }
 
     private static bool IsReadable(string path)

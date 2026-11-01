@@ -26,7 +26,8 @@ public sealed record LocalItem(Guid Id, string Type, string? Path, Guid? SeriesI
 /// <param name="Name">The display name (for the usage log).</param>
 /// <param name="Path">The file path, if any.</param>
 /// <param name="Bitrate">The total bitrate in bits per second, when known.</param>
-public sealed record StreamInfo(string Type, string Name, string? Path, long? Bitrate);
+/// <param name="RunTimeTicks">The runtime in ticks, when known.</param>
+public sealed record StreamInfo(string Type, string Name, string? Path, long? Bitrate, long? RunTimeTicks = null);
 
 /// <summary>Reads local library content, abstracted so the catalog logic stays unit-testable.</summary>
 public interface ILocalItemSource

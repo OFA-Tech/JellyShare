@@ -78,7 +78,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     private FederationController Controller(string? token, Action<HttpContext>? tweak = null)
     {
         var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
-        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, new StreamLimiter(TimeProvider.System), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
+        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
         var http = new DefaultHttpContext();
         if (token is not null)
         {

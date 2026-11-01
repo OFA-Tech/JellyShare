@@ -16,6 +16,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
 {
     private static readonly Guid Lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid MovieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
+    private static readonly Guid CappedId = Guid.Parse("00000001-0000-0000-0000-000000000002");
 
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "jellyshare-test-" + Guid.NewGuid().ToString("N"));
     private readonly FakeConfig _config = new();
@@ -36,6 +37,10 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         var source = new FakeSource();
         source.Items.Add((Lib, new LocalItem(MovieId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[MovieId] = new StreamInfo("Movie", "Movie", file, null);
+        source.Items.Add((Lib, new LocalItem(CappedId, "Movie", file, null, () => throw new InvalidOperationException())));
+        source.Streams[CappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
+        _config.Current.Shares[0].MaxBitrate = 2_000_000;
+        _config.Current.Shares[0].MaxStreams = 1;
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -46,6 +51,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         builder.Services.AddSingleton(_tokens);
         builder.Services.AddSingleton(new StreamLimiter(TimeProvider.System));
         builder.Services.AddSingleton<ILocalItemSource>(source);
+        builder.Services.AddSingleton(FakeCapped.Create());
         builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, _ => true));
         _app = builder.Build();
         _app.MapControllers();
@@ -101,6 +107,31 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal(4096, response.Content.Headers.ContentLength);
         Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task Capped_GetWithRange_Returns200TransportStream_WithoutRanges()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + CappedId.ToString("N") + "?start=10");
+        request.Headers.Add("X-JellyShare-Token", _token);
+        request.Headers.Range = new RangeHeaderValue(100, null);
+
+        var response = await _client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("video/mp2t", response.Content.Headers.ContentType!.MediaType);
+        Assert.Equal("none", string.Join(",", response.Headers.AcceptRanges));
+        Assert.Null(response.Content.Headers.ContentRange);
+        Assert.Equal(FakeFfmpegRunner.Payload, await response.Content.ReadAsByteArrayAsync());
+    }
+
+    [Fact]
+    public async Task Capped_InvalidStart_Returns400()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + CappedId.ToString("N") + "?start=-3");
+        request.Headers.Add("X-JellyShare-Token", _token);
+
+        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(request)).StatusCode);
     }
 
     [Fact]

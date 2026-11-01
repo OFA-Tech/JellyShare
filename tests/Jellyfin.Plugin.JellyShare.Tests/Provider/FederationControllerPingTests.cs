@@ -20,7 +20,7 @@ public class FederationControllerPingTests
         var identity = new FakeServerIdentity(name);
         var config = new FakeConfig();
         var source = new FakeSource();
-        return new FederationController(identity, new CatalogBuilder(source, identity, config), source, config, new ShareTokenService(), new StreamLimiter(TimeProvider.System), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
+        return new FederationController(identity, new CatalogBuilder(source, identity, config), source, config, new ShareTokenService(), new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
     }
 
     [Fact]

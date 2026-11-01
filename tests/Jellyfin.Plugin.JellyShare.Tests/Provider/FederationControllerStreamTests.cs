@@ -4,6 +4,7 @@ using Jellyfin.Plugin.JellyShare.Protocol;
 using Jellyfin.Plugin.JellyShare.Provider;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -25,6 +26,9 @@ public sealed class FederationControllerStreamTests : IDisposable
     private readonly ManualTimeProvider _clock = new();
     private readonly StreamLimiter _limiter;
     private readonly ListLogger _logger = new();
+    private readonly FakeEncoderSettings _encoder = new();
+    private readonly FakeFfmpegRunner _runner = new();
+    private readonly List<CompletableResponseFeature> _responses = new();
     private readonly string _token;
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "jellyshare-test-" + Guid.NewGuid().ToString("N"));
     private readonly string _movieFile;
@@ -72,12 +76,18 @@ public sealed class FederationControllerStreamTests : IDisposable
         _source.Streams[id] = new StreamInfo(type, "Name of " + id.ToString("N")[..8], path, null);
     }
 
-    private FederationController Controller(string? token, string method = "GET")
+    private FederationController Controller(string? token, string method = "GET", CancellationToken aborted = default)
     {
         var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
-        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, _limiter, _logger);
+        var capped = new CappedStreamService(_encoder, _runner, Microsoft.Extensions.Logging.Abstractions.NullLogger<CappedStreamService>.Instance);
+        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, _limiter, capped, _logger);
         var http = new DefaultHttpContext();
+        var response = new CompletableResponseFeature();
+        http.Features.Set<IHttpResponseFeature>(response);
+        _responses.Add(response);
         http.Request.Method = method;
+        http.Response.Body = new MemoryStream();
+        http.RequestAborted = aborted;
         if (token is not null)
         {
             http.Request.Headers["X-JellyShare-Token"] = token;
@@ -86,6 +96,28 @@ public sealed class FederationControllerStreamTests : IDisposable
         controller.ControllerContext = new ControllerContext { HttpContext = http };
         return controller;
     }
+
+    private void CompleteAllResponses()
+    {
+        foreach (var response in _responses)
+        {
+            response.CompleteAsync().GetAwaiter().GetResult();
+        }
+    }
+
+    private void CapMovie(int cap = 2_000_000, long bitrate = 8_000_000)
+    {
+        _config.Current.Shares[0].MaxBitrate = cap;
+        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate, RunTimeTicks = TimeSpan.FromMinutes(90).Ticks };
+    }
+
+    private static async Task<HttpContext> Execute(FederationController controller, IActionResult result)
+    {
+        await result.ExecuteResultAsync(new ActionContext(controller.HttpContext, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor()));
+        return controller.HttpContext;
+    }
+
+    private static byte[] Body(HttpContext http) => ((MemoryStream)http.Response.Body).ToArray();
 
     [Fact]
     public void Stream_NoToken_Returns401()
@@ -211,9 +243,56 @@ public sealed class FederationControllerStreamTests : IDisposable
     public void Stream_AfterIdle30s_OtherItemIsServed()
     {
         Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        CompleteAllResponses();
         _clock.Advance(TimeSpan.FromSeconds(30));
 
         Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public void Session_HeldWhileBodyInFlight_DoesNotExpire()
+    {
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+
+        _clock.Advance(TimeSpan.FromMinutes(5));
+
+        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+    }
+
+    [Fact]
+    public void Session_ReleasedAfterBody_ExpiresAfter30s()
+    {
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        CompleteAllResponses();
+
+        _clock.Advance(TimeSpan.FromSeconds(29));
+        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public void NewSession_503_ReleasesSlot()
+    {
+        File.Delete(_movieFile);
+
+        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+
+        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public void ExistingSession_503_KeepsSlot()
+    {
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        CompleteAllResponses();
+        File.Delete(_movieFile);
+
+        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+
+        Assert.Equal(1, _limiter.Active(_config.Current.Shares[0].Id));
     }
 
     [Fact]
@@ -225,16 +304,158 @@ public sealed class FederationControllerStreamTests : IDisposable
     }
 
     [Fact]
-    public void Stream_BitrateAboveCap_Returns409_AndDoesNotCountAgainstLimit()
+    public async Task Stream_BitrateAboveCap_ServesTranscodeOfItemFile()
     {
-        _config.Current.Shares[0].MaxBitrate = 1_000_000;
-        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = 8_000_000 };
+        CapMovie();
+        var controller = Controller(_token);
+        controller.Request.Headers.Range = "bytes=1000-";
+
+        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+
+        Assert.Equal(200, http.Response.StatusCode);
+        Assert.Equal("video/mp2t", http.Response.ContentType);
+        Assert.Equal("none", http.Response.Headers.AcceptRanges.ToString());
+        Assert.False(http.Response.Headers.ContainsKey("Content-Range"));
+        Assert.Null(http.Response.ContentLength);
+        Assert.Equal(FakeFfmpegRunner.Payload, Body(http));
+        var call = Assert.Single(_runner.Calls);
+        Assert.Equal("/usr/lib/jellyfin-ffmpeg/ffmpeg", call.Exe);
+        Assert.Equal(CappedStreamArgs.Build(_movieFile, 2_000_000, null, HardwareEncoder.None, null), call.Args);
+    }
+
+    [Fact]
+    public async Task Stream_Capped_StartQuery_SeeksBeforeInput()
+    {
+        CapMovie();
+        var controller = Controller(_token);
+
+        await Execute(controller, controller.Stream(MovieId.ToString("N"), "600.5"));
+
+        var args = Assert.Single(_runner.Calls).Args.ToList();
+        Assert.Equal("600.5", args[args.IndexOf("-ss") + 1]);
+        Assert.True(args.IndexOf("-ss") < args.IndexOf("-i"));
+    }
+
+    [Fact]
+    public async Task Stream_Capped_StartBeyondRuntime_IsCappedToRuntime()
+    {
+        CapMovie();
+        var controller = Controller(_token);
+
+        await Execute(controller, controller.Stream(MovieId.ToString("N"), "999999"));
+
+        var args = Assert.Single(_runner.Calls).Args.ToList();
+        Assert.Equal("5400", args[args.IndexOf("-ss") + 1]);
+    }
+
+    [Theory]
+    [InlineData("-5")]
+    [InlineData("abc")]
+    [InlineData("1;rm")]
+    public void Stream_InvalidStart_Returns400_WithoutSession(string start)
+    {
+        CapMovie();
+
+        var result = Controller(_token).Stream(MovieId.ToString("N"), start);
+
+        Assert.Equal(400, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+        Assert.Empty(_runner.Calls);
+    }
+
+    [Fact]
+    public async Task Stream_Capped_Head_SendsHeadersWithoutTranscoding()
+    {
+        CapMovie();
+        var controller = Controller(_token, "HEAD");
+
+        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+
+        Assert.Equal(200, http.Response.StatusCode);
+        Assert.Equal("video/mp2t", http.Response.ContentType);
+        Assert.Empty(Body(http));
+        Assert.Empty(_runner.Calls);
+    }
+
+    [Fact]
+    public async Task Stream_Capped_CountsAgainstLimit_WhileInFlight_AndDisconnectStopsRunner()
+    {
+        CapMovie();
+        _runner.BlockUntilCancelled = true;
+        using var disconnect = new CancellationTokenSource();
+        var controller = Controller(_token, aborted: disconnect.Token);
+
+        var running = Execute(controller, controller.Stream(MovieId.ToString("N")));
+        await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _clock.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+
+        disconnect.Cancel();
+        await running.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(_runner.SawCancellation);
+        _clock.Advance(TimeSpan.FromSeconds(30));
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public async Task Stream_Capped_FinishedTranscode_ReleasesSessionWithoutResponseCompletion()
+    {
+        CapMovie();
+        var controller = Controller(_token);
+
+        await Execute(controller, controller.Stream(MovieId.ToString("N")));
+        _clock.Advance(TimeSpan.FromSeconds(30));
+
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public async Task Stream_Capped_HardwareFailsBeforeOutput_RetriesInSoftware()
+    {
+        CapMovie();
+        _encoder.Settings = _encoder.Settings! with { Hardware = HardwareEncoder.Nvenc };
+        _runner.FailFirstCallWithoutOutput = true;
+        var controller = Controller(_token);
+
+        var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
+
+        Assert.Equal(2, _runner.Calls.Count);
+        Assert.Contains("h264_nvenc", _runner.Calls[0].Args);
+        Assert.Contains("libx264", _runner.Calls[1].Args);
+        Assert.Equal(FakeFfmpegRunner.Payload, Body(http));
+    }
+
+    [Fact]
+    public void Stream_BitrateAboveCap_NoFfmpeg_Returns409_AndDoesNotCountAgainstLimit()
+    {
+        CapMovie();
+        _encoder.Settings = null;
 
         var result = Controller(_token).Stream(MovieId.ToString("N"));
 
         Assert.Equal(409, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
         Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
         Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+    }
+
+    [Fact]
+    public void Stream_CapTooLowForTranscode_Returns409()
+    {
+        CapMovie(cap: 200_000);
+
+        Assert.Equal(409, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+    }
+
+    [Fact]
+    public void Stream_BelowCap_IgnoresStart_AndServesFile()
+    {
+        _config.Current.Shares[0].MaxBitrate = 10_000_000;
+        _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = 1_000_000 };
+
+        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N"), "60"));
+        Assert.Empty(_runner.Calls);
     }
 
     [Theory]

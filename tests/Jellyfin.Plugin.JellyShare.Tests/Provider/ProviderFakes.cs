@@ -21,6 +21,82 @@ internal sealed class FakeConfig : IConfigProvider
     };
 }
 
+internal sealed class FakeEncoderSettings : IEncoderSettingsSource
+{
+    public EncoderSettings? Settings { get; set; } = new("/usr/lib/jellyfin-ffmpeg/ffmpeg", HardwareEncoder.None, null);
+
+    public EncoderSettings? Get() => Settings;
+}
+
+internal sealed class FakeFfmpegRunner : IFfmpegRunner
+{
+    public static readonly byte[] Payload = System.Text.Encoding.ASCII.GetBytes("G-TS-PAYLOAD");
+
+    public List<(string Exe, IReadOnlyList<string> Args)> Calls { get; } = new();
+
+    public bool BlockUntilCancelled { get; set; }
+
+    public bool FailFirstCallWithoutOutput { get; set; }
+
+    public bool SawCancellation { get; private set; }
+
+    public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<FfmpegRunResult> RunAsync(string executable, IReadOnlyList<string> arguments, Stream output, CancellationToken cancellationToken)
+    {
+        lock (Calls)
+        {
+            Calls.Add((executable, arguments.ToList()));
+        }
+
+        Started.TrySetResult();
+        if (FailFirstCallWithoutOutput && Calls.Count == 1)
+        {
+            return new FfmpegRunResult(1, 0, "Unknown encoder");
+        }
+
+        await output.WriteAsync(Payload, cancellationToken);
+        if (BlockUntilCancelled)
+        {
+            try
+            {
+                await Task.Delay(Timeout.Infinite, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                SawCancellation = true;
+                throw;
+            }
+        }
+
+        return new FfmpegRunResult(0, Payload.Length, string.Empty);
+    }
+}
+
+internal static class FakeCapped
+{
+    public static CappedStreamService Create()
+        => new(new FakeEncoderSettings(), new FakeFfmpegRunner(), Microsoft.Extensions.Logging.Abstractions.NullLogger<CappedStreamService>.Instance);
+}
+
+/// <summary>Response feature that records OnCompleted callbacks so tests can finish a response.</summary>
+internal sealed class CompletableResponseFeature : Microsoft.AspNetCore.Http.Features.HttpResponseFeature
+{
+    private readonly List<(Func<object, Task> Callback, object State)> _completed = new();
+
+    public override void OnCompleted(Func<object, Task> callback, object state) => _completed.Add((callback, state));
+
+    public async Task CompleteAsync()
+    {
+        var callbacks = _completed.ToList();
+        _completed.Clear();
+        foreach (var (callback, state) in callbacks)
+        {
+            await callback(state);
+        }
+    }
+}
+
 internal sealed class FakeSource : ILocalItemSource
 {
     public List<(Guid Library, LocalItem Item)> Items { get; } = new();

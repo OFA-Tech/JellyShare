@@ -108,7 +108,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             case Episode:
                 var bitrate = item.TotalBitrate
                     ?? _mediaSourceManager.GetMediaStreams(item.Id).FirstOrDefault(s => s.Type == MediaStreamType.Video)?.BitRate;
-                return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate);
+                return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate, item.RunTimeTicks);
             case null:
                 return null;
             default:
