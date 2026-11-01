@@ -83,6 +83,38 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
     {
         services.AddSingleton<PlaybackInfoFilter>();
         services.Configure<MvcOptions>(o => o.Filters.AddService<PlaybackInfoFilter>());
+        services.AddHostedService<PlaybackInfoTargetCheck>();
+    }
+
+    /// <summary>
+    /// Checks that Jellyfin still has the action the bitrate rule hooks into: a <see cref="PlaybackInfoTemplate"/> route
+    /// declaring <c>itemId</c> and <c>enableDirectStream</c>. A future Jellyfin that renames them would silently turn the
+    /// rule off, so this is logged as a warning at startup.
+    /// </summary>
+    /// <param name="actions">The registered MVC actions.</param>
+    /// <returns>A warning, or <c>null</c> when the target is found.</returns>
+    public static string? TargetWarning(IEnumerable<Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor> actions)
+    {
+        ArgumentNullException.ThrowIfNull(actions);
+        var routes = actions
+            .Where(a => string.Equals(a.AttributeRouteInfo?.Template, PlaybackInfoTemplate, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (routes.Count == 0)
+        {
+            return "JellyShare: Jellyfin's PlaybackInfo action (" + PlaybackInfoTemplate + ") was not found. Placeholders may play "
+                + "above a client's bitrate limit (direct stream is not turned off). Check for a JellyShare update.";
+        }
+
+        static bool Declares(Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor a, string name)
+            => a.Parameters.Any(p => string.Equals(p.Name, name, StringComparison.Ordinal));
+
+        if (!routes.Any(a => Declares(a, "itemId") && Declares(a, EnableDirectStream)))
+        {
+            return "JellyShare: Jellyfin's PlaybackInfo action no longer declares itemId/" + EnableDirectStream + ". Placeholders "
+                + "may play above a client's bitrate limit. Check for a JellyShare update.";
+        }
+
+        return null;
     }
 
     /// <inheritdoc />
