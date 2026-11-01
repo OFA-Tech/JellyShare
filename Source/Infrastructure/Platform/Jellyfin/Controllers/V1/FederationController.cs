@@ -1,10 +1,12 @@
 using JellyShare.Application.Features.Catalog;
+using JellyShare.Application.Features.Federation;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
-using JellyShare.Domain.Interfaces.Platform;
+using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Models.Requests.Federation;
 using JellyShare.Domain.Models.Streaming;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -19,7 +21,7 @@ namespace JellyShare.Jellyfin.Controllers.V1;
 /// </summary>
 [ApiController]
 [Route("JellyShare/v1")]
-public class FederationController : ControllerBase
+public class FederationController : JellyShareControllerBase
 {
     /// <summary>Name of the request header carrying the share token.</summary>
     public const string TokenHeader = ProtocolInfo.TokenHeader;
@@ -28,7 +30,6 @@ public class FederationController : ControllerBase
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
     private static readonly FileExtensionContentTypeProvider VideoContentTypes = CreateVideoContentTypes();
 
-    private readonly IServerIdentity _identity;
     private readonly CatalogBuilder _catalog;
     private readonly ILocalItemSource _source;
     private readonly ISettingsProvider _config;
@@ -38,8 +39,8 @@ public class FederationController : ControllerBase
     private readonly ILogger<FederationController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="FederationController"/> class.</summary>
-    /// <param name="identity">The local server identity.</param>
-    /// <param name="catalog">The catalog builder.</param>
+    /// <param name="sender">Dispatches the ping and catalog use cases.</param>
+    /// <param name="catalog">The catalog builder (exposure checks for images and streams).</param>
     /// <param name="source">The local item source (used for image paths).</param>
     /// <param name="config">The plugin configuration provider.</param>
     /// <param name="tokens">The share token verifier.</param>
@@ -47,7 +48,7 @@ public class FederationController : ControllerBase
     /// <param name="capped">The capped (transcoded) stream service.</param>
     /// <param name="logger">The logger.</param>
     public FederationController(
-        IServerIdentity identity,
+        ISender sender,
         CatalogBuilder catalog,
         ILocalItemSource source,
         ISettingsProvider config,
@@ -55,11 +56,11 @@ public class FederationController : ControllerBase
         StreamLimiter limiter,
         CappedStreamService capped,
         ILogger<FederationController> logger)
+        : base(sender)
     {
         _limiter = limiter;
         _capped = capped;
         _logger = logger;
-        _identity = identity;
         _catalog = catalog;
         _source = source;
         _config = config;
@@ -67,38 +68,36 @@ public class FederationController : ControllerBase
     }
 
     /// <summary>Anonymous liveness and protocol-version probe.</summary>
+    /// <param name="ct">The cancellation token.</param>
     /// <returns>The protocol version and server name.</returns>
     [HttpGet("ping")]
     [AllowAnonymous]
     [Produces("application/json")]
-    public ActionResult<PingResponse> Ping()
+    public async Task<ActionResult<PingResponse>> Ping(CancellationToken ct = default)
     {
-        return new PingResponse(ProtocolInfo.Version, _identity.ServerName);
+        var result = await Sender.Send(new PingQuery(), ct).ConfigureAwait(false);
+        return result.IsSuccess ? result.Value : ErrorResult(result.Error);
     }
 
     /// <summary>Gets the catalog the calling peer may see.</summary>
+    /// <param name="ct">The cancellation token.</param>
     /// <returns>The catalog, 304 when <c>If-None-Match</c> matches, or 401.</returns>
     [HttpGet("catalog")]
     [AllowAnonymous]
     [Produces("application/json")]
-    public IActionResult Catalog()
+    public async Task<IActionResult> Catalog(CancellationToken ct = default)
     {
-        var share = Authenticate();
-        if (share is null)
+        var query = new GetCatalogQuery(Request.Headers[TokenHeader].ToString(), Request.Headers.IfNoneMatch.ToArray());
+        var result = await Sender.Send(query, ct).ConfigureAwait(false);
+        if (result.IsFailure)
         {
-            return Unauthorized401();
+            return ErrorResult(result.Error);
         }
 
-        // The ETag is known before any catalog entry is built, so a 304 costs one library read and no per-item queries.
-        var plan = _catalog.Plan(share);
-        var etag = "\"" + plan.Etag + "\"";
-        Response.Headers.ETag = etag;
-        if (IfNoneMatchContains(etag))
-        {
-            return StatusCode(StatusCodes.Status304NotModified);
-        }
-
-        return Ok(plan.Build());
+        Response.Headers.ETag = result.Value.Etag;
+        return result.Value.NotModified
+            ? StatusCode(StatusCodes.Status304NotModified)
+            : Ok(result.Value.Catalog);
     }
 
     /// <summary>Gets an image of an item in the calling peer's catalog.</summary>
@@ -268,28 +267,5 @@ public class FederationController : ControllerBase
         return _tokens.Verify(presented, _config.Current.Shares);
     }
 
-    private ObjectResult Unauthorized401()
-        => StatusCode(StatusCodes.Status401Unauthorized, new ErrorResponse("unauthorized"));
-
-    private bool IfNoneMatchContains(string etag)
-    {
-        foreach (var header in Request.Headers.IfNoneMatch)
-        {
-            foreach (var part in (header ?? string.Empty).Split(','))
-            {
-                var candidate = part.Trim();
-                if (candidate.StartsWith("W/", StringComparison.Ordinal))
-                {
-                    candidate = candidate[2..];
-                }
-
-                if (candidate == etag || candidate == "*")
-                {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
+    private ObjectResult Unauthorized401() => ErrorResult(GetCatalogQueryHandler.Unauthorized);
 }

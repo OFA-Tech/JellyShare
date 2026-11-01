@@ -5,6 +5,7 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Jellyfin.Controllers.V1;
+using JellyShare.JellyfinTests.Fakes;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -94,7 +95,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     private FederationController Controller(string? token, Action<HttpContext>? tweak = null)
     {
         var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
-        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
+        var controller = new FederationController(FederationSender.Create(new FakeIdentity(), builder, _config, _tokens), builder, _source, _config, _tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
         var http = new DefaultHttpContext();
         if (token is not null)
         {
@@ -109,7 +110,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Catalog_NoToken_Returns401()
     {
-        var result = Controller(null).Catalog();
+        var result = Controller(null).Catalog().GetAwaiter().GetResult();
 
         Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
     }
@@ -120,7 +121,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
         const string wrong = "js1_not-a-real-token-value";
         var controller = Controller(wrong);
 
-        var result = Assert.IsAssignableFrom<ObjectResult>(controller.Catalog());
+        var result = Assert.IsAssignableFrom<ObjectResult>(controller.Catalog().GetAwaiter().GetResult());
 
         Assert.Equal(401, result.StatusCode);
         Assert.DoesNotContain(wrong, System.Text.Json.JsonSerializer.Serialize(result.Value));
@@ -131,7 +132,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         _config.Settings.Shares[0].Enabled = false;
 
-        var result = Controller(_token).Catalog();
+        var result = Controller(_token).Catalog().GetAwaiter().GetResult();
 
         Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
     }
@@ -141,7 +142,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token);
 
-        var result = Assert.IsType<OkObjectResult>(controller.Catalog());
+        var result = Assert.IsType<OkObjectResult>(controller.Catalog().GetAwaiter().GetResult());
 
         var catalog = Assert.IsType<CatalogResponse>(result.Value);
         Assert.Equal(2, catalog.Items.Count);
@@ -152,10 +153,10 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Catalog_IfNoneMatchMatches_Returns304WithoutBody()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog()).Value).Etag;
+        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).Value).Etag;
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        var result = controller.Catalog();
+        var result = controller.Catalog().GetAwaiter().GetResult();
 
         Assert.Equal(304, Assert.IsType<StatusCodeResult>(result).StatusCode);
         Assert.Equal("\"" + etag + "\"", controller.Response.Headers.ETag.ToString());
@@ -164,13 +165,13 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Catalog_304_MaterializesNothing()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog()).Value).Etag;
+        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).Value).Etag;
         _materialized = 0;
 
         // A fresh builder (no cache): the 304 answer must still not build any catalog entry.
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        Assert.Equal(304, Assert.IsType<StatusCodeResult>(controller.Catalog()).StatusCode);
+        Assert.Equal(304, Assert.IsType<StatusCodeResult>(controller.Catalog().GetAwaiter().GetResult()).StatusCode);
         Assert.Equal(0, _materialized);
     }
 
@@ -179,17 +180,17 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"deadbeef\"");
 
-        Assert.IsType<OkObjectResult>(controller.Catalog());
+        Assert.IsType<OkObjectResult>(controller.Catalog().GetAwaiter().GetResult());
     }
 
     [Fact]
     public void Catalog_RevocationIsImmediate()
     {
-        Assert.IsType<OkObjectResult>(Controller(_token).Catalog());
+        Assert.IsType<OkObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult());
 
         _config.Settings.Shares.Clear();
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Catalog()).StatusCode);
+        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Catalog().GetAwaiter().GetResult()).StatusCode);
     }
 
     [Fact]

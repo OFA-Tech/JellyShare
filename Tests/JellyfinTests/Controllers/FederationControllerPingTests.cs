@@ -4,6 +4,7 @@ using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Jellyfin.Controllers.V1;
+using JellyShare.JellyfinTests.Fakes;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -23,7 +24,9 @@ public class FederationControllerPingTests
         var identity = new FakeServerIdentity(name);
         var config = new FakeConfig();
         var source = new FakeSource();
-        return new FederationController(identity, new CatalogBuilder(source, identity, config), source, config, new ShareTokenService(), new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
+        var catalog = new CatalogBuilder(source, identity, config);
+        var tokens = new ShareTokenService();
+        return new FederationController(FederationSender.Create(identity, catalog, config, tokens), catalog, source, config, tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
     }
 
     [Fact]
@@ -31,7 +34,7 @@ public class FederationControllerPingTests
     {
         var controller = NewController("Alice");
 
-        var result = controller.Ping();
+        var result = controller.Ping().GetAwaiter().GetResult();
 
         Assert.NotNull(result.Value);
         Assert.Equal("1.0", result.Value!.ProtocolVersion);
@@ -43,7 +46,7 @@ public class FederationControllerPingTests
     {
         var controller = NewController("Alice");
 
-        var json = JsonSerializer.Serialize(controller.Ping().Value);
+        var json = JsonSerializer.Serialize(controller.Ping().GetAwaiter().GetResult().Value);
 
         Assert.Equal("{\"protocolVersion\":\"1.0\",\"serverName\":\"Alice\"}", json);
     }

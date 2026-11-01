@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using JellyShare.Application.Features.Catalog;
+using JellyShare.Application.Setup;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
@@ -60,6 +61,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         builder.Services.AddSingleton<ILocalItemSource>(source);
         builder.Services.AddSingleton(FakeCapped.Create());
         builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, _ => true));
+        builder.Services.AddDispatcherSetup();
         _app = builder.Build();
         _app.MapControllers();
         await _app.StartAsync();

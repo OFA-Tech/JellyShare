@@ -6,6 +6,7 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Jellyfin.Controllers.V1;
 using JellyShare.JellyfinTests.Fakes;
+using JellyShare.JellyfinTests.Fakes;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -90,7 +91,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
         _capped ??= new CappedStreamService(_encoder, _runner, _clock, _cappedLogger);
-        var controller = new FederationController(new FakeIdentity(), builder, _source, _config, _tokens, _limiter, _capped, _logger);
+        var controller = new FederationController(FederationSender.Create(new FakeIdentity(), builder, _config, _tokens), builder, _source, _config, _tokens, _limiter, _capped, _logger);
         var http = new DefaultHttpContext();
         var response = new CompletableResponseFeature();
         http.Features.Set<IHttpResponseFeature>(response);
