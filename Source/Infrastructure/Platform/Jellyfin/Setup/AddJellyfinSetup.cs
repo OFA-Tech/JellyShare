@@ -1,4 +1,3 @@
-using JellyShare.Application.Features.Peers;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Application.Storage;
 using JellyShare.Domain.Interfaces.Configuration;
@@ -35,13 +34,6 @@ public static class JellyfinSetup
         services.AddSingleton<IFfmpegRunner, FfmpegProcessRunner>();
 
         services.AddSingleton<IRelayBase, JellyfinRelayBase>();
-        services.AddHttpClient(PeerClient.HttpClientName, c => c.Timeout = PeerClient.HttpClientTimeout)
-            .ConfigurePrimaryHttpMessageHandler(PeerClient.CreatePrimaryHandler);
-        services.AddSingleton<IPeerClient>(sp =>
-        {
-            var factory = sp.GetRequiredService<IHttpClientFactory>();
-            return new PeerClient(() => factory.CreateClient(PeerClient.HttpClientName));
-        });
         services.AddSingleton<ILocalLibrary, JellyfinLocalLibrary>();
         services.AddSingleton<IScanReporter, LibraryMonitorScanReporter>();
         services.AddSingleton<ILocalItemEvents, JellyfinLocalItemEvents>();

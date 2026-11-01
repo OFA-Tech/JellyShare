@@ -67,6 +67,7 @@ public sealed partial class ConventionTests
 
         registrator.ShouldContain(".AddDomainSetup(");
         registrator.ShouldContain(".AddApplicationSetup(");
+        registrator.ShouldContain(".AddModulesSetup(");
         registrator.ShouldContain(".AddJellyfinSetup(");
     }
 

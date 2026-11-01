@@ -1,5 +1,4 @@
 using JellyShare.Application.Features.Catalog;
-using JellyShare.Application.Features.Peers;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Application.Storage;
 using JellyShare.Domain.Enums;
@@ -13,6 +12,7 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Sync;
+using JellyShare.Domain.Rules;
 using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -575,11 +575,7 @@ public class AdminController : ControllerBase
         return string.IsNullOrEmpty(trimmed) || trimmed.Length > MaxNameLength || trimmed.Any(char.IsControl) ? null : trimmed;
     }
 
-    private static string? NormalizeUrl(string? url)
-    {
-        var uri = PeerClient.BuildUri(url, string.Empty);
-        return uri is null || !string.IsNullOrEmpty(uri.UserInfo) ? null : uri.AbsoluteUri.TrimEnd('/');
-    }
+    private static string? NormalizeUrl(string? url) => PeerUri.Normalize(url);
 
     private static bool SamePath(string a, string b)
     {

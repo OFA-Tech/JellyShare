@@ -10,6 +10,11 @@ internal static class Solution
     public const string ApplicationName = "JellyShare.Application";
     public const string JellyfinName = "JellyShare.Jellyfin";
 
+    public static readonly (string Assembly, string Folder)[] InfrastructureModules =
+    [
+        ("JellyShare.Data.Peers", "Source/Infrastructure/Api/Data.Peers"),
+    ];
+
     public static readonly string[] HostNamespaces = ["MediaBrowser", "Jellyfin", "Emby", "Microsoft.AspNetCore"];
 
     public static readonly (string Assembly, string Folder)[] SourceProjects =
@@ -17,6 +22,7 @@ internal static class Solution
         (DomainName, "Source/Domain"),
         (ApplicationName, "Source/Application"),
         (JellyfinName, "Source/Infrastructure/Platform/Jellyfin"),
+        .. InfrastructureModules,
     ];
 
     public static Assembly Domain => typeof(global::JellyShare.Domain.Setup.DomainSetup).Assembly;

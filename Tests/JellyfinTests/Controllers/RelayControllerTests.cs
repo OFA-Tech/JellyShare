@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
-using JellyShare.Application.Features.Peers;
+using JellyShare.Data.Peers.Clients;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;

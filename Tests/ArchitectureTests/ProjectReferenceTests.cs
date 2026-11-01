@@ -17,9 +17,9 @@ public sealed class ProjectReferenceTests
             .ShouldBe([Solution.DomainName]);
 
     [Fact]
-    public void Jellyfin_ReferencesDomainAndApplication()
+    public void Jellyfin_ReferencesDomainApplicationAndEveryModule()
         => Solution.ProjectReferences(Solution.Full("Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj"))
-            .ShouldBe([Solution.DomainName, Solution.ApplicationName], ignoreOrder: true);
+            .ShouldBe([Solution.DomainName, Solution.ApplicationName, .. Solution.InfrastructureModules.Select(m => m.Assembly)], ignoreOrder: true);
 
     [Fact]
     public void UnitTests_DoNotReferenceTheJellyfinProject()

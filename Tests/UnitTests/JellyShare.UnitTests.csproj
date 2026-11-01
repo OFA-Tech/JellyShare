@@ -13,11 +13,13 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\Source\Domain\JellyShare.Domain.csproj" />
     <ProjectReference Include="..\..\Source\Application\JellyShare.Application.csproj" />
+    <ProjectReference Include="..\..\Source\Infrastructure\Api\Data.Peers\JellyShare.Data.Peers.csproj" />
   </ItemGroup>
 
 </Project>

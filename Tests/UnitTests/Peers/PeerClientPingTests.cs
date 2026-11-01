@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text;
-using JellyShare.Application.Features.Peers;
+using JellyShare.Data.Peers.Clients;
 using JellyShare.Domain.Enums;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;

@@ -1,4 +1,5 @@
 using JellyShare.Application.Setup;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Setup;
 using JellyShare.Jellyfin.Setup;
 using MediaBrowser.Controller;
@@ -18,8 +19,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection
             .AddDomainSetup()
             .AddApplicationSetup(DataFolder)
+            .AddModulesSetup(RegistrationSettings(), DataFolder)
             .AddJellyfinSetup(DataFolder);
     }
+
+    private static JellyShareSettings RegistrationSettings()
+        => Plugin.Instance?.Configuration.ToSettings() ?? new JellyShareSettings();
 
     private static string DataFolder()
         => Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("JellyShare plugin not loaded");

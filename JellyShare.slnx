@@ -20,6 +20,9 @@
     <Project Path="Source/Application/JellyShare.Application.csproj" />
   </Folder>
   <Folder Name="/Source/Infrastructure/" />
+  <Folder Name="/Source/Infrastructure/Api/">
+    <Project Path="Source/Infrastructure/Api/Data.Peers/JellyShare.Data.Peers.csproj" />
+  </Folder>
   <Folder Name="/Source/Infrastructure/Platform/">
     <Project Path="Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj" />
   </Folder>

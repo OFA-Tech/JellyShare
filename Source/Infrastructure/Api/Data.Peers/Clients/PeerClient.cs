@@ -8,8 +8,9 @@ using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Rules;
 
-namespace JellyShare.Application.Features.Peers;
+namespace JellyShare.Data.Peers.Clients;
 
 /// <summary>HTTP client for the <c>/JellyShare/v1</c> provider API. The token is only ever sent as a header.</summary>
 public sealed class PeerClient : IPeerClient
@@ -74,20 +75,7 @@ public sealed class PeerClient : IPeerClient
     /// <param name="baseUrl">The peer base URL, e.g. <c>https://h/jellyfin</c>.</param>
     /// <param name="relative">The API path, e.g. <c>JellyShare/v1/catalog</c>.</param>
     /// <returns>The absolute URI, or <c>null</c> when the base URL is not an absolute http(s) URL.</returns>
-    public static Uri? BuildUri(string? baseUrl, string relative)
-    {
-        ArgumentNullException.ThrowIfNull(relative);
-        if (string.IsNullOrWhiteSpace(baseUrl)
-            || !Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var b)
-            || (b.Scheme != Uri.UriSchemeHttp && b.Scheme != Uri.UriSchemeHttps)
-            || !string.IsNullOrEmpty(b.Query)
-            || !string.IsNullOrEmpty(b.Fragment))
-        {
-            return null;
-        }
-
-        return new Uri(b.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/" + relative.TrimStart('/'));
-    }
+    public static Uri? BuildUri(string? baseUrl, string relative) => PeerUri.Build(baseUrl, relative);
 
     /// <inheritdoc />
     public async Task<PeerPingResult> PingAsync(string baseUrl, CancellationToken ct)
