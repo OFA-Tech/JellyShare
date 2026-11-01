@@ -16,6 +16,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IServerIdentity, ServerIdentity>();
         serviceCollection.AddSingleton<IConfigProvider, PluginConfigProvider>();
         serviceCollection.AddSingleton<ShareTokenService>();
+        serviceCollection.AddSingleton(new StreamLimiter(TimeProvider.System));
         serviceCollection.AddSingleton<ILocalItemSource, JellyfinLocalItemSource>();
         serviceCollection.AddSingleton<CatalogBuilder>(sp => new CatalogBuilder(
             sp.GetRequiredService<ILocalItemSource>(),

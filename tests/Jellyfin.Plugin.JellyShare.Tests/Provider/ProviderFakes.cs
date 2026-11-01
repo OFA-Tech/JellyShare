@@ -46,4 +46,16 @@ internal sealed class FakeSource : ILocalItemSource
 
     public string? GetImagePath(Guid itemId, string imageType)
         => Images.TryGetValue((itemId, imageType), out var p) ? p : null;
+
+    public Dictionary<Guid, StreamInfo> Streams { get; } = new();
+
+    public StreamInfo? GetStreamInfo(Guid itemId)
+    {
+        if (Streams.TryGetValue(itemId, out var info))
+        {
+            return info;
+        }
+
+        return Items.Any(i => i.Item.SeriesId == itemId) ? new StreamInfo("Series", "series", null, null) : null;
+    }
 }

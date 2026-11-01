@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.JellyShare.Provider;
 
@@ -19,12 +20,15 @@ public class FederationController : ControllerBase
 
     private static readonly string[] ImageTypes = { "Primary", "Backdrop", "Logo", "Thumb" };
     private static readonly FileExtensionContentTypeProvider ContentTypes = new();
+    private static readonly FileExtensionContentTypeProvider VideoContentTypes = CreateVideoContentTypes();
 
     private readonly IServerIdentity _identity;
     private readonly CatalogBuilder _catalog;
     private readonly ILocalItemSource _source;
     private readonly IConfigProvider _config;
     private readonly ShareTokenService _tokens;
+    private readonly StreamLimiter _limiter;
+    private readonly ILogger<FederationController> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="FederationController"/> class.</summary>
     /// <param name="identity">The local server identity.</param>
@@ -32,13 +36,19 @@ public class FederationController : ControllerBase
     /// <param name="source">The local item source (used for image paths).</param>
     /// <param name="config">The plugin configuration provider.</param>
     /// <param name="tokens">The share token verifier.</param>
+    /// <param name="limiter">The per-share concurrent stream limiter.</param>
+    /// <param name="logger">The logger.</param>
     public FederationController(
         IServerIdentity identity,
         CatalogBuilder catalog,
         ILocalItemSource source,
         IConfigProvider config,
-        ShareTokenService tokens)
+        ShareTokenService tokens,
+        StreamLimiter limiter,
+        ILogger<FederationController> logger)
     {
+        _limiter = limiter;
+        _logger = logger;
         _identity = identity;
         _catalog = catalog;
         _source = source;
@@ -117,6 +127,86 @@ public class FederationController : ControllerBase
         }
 
         return PhysicalFile(path, contentType);
+    }
+
+    /// <summary>Streams the file of a movie or episode in the calling peer's catalog, with Range support.</summary>
+    /// <param name="itemId">The item id.</param>
+    /// <returns>The file, or 401/404/409/429/503.</returns>
+    [HttpGet("stream/{itemId}")]
+    [HttpHead("stream/{itemId}")]
+    
+    [AllowAnonymous]
+    public IActionResult Stream(string itemId)
+    {
+        var share = Authenticate();
+        if (share is null)
+        {
+            return Unauthorized401();
+        }
+
+        if (!Guid.TryParse(itemId, out var id) || !_catalog.IsExposed(share, id))
+        {
+            return NotFound();
+        }
+
+        var info = _source.GetStreamInfo(id);
+        if (info is null
+            || (info.Type != "Movie" && info.Type != "Episode")
+            || string.IsNullOrEmpty(info.Path))
+        {
+            return NotFound();
+        }
+
+        var overCap = CheckBitrateCap(share, info);
+        if (overCap is not null)
+        {
+            return overCap;
+        }
+
+        if (!_limiter.TryAcquire(share.Id, id, share.MaxStreams, out var isNewSession))
+        {
+            Response.Headers.RetryAfter = "30";
+            return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("stream limit reached"));
+        }
+
+        if (!IsReadable(info.Path))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse("file unavailable"));
+        }
+
+        if (isNewSession)
+        {
+            _logger.LogInformation("Stream started for share {Share}: {Item}", share.Name, info.Name);
+        }
+
+        if (!VideoContentTypes.TryGetContentType(info.Path, out var contentType))
+        {
+            contentType = "application/octet-stream";
+        }
+
+        return PhysicalFile(info.Path, contentType, enableRangeProcessing: true);
+    }
+
+    private static FileExtensionContentTypeProvider CreateVideoContentTypes()
+    {
+        var provider = new FileExtensionContentTypeProvider();
+        provider.Mappings[".mkv"] = "video/x-matroska";
+        provider.Mappings[".m4v"] = "video/x-m4v";
+        provider.Mappings[".ts"] = "video/mp2t";
+        provider.Mappings[".m2ts"] = "video/mp2t";
+        provider.Mappings[".ogv"] = "video/ogg";
+        return provider;
+    }
+
+    // Placeholder until Task 12: a capped stream service replaces the 409 so the provider transcodes instead.
+    private ObjectResult? CheckBitrateCap(PeerShare share, StreamInfo info)
+    {
+        if (share.MaxBitrate is { } cap && info.Bitrate is { } bitrate && bitrate > cap)
+        {
+            return StatusCode(StatusCodes.Status409Conflict, new ErrorResponse("over cap"));
+        }
+
+        return null;
     }
 
     private static bool IsReadable(string path)

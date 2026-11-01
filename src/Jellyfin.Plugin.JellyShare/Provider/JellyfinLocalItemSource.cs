@@ -98,6 +98,24 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         return info?.Path;
     }
 
+    /// <inheritdoc />
+    public StreamInfo? GetStreamInfo(Guid itemId)
+    {
+        var item = _libraryManager.GetItemById(itemId);
+        switch (item)
+        {
+            case Movie:
+            case Episode:
+                var bitrate = item.TotalBitrate
+                    ?? _mediaSourceManager.GetMediaStreams(item.Id).FirstOrDefault(s => s.Type == MediaStreamType.Video)?.BitRate;
+                return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate);
+            case null:
+                return null;
+            default:
+                return new StreamInfo(item.GetType().Name, item.Name, null, null);
+        }
+    }
+
     private CatalogItem ToCatalogItem(BaseItem item, string type, BaseItem? series)
     {
         var episode = item as Episode;

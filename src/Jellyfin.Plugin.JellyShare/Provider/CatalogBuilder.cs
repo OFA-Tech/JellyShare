@@ -21,6 +21,13 @@ public sealed record LocalItem(Guid Id, string Type, string? Path, Guid? SeriesI
     public CatalogItem CreateItem() => Factory();
 }
 
+/// <summary>What the stream endpoint needs to know about a library item.</summary>
+/// <param name="Type">The item type, e.g. <c>Movie</c>, <c>Episode</c> or <c>Series</c>.</param>
+/// <param name="Name">The display name (for the usage log).</param>
+/// <param name="Path">The file path, if any.</param>
+/// <param name="Bitrate">The total bitrate in bits per second, when known.</param>
+public sealed record StreamInfo(string Type, string Name, string? Path, long? Bitrate);
+
 /// <summary>Reads local library content, abstracted so the catalog logic stays unit-testable.</summary>
 public interface ILocalItemSource
 {
@@ -34,6 +41,11 @@ public interface ILocalItemSource
     /// <param name="imageType">One of <c>Primary</c>, <c>Backdrop</c>, <c>Logo</c>, <c>Thumb</c>.</param>
     /// <returns>The file path, or <c>null</c> when the item has no such local image.</returns>
     string? GetImagePath(Guid itemId, string imageType);
+
+    /// <summary>Gets the file path, name and bitrate of an item without building a catalog entry.</summary>
+    /// <param name="itemId">The item id.</param>
+    /// <returns>The stream info, or <c>null</c> when the item does not exist.</returns>
+    StreamInfo? GetStreamInfo(Guid itemId);
 }
 
 /// <summary>Provides the current plugin configuration at request time.</summary>
