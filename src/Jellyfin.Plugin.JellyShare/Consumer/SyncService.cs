@@ -57,7 +57,7 @@ public sealed record SyncReport(
 public sealed record ReconcileReport(int Entries, int Written, int Deleted, int Scanned, int MissingLocalFiles);
 
 /// <summary>Pulls peer catalogs, merges them and maintains the placeholder folders.</summary>
-public sealed class SyncService
+public sealed class SyncService : ISyncRunner
 {
     /// <summary>A failing peer's last good catalog is used for at most this long.</summary>
     public static readonly TimeSpan FailureGrace = TimeSpan.FromDays(7);
@@ -78,6 +78,9 @@ public sealed class SyncService
     private readonly ILogger<SyncService> _logger;
     private readonly PlaceholderWriter _writer;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _lastLock = new();
+    private SyncReport? _last;
+    private bool _lastLoaded;
 
     /// <summary>Initializes a new instance of the <see cref="SyncService"/> class.</summary>
     /// <param name="config">The plugin configuration.</param>
@@ -109,8 +112,39 @@ public sealed class SyncService
         _writer = new PlaceholderWriter(logger);
     }
 
-    /// <summary>Gets the report of the last finished run, if any.</summary>
-    public SyncReport? LastReport { get; private set; }
+    /// <summary>Gets the report of the last finished run, if any (read from the data folder after a restart).</summary>
+    public SyncReport? LastReport
+    {
+        get
+        {
+            lock (_lastLock)
+            {
+                if (_last is null && !_lastLoaded)
+                {
+                    _lastLoaded = true;
+                    try
+                    {
+                        _last = SyncReportStore.Load(_dataDir());
+                    }
+                    catch (InvalidOperationException)
+                    {
+                        _lastLoaded = false;
+                    }
+                }
+
+                return _last;
+            }
+        }
+
+        private set
+        {
+            lock (_lastLock)
+            {
+                _last = value;
+                _lastLoaded = true;
+            }
+        }
+    }
 
     /// <summary>Gets the path of the persisted merged index.</summary>
     public string MergedIndexPath => Path.Combine(_dataDir(), MergedIndexStore.FileName);
@@ -125,6 +159,15 @@ public sealed class SyncService
         {
             var report = await RunCoreAsync(ct).ConfigureAwait(false);
             LastReport = report;
+            try
+            {
+                SyncReportStore.Save(_dataDir(), report);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogWarning("JellyShare sync: could not persist the sync report: {Error}", ex.GetType().Name);
+            }
+
             _logger.LogInformation(
                 "JellyShare sync: offered={Offered} unmatched={Unmatched} conflicts={Conflicts} skippedLocal={SkippedLocal} written={Written} deleted={Deleted} skipped={Skipped} images={Images} uncheckedLocal={Unchecked} scans={Scans} pending={Pending} peerErrors={Errors}",
                 report.Offered,

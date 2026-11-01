@@ -59,6 +59,16 @@ internal sealed class FakePeerClient : IPeerClient
 
     private int _entered;
 
+    public Func<string, PeerPingResult> Pings { get; set; } = _ => new PeerPingResult(true, "peer", ProtocolInfo.Version, PingFailure.None, null);
+
+    public List<string> PingedUrls { get; } = new();
+
+    public Task<PeerPingResult> PingAsync(string baseUrl, CancellationToken ct)
+    {
+        PingedUrls.Add(baseUrl);
+        return Task.FromResult(Pings(baseUrl));
+    }
+
     public async Task<PeerFetchResult> FetchCatalogAsync(RemotePeer peer, string? etag, CancellationToken ct)
     {
         Interlocked.Increment(ref _entered);

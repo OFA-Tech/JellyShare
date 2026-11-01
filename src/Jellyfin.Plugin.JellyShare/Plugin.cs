@@ -43,7 +43,26 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
     {
-        // The admin UI page is added in a later task.
-        return Array.Empty<PluginPageInfo>();
+        var ns = GetType().Namespace;
+        return
+        [
+            new PluginPageInfo
+            {
+                Name = PluginName,
+                DisplayName = PluginName,
+                EmbeddedResourcePath = ns + ".Configuration.configPage.html",
+                EnableInMainMenu = true,
+                MenuSection = "server",
+                MenuIcon = "share",
+            },
+            new PluginPageInfo
+            {
+                Name = ScriptPageName,
+                EmbeddedResourcePath = ns + ".Configuration.configPage.js",
+            },
+        ];
     }
+
+    /// <summary>The name under which the admin page script is served (<c>configurationpage?name=…</c>).</summary>
+    public const string ScriptPageName = "JellyShareScript";
 }

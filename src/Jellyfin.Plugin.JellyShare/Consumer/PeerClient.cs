@@ -15,9 +15,48 @@ namespace Jellyfin.Plugin.JellyShare.Consumer;
 /// <param name="Error">A short error that never contains the token.</param>
 public sealed record PeerFetchResult(bool Ok, bool NotModified, CatalogResponse? Catalog, string? Error);
 
+/// <summary>Why a ping failed.</summary>
+public enum PingFailure
+{
+    /// <summary>The ping succeeded.</summary>
+    None,
+
+    /// <summary>The URL is not an absolute http(s) URL.</summary>
+    InvalidUrl,
+
+    /// <summary>The server could not be reached.</summary>
+    Unreachable,
+
+    /// <summary>The server did not answer in time.</summary>
+    Timeout,
+
+    /// <summary>The server answered with a redirect (never followed).</summary>
+    Redirect,
+
+    /// <summary>The server answered, but not like a JellyShare server.</summary>
+    NotJellyShare,
+
+    /// <summary>The server speaks another major protocol version.</summary>
+    IncompatibleProtocol,
+}
+
+/// <summary>Result of the anonymous ping.</summary>
+/// <param name="Ok">The server is a compatible JellyShare server.</param>
+/// <param name="ServerName">The server name when it answered like a JellyShare server.</param>
+/// <param name="ProtocolVersion">The protocol version when it answered like a JellyShare server.</param>
+/// <param name="Failure">Why the ping failed.</param>
+/// <param name="Detail">A short detail (HTTP status, connection error); never contains a token.</param>
+public sealed record PeerPingResult(bool Ok, string? ServerName, string? ProtocolVersion, PingFailure Failure, string? Detail);
+
 /// <summary>Talks to a peer's provider endpoints.</summary>
 public interface IPeerClient
 {
+    /// <summary>Probes <c>GET /JellyShare/v1/ping</c> (anonymous, no token is sent).</summary>
+    /// <param name="baseUrl">The peer base URL.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>The result.</returns>
+    Task<PeerPingResult> PingAsync(string baseUrl, CancellationToken ct);
+
     /// <summary>Fetches the peer's catalog.</summary>
     /// <param name="peer">The peer.</param>
     /// <param name="etag">The ETag of the last good catalog, if any.</param>
@@ -49,6 +88,9 @@ public sealed class PeerClient : IPeerClient
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
     private const long MaxImageBytes = 32L * 1024 * 1024;
+    private const long MaxPingBytes = 64 * 1024;
+
+    private static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(15);
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -100,6 +142,89 @@ public sealed class PeerClient : IPeerClient
 
         return new Uri(b.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/" + relative.TrimStart('/'));
     }
+
+    /// <inheritdoc />
+    public async Task<PeerPingResult> PingAsync(string baseUrl, CancellationToken ct)
+    {
+        var uri = BuildUri(baseUrl, "JellyShare/v1/ping");
+        if (uri is null)
+        {
+            return PingFail(PingFailure.InvalidUrl, null);
+        }
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(_timeout < PingTimeout ? _timeout : PingTimeout);
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await _client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            var code = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+            if (code[0] == '3')
+            {
+                return PingFail(PingFailure.Redirect, "HTTP " + code);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return PingFail(PingFailure.NotJellyShare, "HTTP " + code);
+            }
+
+            var stream = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);
+            await using (stream.ConfigureAwait(false))
+            {
+                var limited = new MemoryStream();
+                var chunk = new byte[4096];
+                int read;
+                while (limited.Length < MaxPingBytes && (read = await stream.ReadAsync(chunk, cts.Token).ConfigureAwait(false)) > 0)
+                {
+                    limited.Write(chunk, 0, read);
+                }
+
+                limited.Position = 0;
+                using var doc = await JsonDocument.ParseAsync(limited, cancellationToken: cts.Token).ConfigureAwait(false);
+                if (doc.RootElement.ValueKind != JsonValueKind.Object
+                    || !TryGetString(doc.RootElement, "protocolVersion", out var version))
+                {
+                    return PingFail(PingFailure.NotJellyShare, "HTTP " + code);
+                }
+
+                TryGetString(doc.RootElement, "serverName", out var name);
+                return IsCompatible(version)
+                    ? new PeerPingResult(true, name, version, PingFailure.None, null)
+                    : new PeerPingResult(false, name, version, PingFailure.IncompatibleProtocol, null);
+            }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return PingFail(PingFailure.Timeout, null);
+        }
+        catch (JsonException)
+        {
+            return PingFail(PingFailure.NotJellyShare, "not JSON");
+        }
+        catch (HttpRequestException ex)
+        {
+            return PingFail(PingFailure.Unreachable, ex.Message);
+        }
+    }
+
+    private static bool TryGetString(JsonElement obj, string name, out string value)
+    {
+        value = string.Empty;
+        foreach (var property in obj.EnumerateObject())
+        {
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String)
+            {
+                value = property.Value.GetString() ?? string.Empty;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static PeerPingResult PingFail(PingFailure failure, string? detail) => new(false, null, null, failure, detail);
 
     /// <inheritdoc />
     public async Task<PeerFetchResult> FetchCatalogAsync(RemotePeer peer, string? etag, CancellationToken ct)
