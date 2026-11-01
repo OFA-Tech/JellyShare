@@ -53,6 +53,17 @@ Admin login on both: `admin` / `admin` (throwaway harness credentials).
 
    Both return `{"protocolVersion":"1.0","serverName":"..."}` without authentication.
 
+6. Federate (each direction needs a share on the provider and a peer on the consumer):
+
+   ```powershell
+   py harness/add_share.py alice bob        # alice shares with bob; token -> harness/.secrets/ (never printed)
+   py harness/add_peer.py bob alice --sync  # bob consumes alice, placeholder roots added to bob's libraries, sync run
+   py harness/list_items.py bob             # movies/series/episodes with paths and provider ids
+   ```
+
+   `py harness/add_peer.py bob --sync` re-runs only the sync task. Placeholders appear in the library about
+   60 s after a sync (Jellyfin's `LibraryMonitorDelay`).
+
 After rebuilding the plugin, `docker compose -f harness/docker-compose.yml restart` to load the new DLL.
 To start over from scratch: `docker compose -f harness/docker-compose.yml down`, delete `harness/config/`, repeat steps 3-4.
 

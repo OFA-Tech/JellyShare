@@ -1,4 +1,7 @@
+using Jellyfin.Plugin.JellyShare.Consumer;
 using Jellyfin.Plugin.JellyShare.Provider;
+using MediaBrowser.Common.Net;
+using Microsoft.Extensions.Logging;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,5 +25,26 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             sp.GetRequiredService<ILocalItemSource>(),
             sp.GetRequiredService<IServerIdentity>(),
             sp.GetRequiredService<IConfigProvider>()));
+
+        serviceCollection.AddSingleton<IRelayBase, JellyfinRelayBase>();
+        serviceCollection.AddSingleton<IPeerClient>(sp =>
+        {
+            var factory = sp.GetRequiredService<IHttpClientFactory>();
+            return new PeerClient(() => factory.CreateClient(NamedClient.Default));
+        });
+        serviceCollection.AddSingleton<ILocalLibrary, JellyfinLocalLibrary>();
+        serviceCollection.AddSingleton<ILocalIndex>(sp => new LocalIndex(
+            sp.GetRequiredService<ILocalLibrary>(),
+            sp.GetRequiredService<IConfigProvider>()));
+        serviceCollection.AddSingleton<IScanReporter, LibraryMonitorScanReporter>();
+        serviceCollection.AddSingleton(sp => new SyncService(
+            sp.GetRequiredService<IConfigProvider>(),
+            sp.GetRequiredService<IPeerClient>(),
+            sp.GetRequiredService<ILocalIndex>(),
+            sp.GetRequiredService<IScanReporter>(),
+            sp.GetRequiredService<IRelayBase>(),
+            () => Plugin.Instance?.DataFolderPath ?? throw new InvalidOperationException("JellyShare plugin not loaded"),
+            TimeProvider.System,
+            sp.GetRequiredService<ILogger<SyncService>>()));
     }
 }

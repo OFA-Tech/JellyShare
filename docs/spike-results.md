@@ -382,3 +382,24 @@ From the Task 2 spike (details above):
 13. **Task 10 user data:** watched/resume/favourite carry over automatically between a local item
     and a placeholder with the same provider id (movie key = provider id, episode key = series key
     + season/episode numbers). No plugin code; Task 10 Step 5 just records it.
+
+From Task 8 (harness, 12.4.0):
+
+14. **Targeted scans need a `Folder` item for the placeholder root.** `ILibraryMonitor.ReportFileSystemChanged(dir)`
+    works for new, changed and deleted placeholder folders: after `LibraryMonitorDelay` (60 s) its `FileRefresher`
+    walks up from `dir` with `ILibraryManager.FindByPath` to the nearest existing item and refreshes it (log:
+    `Movies (/config/plugins/.../placeholders/Movies) will be refreshed.`). For a brand new movie or series folder
+    that item is the `Folder` Jellyfin keeps for each library path (`Type=Folder`, `Path=<root>`); siblings are
+    batched into one refresh of that root. Verified: alice got Tears of Steel, Pioneer One S01E02 + S02E01 (one
+    merged series) and bob lost the Big Buck Bunny placeholder (whole folder removed, no leftover `Folder` item),
+    each without a library scan. **But** the root's `Folder` item only exists after one library scan following
+    `POST /Library/VirtualFolders/Paths`; with `refreshLibrary=false` the walk finds nothing and the change is
+    silently dropped (bob's first sync). So adding a placeholder root to a library must use `refreshLibrary=true`
+    (or be followed by one library refresh): a one-time setup step, done by `harness/add_peer.py` and to be done by
+    the Task 11 admin page. The plugin itself never triggers a full refresh. The root must not be empty at that
+    scan (`harness/add_peer.py` creates the `.jellyshare` marker before adding the path; the writer creates it too).
+15. **Harness naming artefact:** with metadata fetchers disabled (correction 5) peer item names are raw folder
+    names (`Big Buck Bunny (2008) [tmdbid-10378]`), so placeholder folders get the year/id tag twice
+    (`Big Buck Bunny (2008) [tmdbid-10378] (2008) [tmdbid-10378]`, series `Pioneer One [tvdbid-153021] [tvdbid-153021]`).
+    Jellyfin still parses the right id and the titles merge; real servers with metadata have clean names.
+    `PathNaming` was not changed.
