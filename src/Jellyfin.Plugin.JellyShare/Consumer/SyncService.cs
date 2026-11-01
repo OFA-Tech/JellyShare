@@ -274,6 +274,12 @@ public sealed class SyncService : ISyncRunner
 
     private static void EnsureRootsSeparate(PluginConfiguration cfg)
     {
+        if (RelayBase.OverrideError(cfg.RelayBaseOverride) is { } relayError)
+        {
+            // .strm files pointing elsewhere would always be refused by the relay (403).
+            throw new InvalidOperationException(relayError);
+        }
+
         if (RootsOverlap(cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath))
         {
             // Each planner owns every .strm/.nfo under its root, so shared roots would delete each other's files.

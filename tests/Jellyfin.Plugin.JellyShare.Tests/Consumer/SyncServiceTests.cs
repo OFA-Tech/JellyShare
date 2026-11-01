@@ -402,6 +402,18 @@ public sealed class SyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Sync_NonLoopbackRelayOverride_RefusesToWrite()
+    {
+        _config.Current.RelayBaseOverride = "http://10.0.0.2:8096";
+        Offer(Bunny());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+
+        Assert.Contains("RelayBaseOverride", ex.Message, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(MoviesRoot));
+    }
+
+    [Fact]
     public async Task Sync_OverlappingRuns_AreSerialized()
     {
         Offer(Bunny());
