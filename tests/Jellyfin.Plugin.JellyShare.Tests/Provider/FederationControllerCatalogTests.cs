@@ -51,11 +51,23 @@ public sealed class FederationControllerCatalogTests : IDisposable
         }
     }
 
-    private static LocalItem Movie(Guid id, string path)
-        => new(id, "Movie", path, null, () => Make(id, "Movie", null));
+    private int _materialized;
 
-    private static LocalItem Episode(Guid id, Guid seriesId, string path)
-        => new(id, "Episode", path, seriesId, () => Make(id, "Episode", seriesId.ToString("N")));
+    private LocalItem Movie(Guid id, string path)
+        => new(id, "Movie", path, null, () =>
+        {
+            Interlocked.Increment(ref _materialized);
+            return Make(id, "Movie", null);
+        })
+        { DateModified = Modified };
+
+    private LocalItem Episode(Guid id, Guid seriesId, string path)
+        => new(id, "Episode", path, seriesId, () =>
+        {
+            Interlocked.Increment(ref _materialized);
+            return Make(id, "Episode", seriesId.ToString("N"));
+        })
+        { DateModified = Modified };
 
     private static CatalogItem Make(Guid id, string type, string? seriesId)
         => new(
@@ -143,6 +155,19 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         Assert.Equal(304, Assert.IsType<StatusCodeResult>(result).StatusCode);
         Assert.Equal("\"" + etag + "\"", controller.Response.Headers.ETag.ToString());
+    }
+
+    [Fact]
+    public void Catalog_304_MaterializesNothing()
+    {
+        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>(Controller(_token).Catalog()).Value).Etag;
+        _materialized = 0;
+
+        // A fresh builder (no cache): the 304 answer must still not build any catalog entry.
+        var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
+
+        Assert.Equal(304, Assert.IsType<StatusCodeResult>(controller.Catalog()).StatusCode);
+        Assert.Equal(0, _materialized);
     }
 
     [Fact]

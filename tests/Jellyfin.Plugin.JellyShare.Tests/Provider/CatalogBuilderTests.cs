@@ -45,7 +45,10 @@ public class CatalogBuilderTests
             {
                 Interlocked.Increment(ref _materialized);
                 return Item(id, type, modified, seriesId);
-            });
+            })
+        {
+            DateModified = modified ?? Modified,
+        };
 
     private static Guid G(int n) => new(n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
 
@@ -267,21 +270,77 @@ public class CatalogBuilderTests
     }
 
     [Fact]
-    public async Task IsExposed_ConcurrentCallsAfterExpiry_RebuildOnce()
+    public void IsExposed_ChecksOnlyTheRequestedItem_NeverEnumeratesTheLibrary()
     {
-        var now = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        var source = new FakeSource { GetItemsDelay = TimeSpan.FromMilliseconds(150) };
+        var source = new FakeSource();
         source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
-        var builder = new CatalogBuilder(source, new FakeIdentity(), new FakeConfig(), _ => true, () => now);
+        source.Items.Add((LibA, Local(G(2), "/media/Movies/missing/B.mkv")));
+        source.Items.Add((LibA, Local(G(3), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: G(99).ToString("N"))));
+        var builder = Builder(source, p => !p.Contains("/missing/"));
         var share = Share(LibA);
+
         Assert.True(builder.IsExposed(share, G(1)));
-        Assert.Equal(1, source.GetItemsCalls);
+        Assert.False(builder.IsExposed(share, G(2)));
+        Assert.True(builder.IsExposed(share, G(99)));
 
-        now = now.AddMinutes(1);
-        var results = await Task.WhenAll(Enumerable.Range(0, 16)
-            .Select(_ => Task.Run(() => builder.IsExposed(share, G(1)))));
+        Assert.Equal(0, source.GetItemsCalls);
+        Assert.Equal(3, source.CandidateCalls);
+    }
 
-        Assert.All(results, Assert.True);
-        Assert.Equal(2, source.GetItemsCalls);
+    [Fact]
+    public void IsExposed_NoLibraries_IsFalseWithoutQuery()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+
+        Assert.False(Builder(source).IsExposed(Share(), G(1)));
+        Assert.Equal(0, source.CandidateCalls);
+    }
+
+    [Fact]
+    public void Plan_EtagIsComputedWithoutMaterializingItems()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        var builder = Builder(source);
+
+        var plan = builder.Plan(Share(LibA));
+
+        Assert.Matches("^[0-9a-f]{64}$", plan.Etag);
+        Assert.Equal(0, _materialized);
+        Assert.Equal(plan.Etag, plan.Build().Etag);
+        Assert.Equal(2, _materialized);
+    }
+
+    [Fact]
+    public void Build_SameEtagTwice_IsServedFromCache()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        source.Items.Add((LibA, Local(G(2), "/media/Movies/B/B.mkv")));
+        var builder = Builder(source);
+
+        var first = builder.Build(Share(LibA));
+        var second = builder.Build(Share(LibA));
+
+        Assert.Same(first, second);
+        Assert.Equal(2, _materialized);
+    }
+
+    [Fact]
+    public void Build_ChangedItem_RebuildsInsteadOfServingCache()
+    {
+        var source = new FakeSource();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
+        var builder = Builder(source);
+        var first = builder.Build(Share(LibA));
+
+        source.Items.Clear();
+        source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv", modified: Modified.AddMinutes(1))));
+        var second = builder.Build(Share(LibA));
+
+        Assert.NotEqual(first.Etag, second.Etag);
+        Assert.Equal(Modified.AddMinutes(1), Assert.Single(second.Items).DateModified);
     }
 }

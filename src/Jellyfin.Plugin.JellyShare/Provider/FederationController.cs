@@ -83,15 +83,16 @@ public class FederationController : ControllerBase
             return Unauthorized401();
         }
 
-        var catalog = _catalog.Build(share);
-        var etag = "\"" + catalog.Etag + "\"";
+        // The ETag is known before any catalog entry is built, so a 304 costs one library read and no per-item queries.
+        var plan = _catalog.Plan(share);
+        var etag = "\"" + plan.Etag + "\"";
         Response.Headers.ETag = etag;
         if (IfNoneMatchContains(etag))
         {
             return StatusCode(StatusCodes.Status304NotModified);
         }
 
-        return Ok(catalog);
+        return Ok(plan.Build());
     }
 
     /// <summary>Gets an image of an item in the calling peer's catalog.</summary>

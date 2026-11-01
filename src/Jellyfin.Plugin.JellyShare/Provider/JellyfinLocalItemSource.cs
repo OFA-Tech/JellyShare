@@ -41,6 +41,57 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             Recursive = true,
         });
 
+        return ToLocalItems(items);
+    }
+
+    /// <inheritdoc />
+    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds)
+    {
+        if (libraryIds.Count == 0 || itemId == Guid.Empty)
+        {
+            return Array.Empty<LocalItem>();
+        }
+
+        var item = _libraryManager.GetItemById(itemId);
+        Guid[] ids;
+        switch (item)
+        {
+            case Movie:
+            case Episode:
+                ids = new[] { itemId };
+                break;
+            case Series:
+                // The series' own episodes; library membership is checked below, like for a single item.
+                ids = _libraryManager.GetItemIds(new InternalItemsQuery
+                {
+                    IncludeItemTypes = new[] { BaseItemKind.Episode },
+                    AncestorIds = new[] { itemId },
+                    IsVirtualItem = false,
+                    Recursive = true,
+                }).ToArray();
+                break;
+            default:
+                return Array.Empty<LocalItem>();
+        }
+
+        if (ids.Length == 0)
+        {
+            return Array.Empty<LocalItem>();
+        }
+
+        var inShare = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            ItemIds = ids,
+            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+            AncestorIds = libraryIds.ToArray(),
+            IsVirtualItem = false,
+            Recursive = true,
+        });
+        return ToLocalItems(inShare);
+    }
+
+    private List<LocalItem> ToLocalItems(IReadOnlyList<BaseItem> items)
+    {
         // Series and media streams are only looked up for items that pass the share filters (see LocalItem.Factory).
         var series = new Lazy<Dictionary<Guid, BaseItem>>(() =>
         {
@@ -60,7 +111,10 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             switch (item)
             {
                 case Movie movie:
-                    result.Add(new LocalItem(movie.Id, "Movie", movie.Path, null, () => ToCatalogItem(movie, "Movie", null)));
+                    result.Add(new LocalItem(movie.Id, "Movie", movie.Path, null, () => ToCatalogItem(movie, "Movie", null))
+                    {
+                        DateModified = movie.DateModified,
+                    });
                     break;
                 case Episode episode:
                     var seriesId = episode.SeriesId == Guid.Empty ? (Guid?)null : episode.SeriesId;
@@ -73,7 +127,10 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                         {
                             series.Value.TryGetValue(episode.SeriesId, out var parent);
                             return ToCatalogItem(episode, "Episode", parent);
-                        }));
+                        })
+                    {
+                        DateModified = episode.DateModified,
+                    });
                     break;
             }
         }

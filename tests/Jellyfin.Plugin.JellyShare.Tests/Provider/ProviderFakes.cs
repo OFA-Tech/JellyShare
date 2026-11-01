@@ -211,6 +211,19 @@ internal sealed class FakeSource : ILocalItemSource
         return Items.Where(i => libraryIds.Contains(i.Library)).Select(i => i.Item).ToList();
     }
 
+    public int CandidateCalls => _candidateCalls;
+
+    private int _candidateCalls;
+
+    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds)
+    {
+        Interlocked.Increment(ref _candidateCalls);
+        return Items
+            .Where(i => libraryIds.Contains(i.Library) && (i.Item.Id == itemId || i.Item.SeriesId == itemId))
+            .Select(i => i.Item)
+            .ToList();
+    }
+
     public string? GetImagePath(Guid itemId, string imageType)
         => Images.TryGetValue((itemId, imageType), out var p) ? p : null;
 

@@ -16,6 +16,9 @@ namespace Jellyfin.Plugin.JellyShare.Provider;
 /// <param name="Factory">Creates the catalog entry. Only called for items that pass the share filters.</param>
 public sealed record LocalItem(Guid Id, string Type, string? Path, Guid? SeriesId, Func<CatalogItem> Factory)
 {
+    /// <summary>Gets the item's last modification time (what the catalog ETag is computed from).</summary>
+    public DateTime DateModified { get; init; }
+
     /// <summary>Creates the catalog entry for the item (may query the library; call only for included items).</summary>
     /// <returns>The catalog entry.</returns>
     public CatalogItem CreateItem() => Factory();
@@ -36,6 +39,15 @@ public interface ILocalItemSource
     /// <param name="libraryIds">The ids of the libraries to read.</param>
     /// <returns>The local items.</returns>
     IEnumerable<LocalItem> GetItems(IReadOnlyCollection<Guid> libraryIds);
+
+    /// <summary>
+    /// Gets what decides whether one id is exposed, without reading the whole library: the movie or episode with that
+    /// id, or the episodes of the series with that id, as far as they are in the given libraries.
+    /// </summary>
+    /// <param name="itemId">The item or series id.</param>
+    /// <param name="libraryIds">The shared libraries.</param>
+    /// <returns>The candidates (not yet filtered for placeholders or missing files).</returns>
+    IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds);
 
     /// <summary>Gets the local image file of an item as Jellyfin recorded it.</summary>
     /// <param name="itemId">The item (or series) id.</param>
@@ -63,53 +75,74 @@ public sealed class PluginConfigProvider : IConfigProvider
     public PluginConfiguration Current => Plugin.Instance?.Configuration ?? new PluginConfiguration();
 }
 
+/// <summary>A share's catalog ETag, known before any catalog entry is built.</summary>
+/// <param name="Etag">The ETag (lowercase hex SHA-256 over item ids and modification times).</param>
+/// <param name="Build">Builds (or returns the cached) catalog for this ETag.</param>
+public sealed record CatalogPlan(string Etag, Func<CatalogResponse> Build);
+
 /// <summary>Builds the catalog a share exposes to its peer.</summary>
 public class CatalogBuilder
 {
-    private static readonly TimeSpan IndexTtl = TimeSpan.FromSeconds(15);
-
     private readonly ILocalItemSource _source;
     private readonly IServerIdentity _identity;
     private readonly IConfigProvider _config;
     private readonly Func<string, bool> _fileExists;
-    private readonly Func<DateTime> _utcNow;
-    private readonly ConcurrentDictionary<Guid, (string Key, DateTime Expires, HashSet<Guid> Ids)> _index = new();
-    private readonly ConcurrentDictionary<Guid, object> _locks = new();
+    private readonly ConcurrentDictionary<Guid, CatalogResponse> _cache = new();
 
     /// <summary>Initializes a new instance of the <see cref="CatalogBuilder"/> class.</summary>
     /// <param name="source">The local item source.</param>
     /// <param name="identity">The local server identity.</param>
     /// <param name="config">The configuration provider.</param>
     /// <param name="fileExists">Existence check for item files; defaults to <see cref="File.Exists(string)"/>.</param>
-    /// <param name="utcNow">Clock used for the index cache; defaults to <see cref="DateTime.UtcNow"/>.</param>
     public CatalogBuilder(
         ILocalItemSource source,
         IServerIdentity identity,
         IConfigProvider config,
-        Func<string, bool>? fileExists = null,
-        Func<DateTime>? utcNow = null)
+        Func<string, bool>? fileExists = null)
     {
-        _utcNow = utcNow ?? (() => DateTime.UtcNow);
         _source = source;
         _identity = identity;
         _config = config;
         _fileExists = fileExists ?? File.Exists;
     }
 
-    /// <summary>Builds the catalog for a share.</summary>
+    /// <summary>Builds the catalog for a share (served from the cache when nothing changed).</summary>
     /// <param name="share">The share.</param>
     /// <returns>The catalog response including its ETag.</returns>
-    public CatalogResponse Build(PeerShare share)
+    public CatalogResponse Build(PeerShare share) => Plan(share).Build();
+
+    /// <summary>
+    /// Lists the share's items and computes the catalog ETag from their ids and modification times only, so a
+    /// conditional request that ends in 304 never builds a catalog entry (no media stream queries). The returned
+    /// <see cref="CatalogPlan.Build"/> reuses the catalog last built for the share when its ETag is the same.
+    /// </summary>
+    /// <param name="share">The share.</param>
+    /// <returns>The ETag and a builder for the body.</returns>
+    public CatalogPlan Plan(PeerShare share)
     {
         ArgumentNullException.ThrowIfNull(share);
-        var items = Included(share).Select(l => l.CreateItem()).ToList();
-        items.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
-        return new CatalogResponse(ProtocolInfo.Version, _identity.ServerName, ComputeEtag(items), items);
+        var included = Included(share).ToList();
+        included.Sort((a, b) => string.CompareOrdinal(a.Id.ToString("N"), b.Id.ToString("N")));
+        var etag = ComputeEtag(included);
+        return new CatalogPlan(etag, () =>
+        {
+            if (_cache.TryGetValue(share.Id, out var cached) && cached.Etag == etag)
+            {
+                return cached;
+            }
+
+            var items = included.Select(l => l.CreateItem()).ToList();
+            items.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
+            var built = new CatalogResponse(ProtocolInfo.Version, _identity.ServerName, etag, items);
+            _cache[share.Id] = built;
+            return built;
+        });
     }
 
     /// <summary>
-    /// Checks whether an item (or a series owning an episode) is part of the share's catalog.
-    /// Uses a short-lived cache so bulk image fetches do not rebuild the catalog per request.
+    /// Checks whether an item (or a series owning an episode) is part of the share's catalog, by looking up only that
+    /// item (or the series' episodes) in the shared libraries: same rules as the catalog (not a placeholder or
+    /// <c>.strm</c>, file exists), without reading the library.
     /// </summary>
     /// <param name="share">The share.</param>
     /// <param name="itemId">The item or series id.</param>
@@ -117,45 +150,23 @@ public class CatalogBuilder
     public bool IsExposed(PeerShare share, Guid itemId)
     {
         ArgumentNullException.ThrowIfNull(share);
-        var key = string.Join(',', share.LibraryIds.OrderBy(i => i));
-        if (TryGetIndex(share.Id, key, out var ids))
+        if (share.LibraryIds.Count == 0 || itemId == Guid.Empty)
         {
-            return ids.Contains(itemId);
+            return false;
         }
 
-        // Single-flight: concurrent callers for the same share wait for one rebuild instead of each running a full query.
-        lock (_locks.GetOrAdd(share.Id, _ => new object()))
-        {
-            if (TryGetIndex(share.Id, key, out ids))
-            {
-                return ids.Contains(itemId);
-            }
-
-            ids = new HashSet<Guid>();
-            foreach (var local in Included(share))
-            {
-                ids.Add(local.Id);
-                if (local.SeriesId is { } seriesId && seriesId != Guid.Empty)
-                {
-                    ids.Add(seriesId);
-                }
-            }
-
-            _index[share.Id] = (key, _utcNow() + IndexTtl, ids);
-            return ids.Contains(itemId);
-        }
+        var cfg = _config.Current;
+        return _source.GetExposureCandidates(itemId, share.LibraryIds.ToArray())
+            .Any(local => (local.Id == itemId || local.SeriesId == itemId) && IsServable(local, cfg));
     }
 
-    private bool TryGetIndex(Guid shareId, string key, out HashSet<Guid> ids)
+    private bool IsServable(LocalItem local, PluginConfiguration cfg)
     {
-        if (_index.TryGetValue(shareId, out var cached) && cached.Key == key && cached.Expires > _utcNow())
-        {
-            ids = cached.Ids;
-            return true;
-        }
-
-        ids = null!;
-        return false;
+        var path = local.Path;
+        return !string.IsNullOrWhiteSpace(path)
+            && !path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
+            && !PlaceholderPaths.IsPlaceholder(path, cfg)
+            && _fileExists(path);
     }
 
     private IEnumerable<LocalItem> Included(PeerShare share)
@@ -168,24 +179,19 @@ public class CatalogBuilder
         var cfg = _config.Current;
         foreach (var local in _source.GetItems(share.LibraryIds.ToArray()))
         {
-            var path = local.Path;
-            if (string.IsNullOrWhiteSpace(path)
-                || path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
-                || PlaceholderPaths.IsPlaceholder(path, cfg)
-                || !_fileExists(path))
+            if (IsServable(local, cfg))
             {
-                continue;
+                yield return local;
             }
-
-            yield return local;
         }
     }
-    private static string ComputeEtag(IReadOnlyList<CatalogItem> items)
+
+    private static string ComputeEtag(IReadOnlyList<LocalItem> items)
     {
         var sb = new StringBuilder();
-        foreach (var item in items.OrderBy(i => i.Id, StringComparer.Ordinal))
+        foreach (var item in items)
         {
-            sb.Append(item.Id).Append('|').Append(item.DateModified.ToString("O", CultureInfo.InvariantCulture)).Append('\n');
+            sb.Append(item.Id.ToString("N")).Append('|').Append(item.DateModified.ToString("O", CultureInfo.InvariantCulture)).Append('\n');
         }
 
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()))).ToLowerInvariant();
