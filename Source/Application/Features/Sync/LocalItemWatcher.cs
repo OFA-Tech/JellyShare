@@ -1,11 +1,13 @@
 using System.Collections.Concurrent;
 using JellyShare.Application.Features.Placeholders;
-using JellyShare.Application.Storage;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
+using JellyShare.Domain.Interfaces.Placeholders;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
+using JellyShare.Domain.Models.Storage;
 using JellyShare.Domain.Models.Sync;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -58,6 +60,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private const int Stuck = 5;
 
     private readonly SyncService _sync;
+    private readonly IMergedIndexStore _mergedIndex;
+    private readonly IPlaceholderFiles _placeholders;
     private readonly ILocalItemEvents _events;
     private readonly ILocalLibrary _library;
     private readonly ISettingsProvider _config;
@@ -89,11 +93,13 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private int _dirty;
     private List<Candidate>? _candidates;
     private IReadOnlyDictionary<string, LocalSeries> _series = new Dictionary<string, LocalSeries>();
-    private (DateTime WriteUtc, long Length) _indexStamp;
+    private FileStamp _indexStamp;
     private DateTimeOffset _builtUtc;
 
     /// <summary>Initializes a new instance of the <see cref="LocalItemWatcher"/> class.</summary>
     /// <param name="sync">The sync service (reconcile and full sync).</param>
+    /// <param name="mergedIndex">The persisted merged index (sweep candidates).</param>
+    /// <param name="placeholders">The placeholder roots on disk.</param>
     /// <param name="events">The library event source.</param>
     /// <param name="library">The library reader (sweep candidates).</param>
     /// <param name="config">The plugin configuration.</param>
@@ -103,6 +109,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     /// <param name="sweepBudget">Time budget of one sweep pass; defaults to <see cref="DefaultSweepBudget"/>.</param>
     public LocalItemWatcher(
         SyncService sync,
+        IMergedIndexStore mergedIndex,
+        IPlaceholderFiles placeholders,
         ILocalItemEvents events,
         ILocalLibrary library,
         ISettingsProvider config,
@@ -112,6 +120,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         TimeSpan? sweepBudget = null)
     {
         _sync = sync;
+        _mergedIndex = mergedIndex;
+        _placeholders = placeholders;
         _events = events;
         _library = library;
         _config = config;
@@ -526,8 +536,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
     private List<Candidate> EnsureCandidates(JellyShareSettings cfg)
     {
-        var info = new FileInfo(_sync.MergedIndexPath);
-        if (!info.Exists)
+        var stamp = _mergedIndex.Stamp();
+        if (stamp == default)
         {
             _candidates = [];
             _indexStamp = default;
@@ -535,7 +545,6 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
             return _candidates;
         }
 
-        var stamp = (info.LastWriteTimeUtc, info.Length);
         var now = _clock.GetUtcNow();
         var dirty = Interlocked.Exchange(ref _dirty, 0) != 0;
         if (_candidates is not null && !dirty && stamp == _indexStamp && now - _builtUtc < CandidateRefreshInterval)
@@ -543,7 +552,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
             return _candidates;
         }
 
-        var file = MergedIndexStore.Load(info.FullName);
+        var file = _mergedIndex.Load();
         var canonicalOf = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in file?.Entries ?? [])
         {
@@ -605,35 +614,15 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     {
         const string Marker = "/JellyShare/v1/play/";
         var keys = new HashSet<string>(StringComparer.Ordinal);
-        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
         foreach (var root in new[] { cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath })
         {
-            if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+            foreach (var content in _placeholders.ReadStrmContents(root))
             {
-                continue;
-            }
-
-            try
-            {
-                foreach (var strm in Directory.EnumerateFiles(root, "*.strm", options))
+                var at = content.LastIndexOf(Marker, StringComparison.Ordinal);
+                if (at >= 0)
                 {
-                    try
-                    {
-                        var content = File.ReadAllText(strm).Trim();
-                        var at = content.LastIndexOf(Marker, StringComparison.Ordinal);
-                        if (at >= 0)
-                        {
-                            keys.Add(Uri.UnescapeDataString(content[(at + Marker.Length)..]));
-                        }
-                    }
-                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                    {
-                    }
+                    keys.Add(Uri.UnescapeDataString(content[(at + Marker.Length)..]));
                 }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                _logger.LogWarning("JellyShare sweep: placeholder folder unreadable: {Error}", ex.GetType().Name);
             }
         }
 

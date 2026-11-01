@@ -1,6 +1,9 @@
 using System.Text;
 using JellyShare.Application.Features.Placeholders;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.UnitTests.Fakes;
 using Xunit;
 

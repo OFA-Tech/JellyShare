@@ -1,10 +1,10 @@
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Streaming;
-using JellyShare.Application.Storage;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Peers;
+using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Admin;
@@ -45,6 +45,7 @@ public class AdminController : ControllerBase
     private readonly ISyncRunner _sync;
     private readonly IConsumerIndex _consumerIndex;
     private readonly IAdminLibraries _libraries;
+    private readonly IPlaceholderFiles _placeholders;
     private readonly IServerIdentity _identity;
     private readonly ILogger<AdminController> _logger;
 
@@ -57,6 +58,7 @@ public class AdminController : ControllerBase
     /// <param name="sync">The sync runner.</param>
     /// <param name="consumerIndex">The persisted peer states.</param>
     /// <param name="libraries">The library operations.</param>
+    /// <param name="placeholders">The placeholder roots on disk.</param>
     /// <param name="identity">The local server identity.</param>
     /// <param name="logger">The logger.</param>
     public AdminController(
@@ -68,6 +70,7 @@ public class AdminController : ControllerBase
         ISyncRunner sync,
         IConsumerIndex consumerIndex,
         IAdminLibraries libraries,
+        IPlaceholderFiles placeholders,
         IServerIdentity identity,
         ILogger<AdminController> logger)
     {
@@ -79,6 +82,7 @@ public class AdminController : ControllerBase
         _sync = sync;
         _consumerIndex = consumerIndex;
         _libraries = libraries;
+        _placeholders = placeholders;
         _identity = identity;
         _logger = logger;
     }
@@ -543,7 +547,7 @@ public class AdminController : ControllerBase
                 : Conflict(new ErrorResponse($"This folder is already part of the library '{holder.Name}'. Remove it there first."));
         }
 
-        if (PlaceholderWriter.RootProblem(root) is { } problem)
+        if (_placeholders.RootProblem(root) is { } problem)
         {
             return Conflict(new ErrorResponse(problem));
         }
@@ -551,7 +555,7 @@ public class AdminController : ControllerBase
         try
         {
             // The marker is only created in a new or empty folder (RootProblem above refuses anything else).
-            PlaceholderWriter.EnsureRoot(root);
+            _placeholders.EnsureRoot(root);
             await _libraries.AddPathAsync(library.Name, root, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

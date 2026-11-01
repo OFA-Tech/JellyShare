@@ -1,3 +1,7 @@
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Application.Features.Sync;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Library;
@@ -129,7 +133,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
-        _sync = new SyncService(
+        _sync = TestSync.Create(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance);
         _watcher = NewWatcher(null);
     }
@@ -150,6 +154,8 @@ public sealed class LocalItemWatcherTests : IDisposable
     private LocalItemWatcher NewWatcher(TimeSpan? budget, Func<string, FilePresence>? probe = null)
         => new(
             _sync,
+            new MergedIndexStore(() => _tmp.Sub("data")),
+            new PlaceholderWriter(),
             _events,
             _library,
             _config,
@@ -683,7 +689,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         Offer(Bunny(), Sintel());
         _clock.Now += TimeSpan.FromMinutes(1);
         await _sync.RunAsync(CancellationToken.None);
-        File.SetLastWriteTimeUtc(_sync.MergedIndexPath, DateTime.UtcNow.AddMinutes(5));
+        File.SetLastWriteTimeUtc(Path.Combine(_tmp.Sub("data"), MergedIndexStore.FileName), DateTime.UtcNow.AddMinutes(5));
 
         Assert.Equal(1, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
     }

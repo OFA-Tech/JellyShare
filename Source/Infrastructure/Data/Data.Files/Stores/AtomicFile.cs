@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace JellyShare.Application.Storage;
+namespace JellyShare.Data.Files.Stores;
 
 /// <summary>Writes files so readers see either the old or the new content, never a partial file.</summary>
 internal static class AtomicFile

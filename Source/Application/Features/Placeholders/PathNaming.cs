@@ -3,6 +3,7 @@ using System.Text;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Rules;
 
 namespace JellyShare.Application.Features.Placeholders;
 
@@ -128,23 +129,7 @@ public static class PathNaming
     /// <param name="relativeDir">The relative directory (forward slashes).</param>
     /// <param name="baseName">The file name without extension.</param>
     /// <returns><c>true</c> if the location cannot escape the placeholder root.</returns>
-    public static bool IsSafeRelative(string relativeDir, string baseName)
-    {
-        if (string.IsNullOrEmpty(relativeDir) || string.IsNullOrEmpty(baseName))
-        {
-            return false;
-        }
-
-        return relativeDir.Split('/').All(IsSafeSegment) && IsSafeSegment(baseName);
-    }
-
-    private static bool IsSafeSegment(string segment)
-        => segment.Length > 0
-            && segment is not ("." or "..")
-            && !segment.Any(c => IsIllegal(c) || (char.IsWhiteSpace(c) && c != ' '))
-            && !segment.EndsWith('.')
-            && !segment.EndsWith(' ')
-            && !segment.StartsWith(' ');
+    public static bool IsSafeRelative(string relativeDir, string baseName) => PlaceholderRules.IsSafeRelative(relativeDir, baseName);
 
     private static PlaceholderFile ForEpisode(MergedEntry e, CatalogItem item, LocalSeries? local)
     {
@@ -203,8 +188,7 @@ public static class PathNaming
         }
     }
 
-    private static bool IsIllegal(char c)
-        => c < 0x20 || c == 0x7F || (c >= 0x80 && c <= 0x9F) || c is '<' or '>' or ':' or '"' or '/' or '\\' or '|' or '?' or '*';
+    private static bool IsIllegal(char c) => PlaceholderRules.IsIllegal(c);
 
     private static string Trim(string s) => s.TrimStart(' ').TrimEnd('.', ' ', '-');
 }

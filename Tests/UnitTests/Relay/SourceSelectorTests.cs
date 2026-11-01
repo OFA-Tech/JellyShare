@@ -1,5 +1,8 @@
 using JellyShare.Application.Features.Relay;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Sync;

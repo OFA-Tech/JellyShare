@@ -13,6 +13,7 @@ internal static class Solution
     public static readonly (string Assembly, string Folder)[] InfrastructureModules =
     [
         ("JellyShare.Data.Peers", "Source/Infrastructure/Api/Data.Peers"),
+        ("JellyShare.Data.Files", "Source/Infrastructure/Data/Data.Files"),
     ];
 
     public static readonly string[] HostNamespaces = ["MediaBrowser", "Jellyfin", "Emby", "Microsoft.AspNetCore"];

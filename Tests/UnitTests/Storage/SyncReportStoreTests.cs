@@ -1,7 +1,10 @@
 using System.Net;
 using System.Text;
 using JellyShare.Application.Features.Sync;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -67,7 +70,7 @@ public sealed class SyncReportStoreTests : IDisposable
         var config = new ConsumerConfig();
         config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
         config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
-        SyncService Create() => new(
+        SyncService Create() => TestSync.Create(
             config,
             new FakePeerClient(),
             new LocalIndex(new FakeLocalLibrary(), config, FakeLocalLibrary.Exists(_ => true)),

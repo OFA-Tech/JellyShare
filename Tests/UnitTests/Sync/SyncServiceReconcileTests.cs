@@ -1,5 +1,8 @@
 using JellyShare.Application.Features.Sync;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
@@ -32,7 +35,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
-        _sync = new SyncService(
+        _sync = TestSync.Create(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), new MutableClock(), NullLogger<SyncService>.Instance);
     }
 
@@ -158,7 +161,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
         var fullReads = _library.Reads;
         var loads = _sync.MergedIndexLoads;
         var reads = new List<string>();
-        JellyShare.Application.Storage.PlaceholderWriter.ReadObserver.Value = reads.Add;
+        JellyShare.Data.Files.Placeholders.PlaceholderWriter.ReadObserver.Value = reads.Add;
 
         _missing.Add(SintelPath);
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);

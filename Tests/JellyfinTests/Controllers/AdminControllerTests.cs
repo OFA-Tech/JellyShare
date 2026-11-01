@@ -4,7 +4,10 @@ using System.Text;
 using System.Text.Json;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Streaming;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
@@ -140,7 +143,7 @@ public sealed class AdminControllerTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _index = new ConsumerIndexFiles(() => _tmp.Sub("data"));
         _c = new AdminController(
-            _config, _saver, _tokens, _limiter, _peers, _sync, _index, _libs, new FakeIdentity(), NullLogger<AdminController>.Instance)
+            _config, _saver, _tokens, _limiter, _peers, _sync, _index, _libs, new PlaceholderWriter(), new FakeIdentity(), NullLogger<AdminController>.Instance)
         {
             ControllerContext = new ControllerContext { HttpContext = _http },
         };

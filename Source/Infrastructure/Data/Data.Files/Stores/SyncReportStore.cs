@@ -1,15 +1,31 @@
 using System.Text.Json;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Models.Sync;
 
-namespace JellyShare.Application.Storage;
+namespace JellyShare.Data.Files.Stores;
 
 /// <summary>Persists the last <see cref="SyncReport"/> as JSON in the plugin data folder so the admin page survives restarts.</summary>
-public static class SyncReportStore
+public sealed class SyncReportStore : ISyncReportStore
 {
     /// <summary>The file name inside the data folder.</summary>
     public const string FileName = "last-sync-report.json";
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
+
+    private readonly Func<string> _dataDir;
+
+    /// <summary>Initializes a new instance of the <see cref="SyncReportStore"/> class.</summary>
+    /// <param name="dataDir">Returns the plugin data folder (it may throw <see cref="InvalidOperationException"/> before the plugin is loaded).</param>
+    public SyncReportStore(Func<string> dataDir)
+    {
+        _dataDir = dataDir;
+    }
+
+    /// <inheritdoc />
+    public SyncReport? Load() => Load(_dataDir());
+
+    /// <inheritdoc />
+    public void Save(SyncReport report) => Save(_dataDir(), report);
 
     /// <summary>Saves the report atomically.</summary>
     /// <param name="dataDir">The plugin data folder.</param>

@@ -1,5 +1,4 @@
 using JellyShare.Application.Features.Streaming;
-using JellyShare.Application.Storage;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Peers;
@@ -38,7 +37,6 @@ public static class JellyfinSetup
         services.AddSingleton<IScanReporter, LibraryMonitorScanReporter>();
         services.AddSingleton<ILocalItemEvents, JellyfinLocalItemEvents>();
 
-        services.AddSingleton<IConsumerIndex>(new ConsumerIndexFiles(dataFolder));
         services.AddSingleton<IPlaceholderLookup, JellyfinPlaceholderLookup>();
         services.AddSingleton<IAdminLibraries, JellyfinAdminLibraries>();
         PlaybackInfoFilter.Register(services);

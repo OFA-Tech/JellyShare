@@ -1,25 +1,9 @@
-using System.Security.Cryptography;
-using System.Text;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Library;
+using JellyShare.Domain.Models.Placeholders;
+using JellyShare.Domain.Rules;
 
 namespace JellyShare.Application.Features.Placeholders;
-
-/// <summary>A placeholder file to create or overwrite.</summary>
-/// <param name="RelativePath">Path relative to the placeholder root, with forward slashes.</param>
-/// <param name="Content">The UTF-8 text content.</param>
-public sealed record FileWrite(string RelativePath, string Content);
-
-/// <summary>The changes needed to bring a placeholder root in line with the wanted entries.</summary>
-/// <param name="Writes">Files to write, ordered by path.</param>
-/// <param name="Deletes">Planner-owned files (<c>.strm</c>/<c>.nfo</c>) to delete, ordered by path.</param>
-/// <param name="TouchedDirs">Distinct relative directories that have a write or delete, ordered.</param>
-/// <param name="Skipped">Entries skipped because their placeholder location was not a safe relative path.</param>
-public sealed record PlaceholderDiff(
-    IReadOnlyList<FileWrite> Writes,
-    IReadOnlyList<string> Deletes,
-    IReadOnlyList<string> TouchedDirs,
-    int Skipped = 0);
 
 /// <summary>Computes placeholder file changes from the merged catalog. Pure: touches no file system.</summary>
 public static class PlaceholderPlanner
@@ -27,11 +11,7 @@ public static class PlaceholderPlanner
     /// <summary>Hashes content the way <c>existing</c> must be hashed: lowercase hex SHA-256 of the UTF-8 bytes.</summary>
     /// <param name="content">The file content.</param>
     /// <returns>The lowercase hex hash.</returns>
-    public static string Hash(string content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-    }
+    public static string Hash(string content) => PlaceholderRules.Hash(content);
 
     /// <summary>Plans the writes and deletes.</summary>
     /// <param name="wanted">The merged entries offered by peers.</param>

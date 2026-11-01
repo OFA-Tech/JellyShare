@@ -1,5 +1,8 @@
 using JellyShare.Application.Features.Sync;
-using JellyShare.Application.Storage;
+using JellyShare.Data.Files.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Peers;
@@ -32,7 +35,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
-        _sync = new SyncService(
+        _sync = TestSync.Create(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance);
     }
 

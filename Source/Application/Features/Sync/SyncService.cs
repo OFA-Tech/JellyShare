@@ -1,17 +1,20 @@
-using System.Text.Json;
 using JellyShare.Application.Features.Placeholders;
 using JellyShare.Application.Features.Relay;
-using JellyShare.Application.Storage;
+using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Peers;
+using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Interfaces.Relay;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Peers;
+using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Models.Storage;
 using JellyShare.Domain.Models.Sync;
 using Microsoft.Extensions.Logging;
 
@@ -26,18 +29,19 @@ public sealed class SyncService : ISyncRunner
     /// <summary>Maximum directories reported for scanning per run.</summary>
     public const int MaxScansPerRun = 200;
 
-    private const string PendingScansFile = "pending-scans.json";
-    private const string PeerStateFile = ConsumerIndexFiles.PeerStateFileName;
-
     private readonly ISettingsProvider _config;
     private readonly IPeerClient _client;
     private readonly ILocalIndex _localIndex;
     private readonly IScanReporter _scans;
     private readonly IRelayBase _relayBase;
-    private readonly Func<string> _dataDir;
+    private readonly IPeerStateStore _peerStates;
+    private readonly IMergedIndexStore _mergedIndex;
+    private readonly ISyncReportStore _reports;
+    private readonly IPlaceholderLedgerStore _ledgerStore;
+    private readonly IPendingScanStore _pendingScans;
+    private readonly IPlaceholderFiles _writer;
     private readonly TimeProvider _clock;
     private readonly ILogger<SyncService> _logger;
-    private readonly PlaceholderWriter _writer;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _lastLock = new();
     private SyncReport? _last;
@@ -49,9 +53,9 @@ public sealed class SyncService : ISyncRunner
     private Task? _background;
     private string? _lastError;
     private List<MergedEntry>? _merged;
-    private (DateTime WriteUtc, long Length) _mergedStamp;
+    private FileStamp _mergedStamp;
     private PlaceholderLedger? _ledger;
-    private (DateTime WriteUtc, long Length) _ledgerStamp;
+    private FileStamp _ledgerStamp;
 
     /// <summary>Initializes a new instance of the <see cref="SyncService"/> class.</summary>
     /// <param name="config">The plugin configuration.</param>
@@ -59,7 +63,12 @@ public sealed class SyncService : ISyncRunner
     /// <param name="localIndex">The local index.</param>
     /// <param name="scans">The scan reporter.</param>
     /// <param name="relayBase">The relay base URL.</param>
-    /// <param name="dataDir">Returns the plugin data folder.</param>
+    /// <param name="peerStates">The persisted peer states.</param>
+    /// <param name="mergedIndex">The persisted merged index.</param>
+    /// <param name="reports">The persisted last sync report.</param>
+    /// <param name="ledgerStore">The persisted placeholder ledger.</param>
+    /// <param name="pendingScans">The persisted pending scan list.</param>
+    /// <param name="placeholders">The placeholder roots on disk.</param>
     /// <param name="clock">The clock.</param>
     /// <param name="logger">The logger.</param>
     public SyncService(
@@ -68,7 +77,12 @@ public sealed class SyncService : ISyncRunner
         ILocalIndex localIndex,
         IScanReporter scans,
         IRelayBase relayBase,
-        Func<string> dataDir,
+        IPeerStateStore peerStates,
+        IMergedIndexStore mergedIndex,
+        ISyncReportStore reports,
+        IPlaceholderLedgerStore ledgerStore,
+        IPendingScanStore pendingScans,
+        IPlaceholderFiles placeholders,
         TimeProvider clock,
         ILogger<SyncService> logger)
     {
@@ -77,10 +91,14 @@ public sealed class SyncService : ISyncRunner
         _localIndex = localIndex;
         _scans = scans;
         _relayBase = relayBase;
-        _dataDir = dataDir;
+        _peerStates = peerStates;
+        _mergedIndex = mergedIndex;
+        _reports = reports;
+        _ledgerStore = ledgerStore;
+        _pendingScans = pendingScans;
+        _writer = placeholders;
         _clock = clock;
         _logger = logger;
-        _writer = new PlaceholderWriter(logger);
     }
 
     /// <summary>Gets the report of the last finished run, if any (read from the data folder after a restart).</summary>
@@ -95,7 +113,7 @@ public sealed class SyncService : ISyncRunner
                     _lastLoaded = true;
                     try
                     {
-                        _last = SyncReportStore.Load(_dataDir());
+                        _last = _reports.Load();
                     }
                     catch (InvalidOperationException)
                     {
@@ -171,9 +189,6 @@ public sealed class SyncService : ISyncRunner
         }
     }
 
-    /// <summary>Gets the path of the persisted merged index.</summary>
-    public string MergedIndexPath => Path.Combine(_dataDir(), MergedIndexStore.FileName);
-
     /// <summary>Runs one sync. Concurrent calls are serialised (never overlap).</summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The report.</returns>
@@ -207,7 +222,7 @@ public sealed class SyncService : ISyncRunner
             SetError(null);
             try
             {
-                SyncReportStore.Save(_dataDir(), report);
+                _reports.Save(report);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -277,9 +292,8 @@ public sealed class SyncService : ISyncRunner
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var dataDir = _dataDir();
-            EnqueueScans(dataDir, dirs);
-            var (scanned, pending) = ReportScans(dataDir);
+            EnqueueScans(dirs);
+            var (scanned, pending) = ReportScans();
             return (images, scanned, pending);
         }
         finally
@@ -332,8 +346,7 @@ public sealed class SyncService : ISyncRunner
         var cfg = _config.Current;
         EnsureRootsSeparate(cfg);
 
-        var dataDir = _dataDir();
-        var merged = MergedEntries(dataDir);
+        var merged = MergedEntries();
         if (merged is null || keys.Count == 0)
         {
             return (new ReconcileReport(0, 0, 0, 0, 0), []);
@@ -356,9 +369,9 @@ public sealed class SyncService : ISyncRunner
         var relay = _relayBase.Current;
         var movies = affected.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
         var episodes = affected.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
-        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, dataDir, ct, targeted: true).ConfigureAwait(false);
-        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, dataDir, ct, targeted: true).ConfigureAwait(false);
-        var (scanned, _) = ReportScans(dataDir);
+        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
+        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
+        var (scanned, _) = ReportScans();
 
         var report = new ReconcileReport(
             affected.Count,
@@ -412,7 +425,7 @@ public sealed class SyncService : ISyncRunner
                 }
             }
 
-            if (PlaceholderWriter.RootProblem(root) is { } problem)
+            if (_writer.RootProblem(root) is { } problem)
             {
                 throw new InvalidOperationException(problem);
             }
@@ -431,11 +444,7 @@ public sealed class SyncService : ISyncRunner
         EnsureRootsSeparate(cfg);
 
         var now = _clock.GetUtcNow();
-        var dataDir = _dataDir();
-        Directory.CreateDirectory(dataDir);
-
-        var stateStore = new PeerStateStore(Path.Combine(dataDir, PeerStateFile));
-        var states = stateStore.Load();
+        var states = _peerStates.Load();
         var peers = cfg.Peers
             .Where(p => p.Id != Guid.Empty)
             .GroupBy(p => p.Id)
@@ -488,16 +497,15 @@ public sealed class SyncService : ISyncRunner
         var skippedLocal = movies.Count(e => e.Keys.Any(local.MovieKeys.Contains))
             + episodes.Count(e => e.Keys.Any(local.EpisodeKeys.Contains));
 
-        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
-        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
+        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
+        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
 
-        var mergedPath = Path.Combine(dataDir, MergedIndexStore.FileName);
-        MergedIndexStore.Save(mergedPath, index.Entries, now);
+        _mergedIndex.Save(index.Entries, now);
         _merged = index.Entries.ToList();
-        _mergedStamp = FileStamp(mergedPath);
-        stateStore.Save(states);
+        _mergedStamp = _mergedIndex.Stamp();
+        _peerStates.Save(states);
 
-        var (scanned, pending) = ReportScans(dataDir);
+        var (scanned, pending) = ReportScans();
 
         var report = new SyncReport(
             index.Entries.Count,
@@ -618,7 +626,6 @@ public sealed class SyncService : ISyncRunner
         string root,
         string relay,
         IReadOnlyDictionary<Guid, RemotePeer> peers,
-        string dataDir,
         CancellationToken ct,
         bool targeted = false)
     {
@@ -634,16 +641,16 @@ public sealed class SyncService : ISyncRunner
         }
 
         var rootFull = Path.GetFullPath(root);
-        var ledger = Ledger(dataDir);
+        var ledger = Ledger();
         var records = ledger.For(rootFull);
         if (records is null)
         {
             // First run with a ledger: what is on disk now counts as plugin-written.
-            records = PlaceholderLedger.Seed(rootFull);
+            records = PlaceholderLedger.Seed(_writer.ScanExisting(rootFull));
             ledger.Set(rootFull, records);
         }
 
-        bool Present(string rel) => PlaceholderWriter.Resolve(rootFull, rel) is { } full && File.Exists(full);
+        bool Present(string rel) => _writer.Exists(rootFull, rel);
 
         // "Existing" is what the plugin wrote and is still there: compared by recorded hash, never by reading the
         // file, so files Jellyfin rewrites (NFO saver) are left alone and files it adds are never deleted.
@@ -711,7 +718,7 @@ public sealed class SyncService : ISyncRunner
                 records[path] = hash;
             }
 
-            SaveLedger(dataDir, ledger);
+            SaveLedger(ledger);
         }
 
         var imageSources = ImageSources(entries, localSeries);
@@ -750,19 +757,19 @@ public sealed class SyncService : ISyncRunner
         {
             // Persist what already changed on disk before failing, so those folders are still scanned later.
             Record(ex.Partial);
-            EnqueueScans(dataDir, ex.Partial.ChangedDirs);
+            EnqueueScans(ex.Partial.ChangedDirs);
             throw;
         }
 
         Record(result);
-        EnqueueScans(dataDir, result.ChangedDirs);
+        EnqueueScans(result.ChangedDirs);
         var tops = new List<string>(result.NewStrmTops);
         if (!targeted)
         {
             // Folders still missing an image (peer had none, or a download failed) get a bounded retry each full sync,
             // rotating through them so one stubborn folder never starves the rest.
             var missing = imageSources.Keys
-                .Where(t => !result.NewStrmTops.Contains(t) && PlaceholderWriter.MissesImages(rootFull, t))
+                .Where(t => !result.NewStrmTops.Contains(t) && _writer.MissesImages(rootFull, t))
                 .Order(StringComparer.Ordinal)
                 .ToList();
             if (missing.Count > 0)
@@ -813,71 +820,38 @@ public sealed class SyncService : ISyncRunner
     /// <summary>Gets how often the merged index file was parsed (test hook).</summary>
     internal int MergedIndexLoads { get; private set; }
 
-    private IReadOnlyList<MergedEntry>? MergedEntries(string dataDir)
+    private IReadOnlyList<MergedEntry>? MergedEntries()
     {
         // The full sync keeps what it saved in memory; the file is parsed again only when it changed on disk.
-        var path = Path.Combine(dataDir, MergedIndexStore.FileName);
-        var stamp = FileStamp(path);
+        var stamp = _mergedIndex.Stamp();
         if (_merged is null || stamp != _mergedStamp)
         {
             MergedIndexLoads++;
-            _merged = MergedIndexStore.Load(path)?.ToEntries().ToList();
+            _merged = _mergedIndex.Load()?.ToEntries().ToList();
             _mergedStamp = stamp;
         }
 
         return _merged;
     }
 
-    private PlaceholderLedger Ledger(string dataDir)
+    private PlaceholderLedger Ledger()
     {
         // Kept in memory; re-read only when the file changed or vanished behind our back.
-        var path = Path.Combine(dataDir, PlaceholderLedger.FileName);
-        var stamp = FileStamp(path);
+        var stamp = _ledgerStore.Stamp();
         if (_ledger is null || stamp != _ledgerStamp)
         {
-            _ledger = PlaceholderLedger.Load(path);
+            _ledger = _ledgerStore.Load();
             _ledgerStamp = stamp;
         }
 
         return _ledger;
     }
 
-    private void SaveLedger(string dataDir, PlaceholderLedger ledger)
+    private void SaveLedger(PlaceholderLedger ledger)
     {
-        var path = Path.Combine(dataDir, PlaceholderLedger.FileName);
-        ledger.Save(path);
+        _ledgerStore.Save(ledger);
         _ledger = ledger;
-        _ledgerStamp = FileStamp(path);
-    }
-
-    private static (DateTime WriteUtc, long Length) FileStamp(string path)
-    {
-        try
-        {
-            var info = new FileInfo(path);
-            return info.Exists ? (info.LastWriteTimeUtc, info.Length) : default;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return default;
-        }
-    }
-
-    private List<string> ReadPending(string path)
-    {
-        try
-        {
-            if (File.Exists(path))
-            {
-                return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(path)) ?? [];
-            }
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
-        {
-            _logger.LogWarning("JellyShare sync: pending scan list unreadable ({Error}), starting a new one", ex.GetType().Name);
-        }
-
-        return [];
+        _ledgerStamp = _ledgerStore.Stamp();
     }
 
     private static List<string> Distinct(IEnumerable<string> paths)
@@ -886,7 +860,7 @@ public sealed class SyncService : ISyncRunner
         return paths.Where(p => !string.IsNullOrWhiteSpace(p) && seen.Add(p)).ToList();
     }
 
-    private void EnqueueScans(string dataDir, IEnumerable<string> dirs)
+    private void EnqueueScans(IEnumerable<string> dirs)
     {
         var added = dirs.ToList();
         if (added.Count == 0)
@@ -894,19 +868,17 @@ public sealed class SyncService : ISyncRunner
             return;
         }
 
-        var path = Path.Combine(dataDir, PendingScansFile);
-        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(Distinct(ReadPending(path).Concat(added))));
+        _pendingScans.Write(Distinct(_pendingScans.Read().Concat(added)));
     }
 
-    private (int Scanned, int Pending) ReportScans(string dataDir)
+    private (int Scanned, int Pending) ReportScans()
     {
-        var path = Path.Combine(dataDir, PendingScansFile);
-        if (!File.Exists(path))
+        if (!_pendingScans.Exists())
         {
             return (0, 0);
         }
 
-        var ordered = Distinct(ReadPending(path));
+        var ordered = Distinct(_pendingScans.Read());
         var batch = ordered.Take(MaxScansPerRun).ToList();
         var rest = ordered.Skip(MaxScansPerRun).ToList();
         var scanned = 0;
@@ -926,7 +898,7 @@ public sealed class SyncService : ISyncRunner
             }
         }
 
-        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(rest));
+        _pendingScans.Write(rest);
         return (scanned, rest.Count);
     }
 }

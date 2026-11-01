@@ -1,4 +1,5 @@
-using JellyShare.Application.Storage;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
@@ -20,7 +21,7 @@ public static class SourceSelector
     /// <param name="state">The peer state store.</param>
     /// <returns>The usable sources, preferred first.</returns>
     /// <exception cref="PeerStateUnreadableException">The state file exists but cannot be read.</exception>
-    public static IReadOnlyList<RelaySource> Order(MergedEntry entry, IReadOnlyList<RemotePeer> peers, PeerStateStore state)
+    public static IReadOnlyList<RelaySource> Order(MergedEntry entry, IReadOnlyList<RemotePeer> peers, IPeerStateStore state)
     {
         ArgumentNullException.ThrowIfNull(state);
         return Order(entry, peers, state.Load());

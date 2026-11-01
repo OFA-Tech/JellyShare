@@ -1,9 +1,9 @@
-using JellyShare.Application.Features.Sync;
+using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Sync;
 
-namespace JellyShare.Application.Storage;
+namespace JellyShare.Data.Files.Stores;
 
 /// <summary>
 /// <see cref="IConsumerIndex"/> over <c>merged-index.json</c> and <c>peer-state.json</c> in the plugin data folder.
@@ -11,8 +11,8 @@ namespace JellyShare.Application.Storage;
 /// </summary>
 public sealed class ConsumerIndexFiles : IConsumerIndex
 {
-    /// <summary>The peer state file name (same as <see cref="SyncService"/>).</summary>
-    public const string PeerStateFileName = "peer-state.json";
+    /// <summary>The peer state file name (same as <see cref="PeerStateStore"/>).</summary>
+    public const string PeerStateFileName = PeerStateStore.FileName;
 
     private static readonly IReadOnlyDictionary<Guid, PeerState> NoStates = new Dictionary<Guid, PeerState>();
 

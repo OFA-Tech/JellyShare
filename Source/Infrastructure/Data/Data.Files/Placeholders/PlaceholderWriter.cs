@@ -1,52 +1,15 @@
-using JellyShare.Application.Features.Placeholders;
+using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Exceptions;
+using JellyShare.Domain.Interfaces.Placeholders;
+using JellyShare.Domain.Models.Placeholders;
+using JellyShare.Domain.Rules;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-namespace JellyShare.Application.Storage;
-
-/// <summary>Fetches an image for a placeholder folder.</summary>
-/// <param name="topDir">The relative movie or series folder (first path segment).</param>
-/// <param name="imageType"><c>Primary</c> or <c>Backdrop</c>.</param>
-/// <param name="ct">The cancellation token.</param>
-/// <returns>The image bytes, or <c>null</c> when the peer has none.</returns>
-public delegate Task<Stream?> PlaceholderImageFetcher(string topDir, string imageType, CancellationToken ct);
-
-/// <summary>What <see cref="PlaceholderWriter.ApplyAsync"/> did.</summary>
-/// <param name="Written">Placeholder files (<c>.strm</c>/<c>.nfo</c>) written.</param>
-/// <param name="Deleted">Placeholder files deleted.</param>
-/// <param name="Refused">Diff entries refused because their path was unsafe.</param>
-/// <param name="ImagesWritten">Images downloaded.</param>
-/// <param name="ChangedDirs">Full paths of directories that changed (including removed ones), ordered.</param>
-public sealed record PlaceholderWriteResult(int Written, int Deleted, int Refused, int ImagesWritten, IReadOnlyList<string> ChangedDirs)
-{
-    /// <summary>Gets the relative paths written (committed), with the hash of what was written.</summary>
-    public IReadOnlyDictionary<string, string> WrittenPaths { get; init; } = new Dictionary<string, string>();
-
-    /// <summary>Gets the relative paths deleted (or already gone).</summary>
-    public IReadOnlyList<string> DeletedPaths { get; init; } = [];
-
-    /// <summary>Gets the movie/series folders (relative, first segment) that got a new <c>.strm</c>.</summary>
-    public IReadOnlyList<string> NewStrmTops { get; init; } = [];
-}
-
-/// <summary>Thrown when applying a diff fails part-way; <see cref="Partial"/> holds what was already changed.</summary>
-public sealed class PlaceholderWriteException : Exception
-{
-    /// <summary>Initializes a new instance of the <see cref="PlaceholderWriteException"/> class.</summary>
-    /// <param name="partial">What was done before the failure.</param>
-    /// <param name="inner">The cause.</param>
-    public PlaceholderWriteException(PlaceholderWriteResult partial, Exception inner)
-        : base("Applying placeholder changes failed part-way", inner)
-    {
-        Partial = partial;
-    }
-
-    /// <summary>Gets what was done before the failure.</summary>
-    public PlaceholderWriteResult Partial { get; }
-}
+namespace JellyShare.Data.Files.Placeholders;
 
 /// <summary>Applies a <see cref="PlaceholderDiff"/> to a plugin-owned placeholder root.</summary>
-public sealed class PlaceholderWriter
+public sealed class PlaceholderWriter : IPlaceholderFiles
 {
     /// <summary>The marker file kept in every root so scans never skip it as empty. Never deleted.</summary>
     public const string MarkerName = ".jellyshare";
@@ -62,6 +25,53 @@ public sealed class PlaceholderWriter
         _logger = logger ?? NullLogger.Instance;
     }
 
+    /// <inheritdoc />
+    string? IPlaceholderFiles.RootProblem(string root) => RootProblem(root);
+
+    /// <inheritdoc />
+    void IPlaceholderFiles.EnsureRoot(string root) => EnsureRoot(root);
+
+    /// <inheritdoc />
+    bool IPlaceholderFiles.MissesImages(string root, string top) => MissesImages(root, top);
+
+    /// <inheritdoc />
+    IReadOnlyDictionary<string, string> IPlaceholderFiles.ScanExisting(string root) => ScanExisting(root);
+
+    /// <inheritdoc />
+    public bool Exists(string rootFull, string relativePath)
+        => Resolve(rootFull, relativePath) is { } full && File.Exists(full);
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> ReadStrmContents(string root)
+    {
+        var contents = new List<string>();
+        if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+        {
+            return contents;
+        }
+
+        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+        try
+        {
+            foreach (var strm in Directory.EnumerateFiles(root, "*.strm", options))
+            {
+                try
+                {
+                    contents.Add(File.ReadAllText(strm).Trim());
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning("JellyShare sweep: placeholder folder unreadable: {Error}", ex.GetType().Name);
+        }
+
+        return contents;
+    }
+
     /// <summary>Test hook: called with each file <see cref="ScanExisting"/> reads (per async flow).</summary>
     internal static readonly AsyncLocal<Action<string>?> ReadObserver = new();
 
@@ -70,7 +80,7 @@ public sealed class PlaceholderWriter
 
     /// <summary>Lists the placeholder files (<c>.strm</c>/<c>.nfo</c>) under a root with their content hash.</summary>
     /// <param name="root">The placeholder root.</param>
-    /// <returns>Relative path (forward slashes) to <see cref="PlaceholderPlanner.Hash"/> of the content.</returns>
+    /// <returns>Relative path (forward slashes) to <see cref="PlaceholderRules.Hash"/> of the content.</returns>
     public static IReadOnlyDictionary<string, string> ScanExisting(string root)
     {
         var result = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -102,7 +112,7 @@ public sealed class PlaceholderWriter
             try
             {
                 ReadObserver.Value?.Invoke(file);
-                result[rel] = PlaceholderPlanner.Hash(File.ReadAllText(file));
+                result[rel] = PlaceholderRules.Hash(File.ReadAllText(file));
             }
             catch (IOException)
             {
@@ -117,7 +127,7 @@ public sealed class PlaceholderWriter
     /// movie/series folder that got a new <c>.strm</c>, then removes folders left without any <c>.strm</c> and empty
     /// directories (never the root or its marker). Paths that could leave the root are refused.
     /// </summary>
-    /// <param name="diff">The diff from <see cref="PlaceholderPlanner.Plan"/>.</param>
+    /// <param name="diff">The diff from the planner.</param>
     /// <param name="root">The placeholder root.</param>
     /// <param name="imageFetcher">Fetches folder images; failures are logged and ignored.</param>
     /// <param name="ct">The cancellation token.</param>
@@ -185,7 +195,7 @@ public sealed class PlaceholderWriter
 
                 AtomicFile.WriteAllText(full, write.Content, BeforeCommit);
                 written++;
-                writtenPaths[write.RelativePath] = PlaceholderPlanner.Hash(write.Content);
+                writtenPaths[write.RelativePath] = PlaceholderRules.Hash(write.Content);
                 changed.Add(Path.GetDirectoryName(full)!);
                 if (write.RelativePath.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
                 {
@@ -246,7 +256,7 @@ public sealed class PlaceholderWriter
         }
 
         var slash = relativePath.LastIndexOf('/');
-        if (slash <= 0 || !PathNaming.IsSafeRelative(relativePath[..slash], relativePath[(slash + 1)..]))
+        if (slash <= 0 || !PlaceholderRules.IsSafeRelative(relativePath[..slash], relativePath[(slash + 1)..]))
         {
             return null;
         }

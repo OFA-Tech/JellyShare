@@ -1,14 +1,36 @@
 using System.Text.Json;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Storage;
 using JellyShare.Domain.Models.Sync;
 
-namespace JellyShare.Application.Storage;
+namespace JellyShare.Data.Files.Stores;
 
 /// <summary>Reads and writes <see cref="MergedIndexFile"/>.</summary>
-public static class MergedIndexStore
+public sealed class MergedIndexStore : IMergedIndexStore
 {
     /// <summary>The file name inside the plugin data folder.</summary>
     public const string FileName = "merged-index.json";
+
+    private readonly Func<string> _dataDir;
+
+    /// <summary>Initializes a new instance of the <see cref="MergedIndexStore"/> class.</summary>
+    /// <param name="dataDir">Returns the plugin data folder.</param>
+    public MergedIndexStore(Func<string> dataDir)
+    {
+        _dataDir = dataDir;
+    }
+
+    private string FilePath => Path.Combine(_dataDir(), FileName);
+
+    /// <inheritdoc />
+    public MergedIndexFile? Load() => Load(FilePath);
+
+    /// <inheritdoc />
+    public void Save(IEnumerable<MergedEntry> entries, DateTimeOffset generatedUtc) => Save(FilePath, entries, generatedUtc);
+
+    /// <inheritdoc />
+    public FileStamp Stamp() => FileStamps.Of(FilePath);
 
     /// <summary>Saves the merged entries atomically.</summary>
     /// <param name="path">The file path.</param>

@@ -18,7 +18,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     {
         serviceCollection
             .AddDomainSetup()
-            .AddApplicationSetup(DataFolder)
+            .AddApplicationSetup()
             .AddModulesSetup(RegistrationSettings(), DataFolder)
             .AddJellyfinSetup(DataFolder);
     }

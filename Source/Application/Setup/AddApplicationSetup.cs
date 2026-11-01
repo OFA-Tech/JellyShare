@@ -5,8 +5,10 @@ using JellyShare.Application.Features.Sync;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Peers;
+using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Domain.Interfaces.Relay;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Interfaces.Streaming;
 using JellyShare.Domain.Interfaces.Sync;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,12 +21,10 @@ public static class ApplicationSetup
 {
     /// <summary>Registers the catalog, streaming, relay and sync services.</summary>
     /// <param name="services">The service collection.</param>
-    /// <param name="dataFolder">Returns the plugin data folder (resolved when first needed).</param>
     /// <returns>The same collection.</returns>
-    public static IServiceCollection AddApplicationSetup(this IServiceCollection services, Func<string> dataFolder)
+    public static IServiceCollection AddApplicationSetup(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(dataFolder);
 
         services.AddSingleton<ShareTokenService>();
         services.AddSingleton(new StreamLimiter(TimeProvider.System));
@@ -47,11 +47,18 @@ public static class ApplicationSetup
             sp.GetRequiredService<ILocalIndex>(),
             sp.GetRequiredService<IScanReporter>(),
             sp.GetRequiredService<IRelayBase>(),
-            dataFolder,
+            sp.GetRequiredService<IPeerStateStore>(),
+            sp.GetRequiredService<IMergedIndexStore>(),
+            sp.GetRequiredService<ISyncReportStore>(),
+            sp.GetRequiredService<IPlaceholderLedgerStore>(),
+            sp.GetRequiredService<IPendingScanStore>(),
+            sp.GetRequiredService<IPlaceholderFiles>(),
             TimeProvider.System,
             sp.GetRequiredService<ILogger<SyncService>>()));
         services.AddSingleton(sp => new LocalItemWatcher(
             sp.GetRequiredService<SyncService>(),
+            sp.GetRequiredService<IMergedIndexStore>(),
+            sp.GetRequiredService<IPlaceholderFiles>(),
             sp.GetRequiredService<ILocalItemEvents>(),
             sp.GetRequiredService<ILocalLibrary>(),
             sp.GetRequiredService<ISettingsProvider>(),
