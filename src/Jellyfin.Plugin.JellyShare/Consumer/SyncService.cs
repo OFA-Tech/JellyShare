@@ -282,7 +282,7 @@ public sealed class SyncService : ISyncRunner
                 if (_queued && Volatile.Read(ref _active) == 0)
                 {
                     _queued = false;
-                    _background = Task.Run(BackgroundRunAsync);
+                    _background = Task.Run(BackgroundRunAsync, CancellationToken.None);
                 }
             }
         }
