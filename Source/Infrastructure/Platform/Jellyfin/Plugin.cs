@@ -50,7 +50,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             {
                 Name = PluginName,
                 DisplayName = PluginName,
-                EmbeddedResourcePath = ns + ".Configuration.configPage.html",
+                EmbeddedResourcePath = ns + ".Web.configPage.html",
                 EnableInMainMenu = true,
                 MenuSection = "server",
                 MenuIcon = "share",
@@ -58,7 +58,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
             new PluginPageInfo
             {
                 Name = ScriptPageName,
-                EmbeddedResourcePath = ns + ".Configuration.configPage.js",
+                EmbeddedResourcePath = ns + ".Web.configPage.js",
             },
         ];
     }

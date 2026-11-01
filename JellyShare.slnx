@@ -15,12 +15,16 @@
   <Folder Name="/Solution Items/.github/workflows/">
     <File Path=".github/workflows/release.yml" />
   </Folder>
-  <Folder Name="/Source/" />
+  <Folder Name="/Source/">
+    <Project Path="Source/Domain/JellyShare.Domain.csproj" />
+    <Project Path="Source/Application/JellyShare.Application.csproj" />
+  </Folder>
   <Folder Name="/Source/Infrastructure/" />
   <Folder Name="/Source/Infrastructure/Platform/">
     <Project Path="Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="Tests/JellyfinTests/JellyShare.JellyfinTests.csproj" />
+    <Project Path="Tests/UnitTests/JellyShare.UnitTests.csproj" />
   </Folder>
 </Solution>

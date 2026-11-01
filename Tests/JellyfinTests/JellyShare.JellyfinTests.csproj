@@ -16,7 +16,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\Source\Domain\JellyShare.Domain.csproj" />
+    <ProjectReference Include="..\..\Source\Application\JellyShare.Application.csproj" />
     <ProjectReference Include="..\..\Source\Infrastructure\Platform\Jellyfin\JellyShare.Jellyfin.csproj" />
+  </ItemGroup>
+
+  <!-- The fakes for the Domain ports are shared with the unit tests (compiled into this assembly too). -->
+  <ItemGroup>
+    <Compile Include="..\UnitTests\Fakes\*.cs" Link="Fakes\Shared\%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

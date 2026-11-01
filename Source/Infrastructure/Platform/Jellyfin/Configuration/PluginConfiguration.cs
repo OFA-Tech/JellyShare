@@ -1,9 +1,12 @@
+using JellyShare.Domain.Models.Configuration;
 using MediaBrowser.Model.Plugins;
 
 namespace JellyShare.Jellyfin.Configuration;
 
 /// <summary>
-/// Plugin configuration persisted by Jellyfin as XML.
+/// Plugin configuration persisted by Jellyfin as XML. Same properties (names, order, defaults) as
+/// <see cref="JellyShareSettings"/>, so the stored XML keeps its shape; the rest of the plugin works with
+/// <see cref="JellyShareSettings"/> through <see cref="ToSettings"/> and <see cref="Apply"/>.
 /// </summary>
 public class PluginConfiguration : BasePluginConfiguration
 {
@@ -45,71 +48,43 @@ public class PluginConfiguration : BasePluginConfiguration
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataFolder);
 
-        if (string.IsNullOrWhiteSpace(cfg.MoviesPlaceholderPath))
-        {
-            cfg.MoviesPlaceholderPath = Path.Combine(dataFolder, "placeholders", "Movies");
-        }
+        cfg.MoviesPlaceholderPath = JellyShareSettings.ResolvePlaceholderRoot(cfg.MoviesPlaceholderPath, dataFolder, "Movies");
+        cfg.ShowsPlaceholderPath = JellyShareSettings.ResolvePlaceholderRoot(cfg.ShowsPlaceholderPath, dataFolder, "Shows");
+    }
 
-        if (string.IsNullOrWhiteSpace(cfg.ShowsPlaceholderPath))
-        {
-            cfg.ShowsPlaceholderPath = Path.Combine(dataFolder, "placeholders", "Shows");
-        }
+    /// <summary>
+    /// Creates a settings snapshot. The share and peer lists are shared, not copied: they are never changed in place
+    /// (copy-on-write), so a reader keeps a self-consistent view while the admin page saves new lists.
+    /// </summary>
+    /// <returns>The settings.</returns>
+    public JellyShareSettings ToSettings() => new()
+    {
+        Shares = Shares,
+        Peers = Peers,
+        MoviesPlaceholderPath = MoviesPlaceholderPath,
+        ShowsPlaceholderPath = ShowsPlaceholderPath,
+        SyncIntervalHours = SyncIntervalHours,
+        PresenceSweepSeconds = PresenceSweepSeconds,
+        MaxConcurrentTranscodes = MaxConcurrentTranscodes,
+        RelayBaseOverride = RelayBaseOverride,
+    };
+
+    /// <summary>Copies every setting from <paramref name="settings"/> into this configuration.</summary>
+    /// <param name="settings">The settings.</param>
+    public void Apply(JellyShareSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Shares = settings.Shares;
+        Peers = settings.Peers;
+        MoviesPlaceholderPath = settings.MoviesPlaceholderPath;
+        ShowsPlaceholderPath = settings.ShowsPlaceholderPath;
+        SyncIntervalHours = settings.SyncIntervalHours;
+        PresenceSweepSeconds = settings.PresenceSweepSeconds;
+        MaxConcurrentTranscodes = settings.MaxConcurrentTranscodes;
+        RelayBaseOverride = settings.RelayBaseOverride;
     }
 
     /// <inheritdoc />
     public override string ToString()
         => $"PluginConfiguration(Shares={Shares.Count}, Peers={Peers.Count})";
-}
-
-/// <summary>A share offered to one peer. Only the hash of the share token is stored.</summary>
-public class PeerShare
-{
-    /// <summary>Gets or sets the share id.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the display name of the peer this share is for.</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the lowercase hex SHA-256 of the share token.</summary>
-    public string TokenHash { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets a value indicating whether the share is active.</summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>Gets or sets the ids of the libraries the peer may see.</summary>
-    public List<Guid> LibraryIds { get; set; } = new();
-
-    /// <summary>Gets or sets the maximum concurrent streams for the peer.</summary>
-    public int MaxStreams { get; set; } = 2;
-
-    /// <summary>Gets or sets the bitrate cap in bits per second; <c>null</c> means no cap.</summary>
-    public int? MaxBitrate { get; set; }
-
-    /// <inheritdoc />
-    public override string ToString() => $"PeerShare({Id}, {Name})";
-}
-
-/// <summary>A remote peer this server syncs from. Holds that peer's secret token.</summary>
-public class RemotePeer
-{
-    /// <summary>Gets or sets the peer id.</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Gets or sets the display name.</summary>
-    public string Name { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the base URL of the remote Jellyfin server.</summary>
-    public string BaseUrl { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets the secret token the remote server gave us.</summary>
-    public string Token { get; set; } = string.Empty;
-
-    /// <summary>Gets or sets a value indicating whether the peer is used.</summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>Gets or sets the priority; lower is preferred.</summary>
-    public int Priority { get; set; }
-
-    /// <inheritdoc />
-    public override string ToString() => $"RemotePeer({Id}, {Name})";
 }
