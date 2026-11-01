@@ -25,8 +25,16 @@ using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
+/// <summary>Like <c>PluginSettingsStore</c>: only what is passed to <c>Save</c> becomes the stored settings.</summary>
 internal sealed class FakeSaver : ISettingsStore
 {
+    private readonly SnapshotSettings _target;
+
+    public FakeSaver(SnapshotSettings target)
+    {
+        _target = target;
+    }
+
     public int Saves { get; private set; }
 
     public JellyShareSettings? Saved { get; private set; }
@@ -35,6 +43,7 @@ internal sealed class FakeSaver : ISettingsStore
     {
         Saves++;
         Saved = settings;
+        _target.Store(settings);
     }
 }
 
@@ -114,7 +123,7 @@ public sealed class AdminControllerTests : IDisposable
 
     private readonly TempDir _tmp = new();
     private readonly ConsumerConfig _config = new();
-    private readonly FakeSaver _saver = new();
+    private readonly FakeSaver _saver;
     private readonly ShareTokenService _tokens = new();
     private readonly StreamLimiter _limiter = new(TimeProvider.System);
     private readonly FakePeerClient _peers = new();
@@ -126,8 +135,9 @@ public sealed class AdminControllerTests : IDisposable
 
     public AdminControllerTests()
     {
-        _config.Current.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
-        _config.Current.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        _saver = new FakeSaver(_config);
+        _config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
+        _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _index = new ConsumerIndexFiles(() => _tmp.Sub("data"));
         _c = new AdminController(
             _config, _saver, _tokens, _limiter, _peers, _sync, _index, _libs, new FakeIdentity(), NullLogger<AdminController>.Instance)
@@ -171,7 +181,7 @@ public sealed class AdminControllerTests : IDisposable
     private RemotePeer SeedPeer(string name = "alice", int priority = 0, bool enabled = true)
     {
         var peer = new RemotePeer { Id = Guid.NewGuid(), Name = name, BaseUrl = "http://" + name + ":8096", Token = Token, Enabled = enabled, Priority = priority };
-        _config.Current.Peers.Add(peer);
+        _config.Settings.Peers.Add(peer);
         return peer;
     }
 
@@ -218,6 +228,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.Equal([FakeLibraries.MoviesId], share.LibraryIds);
         Assert.NotNull(_tokens.Verify(created.Token, _config.Current.Shares));
         Assert.True(_saver.Saves >= 1);
+        Assert.Equal(created.Id, Assert.Single(_saver.Saved!.Shares).Id);
     }
 
     [Fact]
@@ -284,6 +295,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.Equal(4_000_000, share.MaxBitrate);
         Assert.False(share.Enabled);
         Assert.Equal(hashBefore, share.TokenHash);
+        Assert.Equal("bobby", Assert.Single(_saver.Saved!.Shares).Name);
         Assert.Equal(created.Id, view.Id);
         Assert.False(view.Enabled);
         Assert.Null(_tokens.Verify(created.Token, _config.Current.Shares));
@@ -326,6 +338,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.Null(_tokens.Verify(created.Token, _config.Current.Shares));
         Assert.NotNull(_tokens.Verify(other.Token, _config.Current.Shares));
         Assert.Equal(other.Id, Assert.Single(_config.Current.Shares).Id);
+        Assert.Equal(other.Id, Assert.Single(_saver.Saved!.Shares).Id);
     }
 
     [Fact]
@@ -355,6 +368,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.NotEqual(Guid.Empty, stored.Id);
         Assert.Equal(view.Id, stored.Id);
         Assert.True(_saver.Saves >= 1);
+        Assert.Contains(_saver.Saved!.Peers, p => p.Id == view.Id);
     }
 
     [Theory]
@@ -396,6 +410,7 @@ public sealed class AdminControllerTests : IDisposable
         _c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice", peer.BaseUrl, "js1_new", true));
 
         Assert.Equal("js1_new", _config.Current.Peers.Single().Token);
+        Assert.Equal("js1_new", Assert.Single(_saver.Saved!.Peers).Token);
     }
 
     [Fact]
@@ -412,6 +427,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.True(peer.Enabled);
         Assert.NotSame(listBefore, _config.Current.Peers);
         Assert.NotSame(peer, _config.Current.Peers.Single());
+        Assert.Equal("renamed", Assert.Single(_saver.Saved!.Peers).Name);
     }
 
     [Fact]
@@ -427,6 +443,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.True(before.Enabled);
         Assert.NotSame(before, _config.Current.Shares.Single());
         Assert.Equal("renamed", _config.Current.Shares.Single().Name);
+        Assert.Equal("renamed", Assert.Single(_saver.Saved!.Shares).Name);
     }
 
     [Fact]
@@ -514,6 +531,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.IsType<NoContentResult>(_c.DeletePeer(a.Id));
 
         Assert.Equal(b.Id, Assert.Single(_config.Current.Peers).Id);
+        Assert.Equal(b.Id, Assert.Single(_saver.Saved!.Peers).Id);
         Assert.IsType<NotFoundObjectResult>(_c.DeletePeer(a.Id));
     }
 
@@ -530,6 +548,7 @@ public sealed class AdminControllerTests : IDisposable
         Assert.IsType<NoContentResult>(result);
         Assert.Equal(["c", "a", "b", "d"], Status().Peers.Select(p => p.Name));
         Assert.Equal([0, 1, 2, 3], _config.Current.Peers.OrderBy(p => p.Priority).Select(p => p.Priority));
+        Assert.Equal(["c", "a", "b", "d"], _saver.Saved!.Peers.OrderBy(p => p.Priority).Select(p => p.Name));
         _ = (a, b, c, d);
     }
 

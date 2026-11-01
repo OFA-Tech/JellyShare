@@ -28,9 +28,9 @@ public sealed class SyncServiceTests : IDisposable
 
     public SyncServiceTests()
     {
-        _config.Current.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
-        _config.Current.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
-        _config.Current.Peers.Add(_alice);
+        _config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
+        _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
         _sync = new SyncService(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance);
@@ -176,7 +176,7 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Bunny());
         await _sync.RunAsync(CancellationToken.None);
 
-        _config.Current.Peers.Clear();
+        _config.Settings.Peers.Clear();
         var report = await _sync.RunAsync(CancellationToken.None);
 
         Assert.False(MoviePlaceholder(BunnyDir));
@@ -367,7 +367,7 @@ public sealed class SyncServiceTests : IDisposable
     [Fact]
     public async Task Sync_OverlappingPlaceholderRoots_RefusesToWrite()
     {
-        _config.Current.ShowsPlaceholderPath = Path.Combine(MoviesRoot, "Shows");
+        _config.Settings.ShowsPlaceholderPath = Path.Combine(MoviesRoot, "Shows");
         Offer(Bunny(), Pioneer(2, 1));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
@@ -379,7 +379,7 @@ public sealed class SyncServiceTests : IDisposable
     public async Task Sync_PeerFetchThrowsIOException_RecordsPeerErrorAndOthersStillSync()
     {
         var bob = new RemotePeer { Id = Guid.NewGuid(), Name = "bob", BaseUrl = "http://bob", Token = "t2", Priority = 1 };
-        _config.Current.Peers.Add(bob);
+        _config.Settings.Peers.Add(bob);
         _client.Catalogs[_alice.Id] = _ => throw new IOException("response ended prematurely");
         _client.Catalogs[bob.Id] = _ => FakePeerClient.Ok(Bunny());
 
@@ -407,7 +407,7 @@ public sealed class SyncServiceTests : IDisposable
     [Fact]
     public async Task Sync_NonLoopbackRelayOverride_RefusesToWrite()
     {
-        _config.Current.RelayBaseOverride = "http://10.0.0.2:8096";
+        _config.Settings.RelayBaseOverride = "http://10.0.0.2:8096";
         Offer(Bunny());
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
@@ -536,7 +536,7 @@ public sealed class SyncServiceTests : IDisposable
         var ownerNfo = Path.Combine(owner, "Owned (2001)", "Owned (2001).nfo");
         File.WriteAllText(ownerNfo, "<movie/>");
         _library.Locations.Add(owner);
-        _config.Current.MoviesPlaceholderPath = owner;
+        _config.Settings.MoviesPlaceholderPath = owner;
         Offer(Bunny());
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
@@ -692,14 +692,14 @@ public sealed class SyncServiceTests : IDisposable
     [Fact]
     public async Task Sync_BackgroundFailure_IsRecordedAsLastError_AndClearedBySuccess()
     {
-        _config.Current.RelayBaseOverride = "http://10.0.0.2:8096";
+        _config.Settings.RelayBaseOverride = "http://10.0.0.2:8096";
         Offer(Bunny());
 
         Assert.True(_sync.TryStartBackground());
         await WaitUntil(() => !_sync.IsRunning && _sync.LastError is not null);
         Assert.Contains("RelayBaseOverride", _sync.LastError, StringComparison.Ordinal);
 
-        _config.Current.RelayBaseOverride = null;
+        _config.Settings.RelayBaseOverride = null;
         await _sync.RunAsync(CancellationToken.None);
         Assert.Null(_sync.LastError);
     }

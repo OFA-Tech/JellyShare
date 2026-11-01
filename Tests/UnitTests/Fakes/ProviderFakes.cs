@@ -16,16 +16,16 @@ internal sealed class FakeIdentity : IServerIdentity
     public string ServerName => "Alice";
 }
 
-internal sealed class FakeConfig : ISettingsProvider
+internal sealed class FakeConfig : SnapshotSettings
 {
     public const string MoviesRoot = "/data/placeholders/Movies";
     public const string ShowsRoot = "/data/placeholders/Shows";
 
-    public JellyShareSettings Current { get; } = new()
+    public FakeConfig()
     {
-        MoviesPlaceholderPath = MoviesRoot,
-        ShowsPlaceholderPath = ShowsRoot,
-    };
+        Settings.MoviesPlaceholderPath = MoviesRoot;
+        Settings.ShowsPlaceholderPath = ShowsRoot;
+    }
 }
 
 internal sealed class FakeEncoderSettings : IEncoderSettingsSource

@@ -39,15 +39,15 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         File.WriteAllBytes(file, Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray());
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Current.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { Lib } });
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { Lib } });
 
         var source = new FakeSource();
         source.Items.Add((Lib, new LocalItem(MovieId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[MovieId] = new StreamInfo("Movie", "Movie", file, 1_000_000);
         source.Items.Add((Lib, new LocalItem(CappedId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[CappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
-        _config.Current.Shares[0].MaxBitrate = 2_000_000;
-        _config.Current.Shares[0].MaxStreams = 1;
+        _config.Settings.Shares[0].MaxBitrate = 2_000_000;
+        _config.Settings.Shares[0].MaxStreams = 1;
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");

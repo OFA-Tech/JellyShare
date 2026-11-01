@@ -189,6 +189,59 @@ public class PluginConfigurationTests
     }
 
     [Fact]
+    public void ToSettings_And_Apply_RoundTripEveryProperty_WithNonDefaultValues()
+    {
+        var properties = typeof(JellyShareSettings).GetProperties().Where(p => p.DeclaringType == typeof(JellyShareSettings)).ToArray();
+        Assert.NotEmpty(properties);
+
+        // Every property gets a value different from its default, so a property missing from the mapping fails here.
+        var original = new JellyShareSettings();
+        var expected = new Dictionary<string, object?>();
+        foreach (var property in properties)
+        {
+            var defaultValue = property.GetValue(new JellyShareSettings());
+            var value = NonDefault(property.PropertyType, property.Name);
+            Assert.NotEqual(defaultValue, value);
+            property.SetValue(original, value);
+            expected[property.Name] = value;
+        }
+
+        var cfg = new PluginConfiguration();
+        cfg.Apply(original);
+        var back = cfg.ToSettings();
+
+        foreach (var property in properties)
+        {
+            Assert.Equal(expected[property.Name], typeof(PluginConfiguration).GetProperty(property.Name)!.GetValue(cfg));
+            Assert.Equal(expected[property.Name], property.GetValue(back));
+        }
+    }
+
+    private static object? NonDefault(Type type, string name)
+    {
+        if (type == typeof(int))
+        {
+            return 777;
+        }
+
+        if (type == typeof(string))
+        {
+            return "/non-default/" + name;
+        }
+
+        if (type == typeof(List<PeerShare>))
+        {
+            return new List<PeerShare> { new() { Name = name } };
+        }
+
+        if (type == typeof(List<RemotePeer>))
+        {
+            return new List<RemotePeer> { new() { Name = name } };
+        }
+
+        throw new NotSupportedException("Add a non-default value for " + type + " (" + name + ") to this test.");
+    }
+    [Fact]
     public void PluginConfiguration_HasTheSamePublicSettingsAsJellyShareSettings()
     {
         static string[] Props(Type t) => t.GetProperties().Where(p => p.DeclaringType == t).Select(p => p.Name + ":" + p.PropertyType).ToArray();

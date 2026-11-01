@@ -194,6 +194,7 @@ public sealed class CappedStreamService
             return CappedStreamOutcome.ClientDisconnected;
         }
     }
+
     internal void Release(TranscodeSlot slot)
     {
         lock (_lock)

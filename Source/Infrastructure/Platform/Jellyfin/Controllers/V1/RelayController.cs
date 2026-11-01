@@ -26,7 +26,6 @@ public class RelayController : ControllerBase
     /// <summary>Default time a committed peer may send no bytes before the response is aborted.</summary>
     public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
 
-    private const int MaxRangeLength = 256;
 
     // A request that passed through a reverse proxy on this host would otherwise look like loopback.
     // X-Original-* are what ASP.NET's forwarded-headers middleware leaves after consuming X-Forwarded-*.
@@ -98,7 +97,7 @@ public class RelayController : ControllerBase
         }
 
         var sources = PreferActive(entry.CanonicalKey, SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates()));
-        var range = ForwardableRange(Request.Headers.Range.ToString());
+        var range = RelayRange.Forwardable(Request.Headers.Range.ToString());
         var aborted = HttpContext.RequestAborted;
         var isHead = HttpMethods.IsHead(Request.Method);
 
@@ -195,19 +194,6 @@ public class RelayController : ControllerBase
         }
 
         return true;
-    }
-
-    private static string? ForwardableRange(string? range)
-    {
-        if (string.IsNullOrWhiteSpace(range)
-            || range.Length > MaxRangeLength
-            || !range.StartsWith("bytes=", StringComparison.OrdinalIgnoreCase)
-            || range.Any(char.IsControl))
-        {
-            return null;
-        }
-
-        return range.Trim();
     }
 
     private static void CopyHeaders(HttpResponseMessage from, HttpResponse to, int status)

@@ -48,8 +48,14 @@ public class PluginConfiguration : BasePluginConfiguration
         ArgumentNullException.ThrowIfNull(cfg);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataFolder);
 
-        cfg.MoviesPlaceholderPath = JellyShareSettings.ResolvePlaceholderRoot(cfg.MoviesPlaceholderPath, dataFolder, "Movies");
-        cfg.ShowsPlaceholderPath = JellyShareSettings.ResolvePlaceholderRoot(cfg.ShowsPlaceholderPath, dataFolder, "Shows");
+        var settings = new JellyShareSettings
+        {
+            MoviesPlaceholderPath = cfg.MoviesPlaceholderPath,
+            ShowsPlaceholderPath = cfg.ShowsPlaceholderPath,
+        };
+        JellyShareSettings.ResolvePlaceholderRoots(settings, dataFolder);
+        cfg.MoviesPlaceholderPath = settings.MoviesPlaceholderPath;
+        cfg.ShowsPlaceholderPath = settings.ShowsPlaceholderPath;
     }
 
     /// <summary>

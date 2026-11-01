@@ -1,6 +1,5 @@
 using System.Reflection;
 using System.Xml.Linq;
-using NetArchTest.Rules;
 
 namespace JellyShare.ArchitectureTests;
 
@@ -26,8 +25,6 @@ internal static class Solution
 
     /// <summary>Gets the plugin assembly path. Its types are read with Cecil only: the Jellyfin host assemblies are not here.</summary>
     public static string JellyfinPath => Path.Combine(AppContext.BaseDirectory, JellyfinName + ".dll");
-
-    public static Types JellyfinTypes() => Types.FromFile(JellyfinPath);
 
     public static string Root()
     {

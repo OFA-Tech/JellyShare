@@ -33,7 +33,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
         Directory.CreateDirectory(_tempDir);
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Current.Shares.Add(new PeerShare
+        _config.Settings.Shares.Add(new PeerShare
         {
             Id = Guid.NewGuid(),
             Name = "bob",
@@ -129,7 +129,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     [Fact]
     public void Catalog_DisabledShare_Returns401()
     {
-        _config.Current.Shares[0].Enabled = false;
+        _config.Settings.Shares[0].Enabled = false;
 
         var result = Controller(_token).Catalog();
 
@@ -187,7 +187,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         Assert.IsType<OkObjectResult>(Controller(_token).Catalog());
 
-        _config.Current.Shares.Clear();
+        _config.Settings.Shares.Clear();
 
         Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Catalog()).StatusCode);
     }

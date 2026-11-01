@@ -15,8 +15,8 @@ public class LocalIndexTests
     {
         var library = new FakeLocalLibrary();
         var config = new ConsumerConfig();
-        config.Current.MoviesPlaceholderPath = "/ph/Movies";
-        config.Current.ShowsPlaceholderPath = "/ph/Shows";
+        config.Settings.MoviesPlaceholderPath = "/ph/Movies";
+        config.Settings.ShowsPlaceholderPath = "/ph/Shows";
         return (new LocalIndex(library, config, FakeLocalLibrary.Exists(exists), budget), library, config);
     }
 
@@ -26,8 +26,8 @@ public class LocalIndexTests
     {
         var library = new FakeLocalLibrary();
         var config = new ConsumerConfig();
-        config.Current.MoviesPlaceholderPath = "/ph/Movies";
-        config.Current.ShowsPlaceholderPath = "/ph/Shows";
+        config.Settings.MoviesPlaceholderPath = "/ph/Movies";
+        config.Settings.ShowsPlaceholderPath = "/ph/Shows";
         return (new LocalIndex(library, config, probe), library);
     }
 

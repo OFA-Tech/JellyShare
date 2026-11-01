@@ -41,16 +41,11 @@ public class JellyShareSettings
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentException.ThrowIfNullOrWhiteSpace(dataFolder);
 
-        settings.MoviesPlaceholderPath = ResolvePlaceholderRoot(settings.MoviesPlaceholderPath, dataFolder, "Movies");
-        settings.ShowsPlaceholderPath = ResolvePlaceholderRoot(settings.ShowsPlaceholderPath, dataFolder, "Shows");
+        settings.MoviesPlaceholderPath = ResolveRoot(settings.MoviesPlaceholderPath, dataFolder, "Movies");
+        settings.ShowsPlaceholderPath = ResolveRoot(settings.ShowsPlaceholderPath, dataFolder, "Shows");
     }
 
-    /// <summary>Returns <paramref name="configured"/>, or <c>&lt;dataFolder&gt;/placeholders/&lt;kind&gt;</c> when it is empty.</summary>
-    /// <param name="configured">The configured root.</param>
-    /// <param name="dataFolder">The plugin data folder.</param>
-    /// <param name="kind"><c>Movies</c> or <c>Shows</c>.</param>
-    /// <returns>The root to use.</returns>
-    public static string ResolvePlaceholderRoot(string? configured, string dataFolder, string kind)
+    private static string ResolveRoot(string? configured, string dataFolder, string kind)
         => string.IsNullOrWhiteSpace(configured) ? Path.Combine(dataFolder, "placeholders", kind) : configured;
 
     /// <inheritdoc />

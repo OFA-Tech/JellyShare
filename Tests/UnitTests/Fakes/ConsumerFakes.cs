@@ -42,9 +42,8 @@ internal sealed class TempDir : IDisposable
     }
 }
 
-internal sealed class ConsumerConfig : ISettingsProvider
+internal sealed class ConsumerConfig : SnapshotSettings
 {
-    public JellyShareSettings Current { get; } = new();
 }
 
 internal sealed class FakePeerClient : IPeerClient

@@ -39,8 +39,8 @@ public class RelayControllerTests
     public RelayControllerTests()
     {
         _sessions = new RelaySessions(_clock);
-        _config.Current.Peers.Add(new RemotePeer { Id = A, Name = "alice", BaseUrl = "http://alice:8101", Token = TokenA, Priority = 0 });
-        _config.Current.Peers.Add(new RemotePeer { Id = B, Name = "bob", BaseUrl = "http://bob/jellyfin", Token = TokenB, Priority = 1 });
+        _config.Settings.Peers.Add(new RemotePeer { Id = A, Name = "alice", BaseUrl = "http://alice:8101", Token = TokenA, Priority = 0 });
+        _config.Settings.Peers.Add(new RemotePeer { Id = B, Name = "bob", BaseUrl = "http://bob/jellyfin", Token = TokenB, Priority = 1 });
         _index.Entries[Key] = new MergedEntry(
             Key,
             new[] { Key },

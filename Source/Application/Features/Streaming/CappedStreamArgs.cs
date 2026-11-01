@@ -15,6 +15,16 @@ public static class CappedStreamArgs
     /// <summary>Upper bound for <c>start</c> (seconds) when the runtime is unknown: 7 days.</summary>
     public const double MaxStartWithoutRuntime = 7 * 24 * 3600;
 
+    /// <summary>
+    /// Whether a file must be transcoded to respect a share's bitrate cap. An unknown (missing or non-positive)
+    /// bitrate cannot be shown to be within the cap, so it counts as over.
+    /// </summary>
+    /// <param name="cap">The share's cap in bits per second, or <c>null</c> for no cap.</param>
+    /// <param name="bitrate">The file's total bitrate in bits per second, when known.</param>
+    /// <returns><c>true</c> when a cap applies and the file is not known to be within it.</returns>
+    public static bool IsOverCap(int? cap, long? bitrate)
+        => cap is { } c && (bitrate is not { } b || b <= 0 || b > c);
+
     /// <summary>Whether a cap leaves room for video after audio.</summary>
     /// <param name="cap">The cap in bits per second.</param>
     /// <returns><c>true</c> when a transcode can fit.</returns>

@@ -93,24 +93,11 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     {
         try
         {
-            var limit = caller.UserRemoteBitrateLimit ?? 0;
-            if (limit <= 0)
-            {
-                limit = _serverConfig.Configuration.RemoteClientBitrateLimit;
-            }
-
-            var ip = caller.RemoteAddress;
-            if (limit <= 0 || ip is null)
-            {
-                return null;
-            }
-
-            if (ip.IsIPv4MappedToIPv6)
-            {
-                ip = ip.MapToIPv4();
-            }
-
-            return _network.IsInLocalNetwork(ip) ? null : limit;
+            return PlaybackBitrateRule.RemoteLimit(
+                caller.UserRemoteBitrateLimit,
+                _serverConfig.Configuration.RemoteClientBitrateLimit,
+                caller.RemoteAddress,
+                _network.IsInLocalNetwork);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -127,8 +114,6 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
             return null;
         }
 
-        var preferred = SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates()).FirstOrDefault();
-        return preferred?.Item.Media?.BitRate
-            ?? entry.Sources.Select(s => s.Item.Media?.BitRate).Where(b => b is > 0).DefaultIfEmpty().Max();
+        return PlaybackBitrateRule.CatalogBitrate(entry, _config.Current.Peers, _index.PeerStates());
     }
 }

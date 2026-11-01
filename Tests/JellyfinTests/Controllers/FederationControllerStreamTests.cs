@@ -49,7 +49,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _limiter = new StreamLimiter(_clock);
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Current.Shares.Add(new PeerShare
+        _config.Settings.Shares.Add(new PeerShare
         {
             Id = Guid.NewGuid(),
             Name = "bob",
@@ -119,7 +119,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
     private void CapMovie(int cap = 2_000_000, long bitrate = 8_000_000)
     {
-        _config.Current.Shares[0].MaxBitrate = cap;
+        _config.Settings.Shares[0].MaxBitrate = cap;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate, RunTimeTicks = TimeSpan.FromMinutes(90).Ticks };
     }
 
@@ -321,7 +321,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_MaxStreamsZero_Returns429()
     {
-        _config.Current.Shares[0].MaxStreams = 0;
+        _config.Settings.Shares[0].MaxStreams = 0;
 
         Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
     }
@@ -474,7 +474,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public void Stream_BelowCap_IgnoresStart_AndServesFile()
     {
-        _config.Current.Shares[0].MaxBitrate = 10_000_000;
+        _config.Settings.Shares[0].MaxBitrate = 10_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = 1_000_000 };
 
         Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N"), "60"));
@@ -484,7 +484,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public async Task Stream_UnknownBitrate_WithCap_IsTranscoded()
     {
-        _config.Current.Shares[0].MaxBitrate = 2_000_000;
+        _config.Settings.Shares[0].MaxBitrate = 2_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = null };
         var controller = Controller(_token);
 
@@ -501,7 +501,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [InlineData(-1L)]
     public async Task Stream_ZeroOrNegativeBitrate_WithCap_IsTranscoded(long bitrate)
     {
-        _config.Current.Shares[0].MaxBitrate = 2_000_000;
+        _config.Settings.Shares[0].MaxBitrate = 2_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
         var controller = Controller(_token);
 
@@ -599,7 +599,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public async Task Stream_Capped_SecondTranscodeOfSession_CountsAgainstGlobalLimit()
     {
-        _config.Current.MaxConcurrentTranscodes = 1;
+        _config.Settings.MaxConcurrentTranscodes = 1;
         CapMovie();
         _runner.BlockUntilCancelled = true;
         var first = Controller(_token);
@@ -617,9 +617,9 @@ public sealed class FederationControllerStreamTests : IDisposable
     [Fact]
     public async Task Stream_Capped_OverGlobalTranscodeLimit_Returns429_AndReleasesSlot()
     {
-        _config.Current.MaxConcurrentTranscodes = 2;
-        _config.Current.Shares[0].MaxStreams = 10;
-        _config.Current.Shares[0].MaxBitrate = 2_000_000;
+        _config.Settings.MaxConcurrentTranscodes = 2;
+        _config.Settings.Shares[0].MaxStreams = 10;
+        _config.Settings.Shares[0].MaxBitrate = 2_000_000;
         foreach (var id in new[] { MovieId, Movie2Id, EpisodeId })
         {
             _source.Streams[id] = _source.Streams[id] with { Bitrate = 8_000_000 };
@@ -720,7 +720,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     [InlineData(500_000L)]
     public void Stream_BitrateAtOrBelowCap_IsServed(long? bitrate)
     {
-        _config.Current.Shares[0].MaxBitrate = 1_000_000;
+        _config.Settings.Shares[0].MaxBitrate = 1_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
 
         Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));

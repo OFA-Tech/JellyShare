@@ -644,12 +644,13 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     {
         try
         {
+            var cfg = _config.Current;
             var media = e.Media;
             if (media is null
                 || media.Type is not ("Movie" or "Episode")
                 || string.IsNullOrWhiteSpace(media.Path)
                 || media.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
-                || PlaceholderPaths.IsPlaceholder(media.Path, _config.Current))
+                || PlaceholderPaths.IsPlaceholder(media.Path, cfg))
             {
                 return;
             }
@@ -700,6 +701,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
     private void ResolveDeferred(List<(Func<LocalMedia?> Refresh, int Attempts)> deferred, Dictionary<string, int> keys)
     {
+        var cfg = _config.Current;
         foreach (var (refresh, attempts) in deferred)
         {
             IReadOnlyList<string> resolved = [];
@@ -709,7 +711,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                 if (media is not null
                     && media.Type is "Movie" or "Episode"
                     && !string.IsNullOrWhiteSpace(media.Path)
-                    && !PlaceholderPaths.IsPlaceholder(media.Path, _config.Current))
+                    && !PlaceholderPaths.IsPlaceholder(media.Path, cfg))
                 {
                     resolved = LocalIndex.KeysFor(media);
                 }

@@ -28,9 +28,9 @@ public sealed class SyncServiceReconcileTests : IDisposable
 
     public SyncServiceReconcileTests()
     {
-        _config.Current.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
-        _config.Current.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
-        _config.Current.Peers.Add(_alice);
+        _config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
+        _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
         _sync = new SyncService(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), new MutableClock(), NullLogger<SyncService>.Instance);

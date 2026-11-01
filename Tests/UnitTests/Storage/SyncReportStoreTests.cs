@@ -65,8 +65,8 @@ public sealed class SyncReportStoreTests : IDisposable
     public async Task SyncService_PersistsLastReport_SoANewInstanceSeesItAfterRestart()
     {
         var config = new ConsumerConfig();
-        config.Current.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
-        config.Current.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
+        config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         SyncService Create() => new(
             config,
             new FakePeerClient(),
