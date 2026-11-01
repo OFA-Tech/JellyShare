@@ -169,11 +169,13 @@ class PackageTests(unittest.TestCase):
     def test_artifacts_read_from_build_yaml(self):
         root = os.path.dirname(HERE)
         arts = package.read_artifacts(os.path.join(root, "build.yaml"))
-        self.assertEqual(arts, ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll"])
+        self.assertEqual(arts, ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll",
+                                "JellyShare.Data.Peers.dll", "JellyShare.Data.Files.dll", "JellyShare.Media.dll"])
 
     def test_zips_every_jellyshare_assembly(self):
         with tempfile.TemporaryDirectory() as tmp:
-            names = ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll"]
+            names = ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll",
+                     "JellyShare.Data.Peers.dll", "JellyShare.Data.Files.dll", "JellyShare.Media.dll"]
             for name in names + ["JellyShare.Domain.pdb", "JellyShare.Jellyfin.deps.json"]:
                 with open(os.path.join(tmp, name), "wb") as f:
                     f.write(name.encode())
@@ -186,6 +188,14 @@ class PackageTests(unittest.TestCase):
         for bad in ("Jellyfin.Controller.dll", "Microsoft.Extensions.Logging.Abstractions.dll", "JellyShare.Jellyfin.pdb", "x.dll"):
             with self.assertRaises(ValueError, msg=bad):
                 package.check_artifacts(["JellyShare.Jellyfin.dll", bad])
+
+    def test_unlisted_jellyshare_assembly_in_publish_dir_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("JellyShare.Jellyfin.dll", "JellyShare.Media.dll", "JellyShare.Media.pdb"):
+                open(os.path.join(tmp, name), "wb").close()
+            package.check_complete(tmp, ["JellyShare.Jellyfin.dll", "JellyShare.Media.dll"])
+            with self.assertRaises(ValueError):
+                package.check_complete(tmp, ["JellyShare.Jellyfin.dll"])
 
     def test_publish_dir_with_host_assemblies_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:

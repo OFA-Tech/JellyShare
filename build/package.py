@@ -56,6 +56,14 @@ def check_publish_dir(publish_dir):
         raise ValueError("publish output contains host assemblies: " + ", ".join(leaked))
 
 
+def check_complete(publish_dir, artifacts):
+    """Fail when the publish output has a JellyShare assembly that build.yaml does not ship (the plugin would not load)."""
+    shipped = set(artifacts)
+    unlisted = sorted(n for n in os.listdir(publish_dir) if ARTIFACT_RE.match(n) and n not in shipped)
+    if unlisted:
+        raise ValueError("publish output has JellyShare assemblies missing from build.yaml artifacts: " + ", ".join(unlisted))
+
+
 def make_zip(publish_dir, artifacts, out_path):
     """Write a flat zip with fixed timestamps so the same DLL always gives the same checksum."""
     check_artifacts(artifacts)
@@ -84,7 +92,9 @@ def main(argv=None):
         p.error("version must look like 0.1.0.0")
     out = os.path.join(a.out, "jellyshare_%s.zip" % a.version)
     check_publish_dir(a.publish_dir)
-    make_zip(a.publish_dir, read_artifacts(a.build_yaml), out)
+    artifacts = read_artifacts(a.build_yaml)
+    check_complete(a.publish_dir, artifacts)
+    make_zip(a.publish_dir, artifacts, out)
     print(out)
     return 0
 

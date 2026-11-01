@@ -43,7 +43,8 @@ BASE_MKV = MEDIA / ".base.mkv"
 RELEASE_DIR = HERE.parent / "Source" / "Infrastructure" / "Platform" / "Jellyfin" / "bin" / "Release" / "net10.0"
 PLUGIN_DLL_NAME = "JellyShare.Jellyfin.dll"
 # Every assembly the plugin ships (build.yaml artifacts): the entry DLL plus the Domain and Application layers.
-PLUGIN_DLLS = (PLUGIN_DLL_NAME, "JellyShare.Application.dll", "JellyShare.Domain.dll")
+PLUGIN_DLLS = (PLUGIN_DLL_NAME, "JellyShare.Application.dll", "JellyShare.Domain.dll",
+               "JellyShare.Data.Peers.dll", "JellyShare.Data.Files.dll", "JellyShare.Media.dll")
 PLUGIN_DLL_FALLBACK = "/config/plugins/JellyShare_0.0.0.1/" + PLUGIN_DLL_NAME
 FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
 CLIENT = 'MediaBrowser Client="jellyshare-harness", Device="e2e", DeviceId="jellyshare-harness-e2e", Version="1.0"'

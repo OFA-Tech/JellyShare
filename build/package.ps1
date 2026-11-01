@@ -2,6 +2,8 @@
 #   ./build/package.ps1 -Version 0.1.0.1 -BaseUrl http://host.docker.internal:8000
 # Writes dist/jellyshare_<Version>.zip and dist/manifest.json (a COPY of manifest.json with the new version
 # added, sourceUrl = <BaseUrl>/jellyshare_<Version>.zip). The committed manifest.json is not touched.
+# The zip holds exactly the build.yaml artifacts: JellyShare.Jellyfin/Application/Domain plus the infrastructure
+# modules JellyShare.Data.Peers/Data.Files/Media (package.py refuses an unlisted JellyShare DLL or a host DLL).
 param(
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$BaseUrl,

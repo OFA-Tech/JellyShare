@@ -13,5 +13,8 @@ artifacts:
   - "JellyShare.Jellyfin.dll"
   - "JellyShare.Application.dll"
   - "JellyShare.Domain.dll"
+  - "JellyShare.Data.Peers.dll"
+  - "JellyShare.Data.Files.dll"
+  - "JellyShare.Media.dll"
 changelog: >
   First release.
