@@ -8,11 +8,10 @@ using JellyShare.JellyfinTests.Fakes;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
-public class FederationControllerPingTests
+public sealed class FederationControllerPingTests
 {
     private sealed class FakeServerIdentity(string name) : IServerIdentity
     {
@@ -36,9 +35,9 @@ public class FederationControllerPingTests
 
         var result = (await controller.Ping());
 
-        Assert.NotNull(result.Value);
-        Assert.Equal("1.0", result.Value!.ProtocolVersion);
-        Assert.Equal("Alice", result.Value.ServerName);
+        result.Value.ShouldNotBeNull();
+        result.Value!.ProtocolVersion.ShouldBe("1.0");
+        result.Value.ServerName.ShouldBe("Alice");
     }
 
     [Fact]
@@ -48,7 +47,7 @@ public class FederationControllerPingTests
 
         var json = JsonSerializer.Serialize((await controller.Ping()).Value);
 
-        Assert.Equal("{\"protocolVersion\":\"1.0\",\"serverName\":\"Alice\"}", json);
+        json.ShouldBe("{\"protocolVersion\":\"1.0\",\"serverName\":\"Alice\"}");
     }
 
     [Fact]
@@ -56,13 +55,13 @@ public class FederationControllerPingTests
     {
         var type = typeof(FederationController);
         var route = type.GetCustomAttribute<RouteAttribute>();
-        Assert.NotNull(route);
-        Assert.Equal("JellyShare/v1", route!.Template);
+        route.ShouldNotBeNull();
+        route!.Template.ShouldBe("JellyShare/v1");
 
         var method = type.GetMethod(nameof(FederationController.Ping))!;
-        Assert.NotNull(method.GetCustomAttribute<AllowAnonymousAttribute>());
+        method.GetCustomAttribute<AllowAnonymousAttribute>().ShouldNotBeNull();
         var get = method.GetCustomAttribute<HttpGetAttribute>();
-        Assert.NotNull(get);
-        Assert.Equal("ping", get!.Template);
+        get.ShouldNotBeNull();
+        get!.Template.ShouldBe("ping");
     }
 }

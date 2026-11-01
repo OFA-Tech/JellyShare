@@ -15,7 +15,6 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
@@ -93,10 +92,10 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     {
         var response = await _client.SendAsync(Request(HttpMethod.Get, _token, r => r.Headers.Range = new RangeHeaderValue(0, 1023)));
 
-        Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
-        Assert.Equal("bytes 0-1023/4096", response.Content.Headers.ContentRange!.ToString());
-        Assert.Equal("video/x-matroska", response.Content.Headers.ContentType!.MediaType);
-        Assert.Equal(1024, (await response.Content.ReadAsByteArrayAsync()).Length);
+        response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
+        response.Content.Headers.ContentRange!.ToString().ShouldBe("bytes 0-1023/4096");
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("video/x-matroska");
+        ((await response.Content.ReadAsByteArrayAsync()).Length).ShouldBe(1024);
     }
 
     [Fact]
@@ -104,8 +103,8 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     {
         var response = await _client.SendAsync(Request(HttpMethod.Get, _token, r => r.Headers.Range = new RangeHeaderValue(4000, null)));
 
-        Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
-        Assert.Equal(96, (await response.Content.ReadAsByteArrayAsync()).Length);
+        response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
+        ((await response.Content.ReadAsByteArrayAsync()).Length).ShouldBe(96);
     }
 
     [Fact]
@@ -113,9 +112,9 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     {
         var response = await _client.SendAsync(Request(HttpMethod.Head, _token));
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal(4096, response.Content.Headers.ContentLength);
-        Assert.Empty(await response.Content.ReadAsByteArrayAsync());
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentLength.ShouldBe(4096);
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBeEmpty();
     }
 
     [Fact]
@@ -127,11 +126,11 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
 
         var response = await _client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Equal("video/mp2t", response.Content.Headers.ContentType!.MediaType);
-        Assert.Equal("none", string.Join(",", response.Headers.AcceptRanges));
-        Assert.Null(response.Content.Headers.ContentRange);
-        Assert.Equal(FakeFfmpegRunner.Payload, await response.Content.ReadAsByteArrayAsync());
+        response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("video/mp2t");
+        string.Join(",", response.Headers.AcceptRanges).ShouldBe("none");
+        response.Content.Headers.ContentRange.ShouldBeNull();
+        (await response.Content.ReadAsByteArrayAsync()).ShouldBe(FakeFfmpegRunner.Payload);
     }
 
     [Fact]
@@ -140,7 +139,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + CappedId.ToString("N") + "?start=-3");
         request.Headers.Add("X-JellyShare-Token", _token);
 
-        Assert.Equal(HttpStatusCode.BadRequest, (await _client.SendAsync(request)).StatusCode);
+        ((await _client.SendAsync(request)).StatusCode).ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
@@ -148,6 +147,6 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     {
         var response = await _client.SendAsync(Request(HttpMethod.Get, null));
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
     }
 }

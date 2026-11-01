@@ -15,11 +15,10 @@ using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
-public class RelayControllerTests
+public sealed class RelayControllerTests
 {
     private const string Key = "movie:tmdb:10378";
     private const string TokenA = "js1_ALICE-secret-token";
@@ -123,8 +122,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(403, StatusOf(result, context));
-        Assert.Empty(_upstream);
+        StatusOf(result, context).ShouldBe(403);
+        _upstream.ShouldBeEmpty();
     }
 
     [Theory]
@@ -149,8 +148,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(403, StatusOf(result, context));
-        Assert.Empty(_upstream);
+        StatusOf(result, context).ShouldBe(403);
+        _upstream.ShouldBeEmpty();
     }
 
     [Theory]
@@ -164,8 +163,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.Equal(new byte[] { 1, 2, 3 }, Body(context));
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 1, 2, 3 });
     }
 
     [Fact]
@@ -175,8 +174,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play("movie:tmdb:999");
 
-        Assert.Equal(404, StatusOf(result, context));
-        Assert.Empty(_upstream);
+        StatusOf(result, context).ShouldBe(404);
+        _upstream.ShouldBeEmpty();
     }
 
     [Fact]
@@ -188,18 +187,18 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(206, StatusOf(result, context));
-        Assert.Equal("video/x-matroska", context.Response.ContentType);
-        Assert.Equal(96, context.Response.ContentLength);
-        Assert.Equal("bytes 4000-4095/4096", context.Response.Headers.ContentRange.ToString());
-        Assert.Equal("bytes", context.Response.Headers.AcceptRanges.ToString());
-        Assert.Equal(body, Body(context));
+        StatusOf(result, context).ShouldBe(206);
+        context.Response.ContentType.ShouldBe("video/x-matroska");
+        context.Response.ContentLength.ShouldBe(96);
+        context.Response.Headers.ContentRange.ToString().ShouldBe("bytes 4000-4095/4096");
+        context.Response.Headers.AcceptRanges.ToString().ShouldBe("bytes");
+        Body(context).ShouldBe(body);
 
-        var sent = Assert.Single(_upstream);
-        Assert.Equal("http://alice:8101/JellyShare/v1/stream/alice-item", sent.RequestUri!.ToString());
-        Assert.Equal("bytes=4000-", string.Join(",", sent.Headers.GetValues("Range")));
-        Assert.Equal(TokenA, string.Join(",", sent.Headers.GetValues("X-JellyShare-Token")));
-        Assert.False(sent.Headers.Contains("Icy-MetaData"));
+        var sent = _upstream.ShouldHaveSingleItem();
+        sent.RequestUri!.ToString().ShouldBe("http://alice:8101/JellyShare/v1/stream/alice-item");
+        string.Join(",", sent.Headers.GetValues("Range")).ShouldBe("bytes=4000-");
+        string.Join(",", sent.Headers.GetValues("X-JellyShare-Token")).ShouldBe(TokenA);
+        sent.Headers.Contains("Icy-MetaData").ShouldBeFalse();
     }
 
     [Fact]
@@ -210,9 +209,9 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(206, StatusOf(result, context));
-        Assert.Equal("bytes=0-1023", string.Join(",", Assert.Single(_upstream).Headers.GetValues("Range")));
-        Assert.Equal(1024, Body(context).Length);
+        StatusOf(result, context).ShouldBe(206);
+        string.Join(",", _upstream.ShouldHaveSingleItem().Headers.GetValues("Range")).ShouldBe("bytes=0-1023");
+        Body(context).Length.ShouldBe(1024);
     }
 
     [Fact]
@@ -223,9 +222,9 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.False(Assert.Single(_upstream).Headers.Contains("Range"));
-        Assert.Equal(10, Body(context).Length);
+        StatusOf(result, context).ShouldBe(200);
+        _upstream.ShouldHaveSingleItem().Headers.Contains("Range").ShouldBeFalse();
+        Body(context).Length.ShouldBe(10);
     }
 
     [Theory]
@@ -255,12 +254,12 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.Equal(new byte[] { 9, 9 }, Body(context));
-        Assert.Equal(new[] { "alice", "bob" }, _upstream.Select(r => r.RequestUri!.Host));
-        Assert.DoesNotContain(_upstream, r => r.RequestUri!.Host == "evil.example");
-        Assert.Equal("bytes=0-", string.Join(",", _upstream[1].Headers.GetValues("Range")));
-        Assert.DoesNotContain(_logger.Lines, l => l.Contains(TokenA, StringComparison.Ordinal) || l.Contains(TokenB, StringComparison.Ordinal));
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 9, 9 });
+        _upstream.Select(r => r.RequestUri!.Host).ShouldBe(new[] { "alice", "bob" });
+        _upstream.ShouldNotContain(r => r.RequestUri!.Host == "evil.example");
+        string.Join(",", _upstream[1].Headers.GetValues("Range")).ShouldBe("bytes=0-");
+        _logger.Lines.ShouldNotContain(l => l.Contains(TokenA, StringComparison.Ordinal) || l.Contains(TokenB, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -276,8 +275,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context, TimeSpan.FromMilliseconds(200)).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.Equal(new byte[] { 7 }, Body(context));
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 7 });
     }
 
     [Fact]
@@ -289,8 +288,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.DoesNotContain(_logger.Lines, l => l.Contains(TokenA, StringComparison.Ordinal));
+        StatusOf(result, context).ShouldBe(200);
+        _logger.Lines.ShouldNotContain(l => l.Contains(TokenA, StringComparison.Ordinal));
     }
 
     [Fact]
@@ -302,8 +301,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(503, StatusOf(result, context));
-        Assert.Equal(2, _upstream.Count);
+        StatusOf(result, context).ShouldBe(503);
+        _upstream.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -318,8 +317,8 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(503, StatusOf(result, context));
-        Assert.Empty(_upstream);
+        StatusOf(result, context).ShouldBe(503);
+        _upstream.ShouldBeEmpty();
     }
 
     [Fact]
@@ -332,8 +331,8 @@ public class RelayControllerTests
 
         await CreateController(context).Play(Key);
 
-        Assert.Equal(new byte[] { 2 }, Body(context));
-        Assert.Equal("bob", Assert.Single(_upstream).RequestUri!.Host);
+        Body(context).ShouldBe(new byte[] { 2 });
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("bob");
     }
 
     [Fact]
@@ -346,8 +345,8 @@ public class RelayControllerTests
 
         await CreateController(context).Play(Key);
 
-        Assert.Equal(new byte[] { 1 }, Body(context));
-        Assert.Equal(new[] { "bob", "alice" }, _upstream.Select(r => r.RequestUri!.Host));
+        Body(context).ShouldBe(new byte[] { 1 });
+        _upstream.Select(r => r.RequestUri!.Host).ShouldBe(new[] { "bob", "alice" });
     }
 
     [Fact]
@@ -358,9 +357,9 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.Equal(4096, context.Response.ContentLength);
-        Assert.Empty(Body(context));
+        StatusOf(result, context).ShouldBe(200);
+        context.Response.ContentLength.ShouldBe(4096);
+        Body(context).ShouldBeEmpty();
     }
 
     [Fact]
@@ -377,9 +376,9 @@ public class RelayControllerTests
 
         var result = await CreateController(context).Play(Key);
 
-        Assert.Equal(200, StatusOf(result, context));
-        Assert.Equal(new byte[] { 1, 2, 3 }, Body(context));
-        Assert.Equal("alice", Assert.Single(_upstream).RequestUri!.Host);
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 1, 2, 3 });
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("alice");
     }
 
     [Fact]
@@ -396,7 +395,7 @@ public class RelayControllerTests
         abort.Cancel();
         await play.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.True(upstreamBody.ReadCancelled);
+        upstreamBody.ReadCancelled.ShouldBeTrue();
     }
 
     [Fact]
@@ -411,11 +410,11 @@ public class RelayControllerTests
 
         await CreateController(context, idleTimeout: TimeSpan.FromMilliseconds(300)).Play(Key).WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(new byte[] { 4, 5, 6 }, Body(context));
-        Assert.True(lifetime.Aborted);
-        Assert.True(upstreamBody.ReadCancelled);
-        Assert.Equal("alice", Assert.Single(_upstream).RequestUri!.Host);
-        Assert.Contains(_logger.Lines, l => l.Contains("stalled", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal));
+        Body(context).ShouldBe(new byte[] { 4, 5, 6 });
+        lifetime.Aborted.ShouldBeTrue();
+        upstreamBody.ReadCancelled.ShouldBeTrue();
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("alice");
+        _logger.Lines.ShouldContain(l => l.Contains("stalled", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -429,7 +428,7 @@ public class RelayControllerTests
 
         await CreateController(context).Play(Key).WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.DoesNotContain(_logger.Lines, l => l.Contains("broke", StringComparison.Ordinal) || l.Contains("stalled", StringComparison.Ordinal));
+        _logger.Lines.ShouldNotContain(l => l.Contains("broke", StringComparison.Ordinal) || l.Contains("stalled", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -449,10 +448,10 @@ public class RelayControllerTests
         var second = Context(range: "bytes=500-");
         await CreateController(second).Play(Key);
 
-        Assert.Equal(new byte[] { 2 }, Body(first));
-        Assert.Equal(new byte[] { 2 }, Body(second));
-        Assert.Equal(1, aliceCalls);
-        Assert.Single(_logger.Lines, l => l.Contains("bob", StringComparison.Ordinal) && l.StartsWith("Information", StringComparison.Ordinal));
+        Body(first).ShouldBe(new byte[] { 2 });
+        Body(second).ShouldBe(new byte[] { 2 });
+        aliceCalls.ShouldBe(1);
+        _logger.Lines.Where(l => l.Contains("bob", StringComparison.Ordinal) && l.StartsWith("Information", StringComparison.Ordinal)).ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -471,7 +470,7 @@ public class RelayControllerTests
         var later = Context();
         await CreateController(later).Play(Key);
 
-        Assert.Equal(new byte[] { 1 }, Body(later));
+        Body(later).ShouldBe(new byte[] { 1 });
     }
 
     private sealed class FakeConsumerIndex : IConsumerIndex

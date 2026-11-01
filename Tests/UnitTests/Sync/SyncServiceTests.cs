@@ -9,7 +9,6 @@ using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Sync;
 
@@ -69,15 +68,13 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.False(MoviePlaceholder(SintelDir));
-        Assert.Equal(2, report.Offered);
-        Assert.Equal(1, report.SkippedLocal);
-        Assert.Equal(2, report.Written);
-        Assert.Empty(report.PeerErrors);
-        Assert.Equal(
-            "http://127.0.0.1:8096/JellyShare/v1/play/movie%3Atmdb%3A10378",
-            File.ReadAllText(Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).strm")));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
+        report.Offered.ShouldBe(2);
+        report.SkippedLocal.ShouldBe(1);
+        report.Written.ShouldBe(2);
+        report.PeerErrors.ShouldBeEmpty();
+        File.ReadAllText(Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).strm")).ShouldBe("http://127.0.0.1:8096/JellyShare/v1/play/movie%3Atmdb%3A10378");
     }
 
     [Fact]
@@ -89,8 +86,8 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Equal(0, report.SkippedLocal);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        report.SkippedLocal.ShouldBe(0);
     }
 
     [Fact]
@@ -103,14 +100,14 @@ public sealed class SyncServiceTests : IDisposable
         _clock.Now += TimeSpan.FromDays(3);
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Equal(0, report.Deleted);
-        Assert.Equal(["alice: connection failed"], report.PeerErrors);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Deleted.ShouldBe(0);
+        report.PeerErrors.ShouldBe(["alice: connection failed"]);
 
         _clock.Now += TimeSpan.FromDays(3);
         report = await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Equal(0, report.Deleted);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Deleted.ShouldBe(0);
     }
 
     [Fact]
@@ -122,17 +119,17 @@ public sealed class SyncServiceTests : IDisposable
         _client.Catalogs[_alice.Id] = _ => FakePeerClient.Fail("timeout");
         _clock.Now += TimeSpan.FromDays(1);
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(BunnyDir));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
 
         _clock.Now += TimeSpan.FromDays(8);
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(BunnyDir));
-        Assert.Equal(2, report.Deleted);
-        Assert.Equal(["alice: timeout"], report.PeerErrors);
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
+        report.Deleted.ShouldBe(2);
+        report.PeerErrors.ShouldBe(["alice: timeout"]);
         var state = new PeerStateStore(Path.Combine(DataDir, "peer-state.json")).Load()[_alice.Id];
-        Assert.Equal(_clock.Now - TimeSpan.FromDays(8), state.FailingSinceUtc);
-        Assert.Equal("timeout", state.LastError);
+        state.FailingSinceUtc.ShouldBe(_clock.Now - TimeSpan.FromDays(8));
+        state.LastError.ShouldBe("timeout");
     }
 
     [Fact]
@@ -145,10 +142,10 @@ public sealed class SyncServiceTests : IDisposable
         _clock.Now += TimeSpan.FromHours(6);
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(["alice: incompatible protocol 2.0"], report.PeerErrors);
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Equal(0, report.Deleted);
-        Assert.Equal(1, report.Offered);
+        report.PeerErrors.ShouldBe(["alice: incompatible protocol 2.0"]);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Deleted.ShouldBe(0);
+        report.Offered.ShouldBe(1);
     }
 
     [Fact]
@@ -163,14 +160,14 @@ public sealed class SyncServiceTests : IDisposable
         _clock.Now += TimeSpan.FromHours(6);
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal([(_alice.Id, (string?)null), (_alice.Id, "etag-1")], _client.Fetches);
-        Assert.Empty(report.PeerErrors);
-        Assert.Equal(0, report.Deleted);
-        Assert.Equal(1, report.Offered);
-        Assert.True(MoviePlaceholder(BunnyDir));
+        _client.Fetches.ShouldBe([(_alice.Id, (string?)null), (_alice.Id, "etag-1")]);
+        report.PeerErrors.ShouldBeEmpty();
+        report.Deleted.ShouldBe(0);
+        report.Offered.ShouldBe(1);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
         var state = new PeerStateStore(Path.Combine(DataDir, "peer-state.json")).Load()[_alice.Id];
-        Assert.Equal(_clock.Now, state.LastSuccessUtc);
-        Assert.Null(state.FailingSinceUtc);
+        state.LastSuccessUtc.ShouldBe(_clock.Now);
+        state.FailingSinceUtc.ShouldBeNull();
     }
 
     [Fact]
@@ -182,10 +179,10 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.Peers.Clear();
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(BunnyDir));
-        Assert.Equal(2, report.Deleted);
-        Assert.Empty(new PeerStateStore(Path.Combine(DataDir, "peer-state.json")).Load());
-        Assert.True(File.Exists(Path.Combine(MoviesRoot, PlaceholderWriter.MarkerName)));
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
+        report.Deleted.ShouldBe(2);
+        (new PeerStateStore(Path.Combine(DataDir, "peer-state.json")).Load()).ShouldBeEmpty();
+        File.Exists(Path.Combine(MoviesRoot, PlaceholderWriter.MarkerName)).ShouldBeTrue();
     }
 
     [Fact]
@@ -196,9 +193,9 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Empty(_client.Fetches);
-        Assert.Equal(0, report.Offered);
-        Assert.False(MoviePlaceholder(BunnyDir));
+        _client.Fetches.ShouldBeEmpty();
+        report.Offered.ShouldBe(0);
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -206,16 +203,16 @@ public sealed class SyncServiceTests : IDisposable
     {
         Offer(Bunny(), Pioneer(1, 1), Pioneer(2, 1));
         var first = await _sync.RunAsync(CancellationToken.None);
-        Assert.True(first.Written > 0);
-        Assert.NotEmpty(_scans.Reported);
+        (first.Written > 0).ShouldBeTrue();
+        _scans.Reported.ShouldNotBeEmpty();
 
         _scans.Reported.Clear();
         var second = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, second.Written);
-        Assert.Equal(0, second.Deleted);
-        Assert.Equal(0, second.Scanned);
-        Assert.Empty(_scans.Reported);
+        second.Written.ShouldBe(0);
+        second.Deleted.ShouldBe(0);
+        second.Scanned.ShouldBe(0);
+        _scans.Reported.ShouldBeEmpty();
     }
 
     [Fact]
@@ -230,8 +227,8 @@ public sealed class SyncServiceTests : IDisposable
             Path.Combine(ShowsRoot, PioneerDir),
             Path.Combine(ShowsRoot, PioneerDir, "Season 02"),
         }.Select(Path.GetFullPath).Order(StringComparer.Ordinal);
-        Assert.Equal(expected, _scans.Reported.Order(StringComparer.Ordinal));
-        Assert.Equal(3, report.Scanned);
+        _scans.Reported.Order(StringComparer.Ordinal).ShouldBe(expected);
+        report.Scanned.ShouldBe(3);
     }
 
     [Fact]
@@ -240,22 +237,22 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Enumerable.Range(1, 250).Select(i => TestItems.Movie("Movie " + i, tmdb: i.ToString(), id: "m" + i)).ToArray());
 
         var first = await _sync.RunAsync(CancellationToken.None);
-        Assert.Equal(200, _scans.Reported.Count);
-        Assert.Equal(200, first.Scanned);
-        Assert.Equal(50, first.PendingScans);
+        _scans.Reported.Count.ShouldBe(200);
+        first.Scanned.ShouldBe(200);
+        first.PendingScans.ShouldBe(50);
 
         var reportedFirst = _scans.Reported.ToList();
         _scans.Reported.Clear();
         var second = await _sync.RunAsync(CancellationToken.None);
-        Assert.Equal(0, second.Written);
-        Assert.Equal(50, _scans.Reported.Count);
-        Assert.Empty(reportedFirst.Intersect(_scans.Reported));
-        Assert.Equal(250, reportedFirst.Concat(_scans.Reported).Distinct().Count());
-        Assert.Equal(0, second.PendingScans);
+        second.Written.ShouldBe(0);
+        _scans.Reported.Count.ShouldBe(50);
+        reportedFirst.Intersect(_scans.Reported).ShouldBeEmpty();
+        reportedFirst.Concat(_scans.Reported).Distinct().Count().ShouldBe(250);
+        second.PendingScans.ShouldBe(0);
 
         _scans.Reported.Clear();
         await _sync.RunAsync(CancellationToken.None);
-        Assert.Empty(_scans.Reported);
+        _scans.Reported.ShouldBeEmpty();
     }
 
     [Fact]
@@ -267,17 +264,17 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
 
         var file = MergedIndexStore.Load(Path.Combine(DataDir, "merged-index.json"));
-        Assert.NotNull(file);
-        Assert.Equal(_clock.Now, file.GeneratedUtc);
+        file.ShouldNotBeNull();
+        file.GeneratedUtc.ShouldBe(_clock.Now);
         var entries = file.ToEntries();
-        Assert.Equal(["ep:tvdb:153021:s1e1", "movie:tmdb:10378"], entries.Select(e => e.CanonicalKey));
+        entries.Select(e => e.CanonicalKey).ShouldBe(["ep:tvdb:153021:s1e1", "movie:tmdb:10378"]);
         var movie = entries[1];
-        Assert.Equal(["movie:tmdb:10378"], movie.Keys);
-        Assert.Equal(_alice.Id, movie.Sources[0].PeerId);
-        Assert.Equal("bunny", movie.Sources[0].Item.Id);
-        Assert.Equal(1312543, movie.Sources[0].Item.Media.BitRate);
-        Assert.Equal("Big Buck Bunny", movie.Sources[0].Item.Name);
-        Assert.Equal("s1", entries[0].Sources[0].Item.SeriesId);
+        movie.Keys.ShouldBe(["movie:tmdb:10378"]);
+        movie.Sources[0].PeerId.ShouldBe(_alice.Id);
+        movie.Sources[0].Item.Id.ShouldBe("bunny");
+        movie.Sources[0].Item.Media.BitRate.ShouldBe(1312543);
+        movie.Sources[0].Item.Name.ShouldBe("Big Buck Bunny");
+        entries[0].Sources[0].Item.SeriesId.ShouldBe("s1");
     }
 
     [Fact]
@@ -290,11 +287,11 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(1, report.SkippedLocal);
-        Assert.False(File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 01", "Pioneer One S01E01.strm")));
-        Assert.True(File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 02", "Pioneer One S02E01.strm")));
-        Assert.Equal([7], File.ReadAllBytes(Path.Combine(ShowsRoot, PioneerDir, "poster.jpg")));
-        Assert.Contains((_alice.Id, "s1", "Backdrop"), _client.ImageRequests);
+        report.SkippedLocal.ShouldBe(1);
+        File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 01", "Pioneer One S01E01.strm")).ShouldBeFalse();
+        File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 02", "Pioneer One S02E01.strm")).ShouldBeTrue();
+        File.ReadAllBytes(Path.Combine(ShowsRoot, PioneerDir, "poster.jpg")).ShouldBe([7]);
+        _client.ImageRequests.ShouldContain((_alice.Id, "s1", "Backdrop"));
     }
 
     [Fact]
@@ -307,10 +304,10 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(2, report.Conflicts);
-        Assert.Equal(2, report.Unmatched);
-        Assert.Equal(1, report.Offered);
-        Assert.Equal(0, report.Skipped);
+        report.Conflicts.ShouldBe(2);
+        report.Unmatched.ShouldBe(2);
+        report.Offered.ShouldBe(1);
+        report.Skipped.ShouldBe(0);
     }
 
     [Fact]
@@ -324,10 +321,10 @@ public sealed class SyncServiceTests : IDisposable
         _client.Catalogs[_alice.Id] = _ => FakePeerClient.Fail("connection failed");
         _clock.Now += TimeSpan.FromHours(6);
 
-        await Assert.ThrowsAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
+        await Should.ThrowAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Equal("{ truncated", File.ReadAllText(statePath));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        File.ReadAllText(statePath).ShouldBe("{ truncated");
     }
 
     [Fact]
@@ -339,15 +336,15 @@ public sealed class SyncServiceTests : IDisposable
         var blocker = Path.Combine(ShowsRoot, PioneerDir);
         File.WriteAllText(blocker, "a file where the series folder should go");
 
-        await Assert.ThrowsAnyAsync<Exception>(() => _sync.RunAsync(CancellationToken.None));
-        Assert.True(MoviePlaceholder(BunnyDir));
+        await Should.ThrowAsync<Exception>(() => _sync.RunAsync(CancellationToken.None));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
 
         File.Delete(blocker);
         _scans.Reported.Clear();
         await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Contains(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)), _scans.Reported);
-        Assert.Contains(Path.GetFullPath(Path.Combine(ShowsRoot, PioneerDir)), _scans.Reported);
+        _scans.Reported.ShouldContain(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)));
+        _scans.Reported.ShouldContain(Path.GetFullPath(Path.Combine(ShowsRoot, PioneerDir)));
     }
 
     [Fact]
@@ -358,13 +355,13 @@ public sealed class SyncServiceTests : IDisposable
         _scans.FailFor = p => p == bunnyFull;
 
         var first = await _sync.RunAsync(CancellationToken.None);
-        Assert.Empty(_scans.Reported);
-        Assert.Equal(1, first.PendingScans);
+        _scans.Reported.ShouldBeEmpty();
+        first.PendingScans.ShouldBe(1);
 
         _scans.FailFor = null;
         var second = await _sync.RunAsync(CancellationToken.None);
-        Assert.Equal([bunnyFull], _scans.Reported);
-        Assert.Equal(0, second.PendingScans);
+        _scans.Reported.ShouldBe([bunnyFull]);
+        second.PendingScans.ShouldBe(0);
     }
 
     [Fact]
@@ -373,9 +370,9 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.ShowsPlaceholderPath = Path.Combine(MoviesRoot, "Shows");
         Offer(Bunny(), Pioneer(2, 1));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.False(Directory.Exists(MoviesRoot));
+        Directory.Exists(MoviesRoot).ShouldBeFalse();
     }
 
     [Fact]
@@ -388,9 +385,9 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Single(report.PeerErrors);
-        Assert.StartsWith("alice: connection failed", report.PeerErrors[0], StringComparison.Ordinal);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.PeerErrors.ShouldHaveSingleItem();
+        report.PeerErrors[0].ShouldStartWith("alice: connection failed", Case.Sensitive);
     }
 
     [Fact]
@@ -402,9 +399,9 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Single(report.PeerErrors);
-        Assert.Equal(0, report.Deleted);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.PeerErrors.ShouldHaveSingleItem();
+        report.Deleted.ShouldBe(0);
     }
 
     [Fact]
@@ -413,10 +410,10 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.RelayBaseOverride = "http://10.0.0.2:8096";
         Offer(Bunny());
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.Contains("RelayBaseOverride", ex.Message, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(MoviesRoot));
+        ex.Message.ShouldContain("RelayBaseOverride", Case.Sensitive);
+        Directory.Exists(MoviesRoot).ShouldBeFalse();
     }
 
     private string BunnyNfo => Path.Combine(MoviesRoot, BunnyDir, "Big Buck Bunny (2008).nfo");
@@ -428,17 +425,17 @@ public sealed class SyncServiceTests : IDisposable
     {
         Offer(Bunny());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(File.Exists(BunnyNfo));
+        File.Exists(BunnyNfo).ShouldBeTrue();
         const string jellyfin = "<?xml version=\"1.0\"?><movie><title>Big Buck Bunny</title><lockdata>false</lockdata></movie>";
         File.WriteAllText(BunnyNfo, jellyfin);
         _scans.Reported.Clear();
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, report.Written);
-        Assert.Equal(0, report.Deleted);
-        Assert.Empty(_scans.Reported);
-        Assert.Equal(jellyfin, File.ReadAllText(BunnyNfo));
+        report.Written.ShouldBe(0);
+        report.Deleted.ShouldBe(0);
+        _scans.Reported.ShouldBeEmpty();
+        File.ReadAllText(BunnyNfo).ShouldBe(jellyfin);
     }
 
     [Fact]
@@ -454,9 +451,9 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, report.Written + report.Deleted);
-        Assert.True(File.Exists(seasonNfo));
-        Assert.Empty(_scans.Reported);
+        (report.Written + report.Deleted).ShouldBe(0);
+        File.Exists(seasonNfo).ShouldBeTrue();
+        _scans.Reported.ShouldBeEmpty();
     }
 
     [Fact]
@@ -469,8 +466,8 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Bunny() with { Overview = "A new plot" });
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(1, report.Written);
-        Assert.Contains("A new plot", File.ReadAllText(BunnyNfo), StringComparison.Ordinal);
+        report.Written.ShouldBe(1);
+        File.ReadAllText(BunnyNfo).ShouldContain("A new plot", Case.Sensitive);
     }
 
     [Fact]
@@ -484,7 +481,7 @@ public sealed class SyncServiceTests : IDisposable
         Offer();
         await _sync.RunAsync(CancellationToken.None);
 
-        Assert.False(Directory.Exists(series));
+        Directory.Exists(series).ShouldBeFalse();
     }
 
     [Fact]
@@ -499,9 +496,9 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, report.Written + report.Deleted);
-        Assert.True(File.Exists(seasonNfo));
-        Assert.True(File.Exists(Path.Combine(DataDir, "placeholder-ledger.json")));
+        (report.Written + report.Deleted).ShouldBe(0);
+        File.Exists(seasonNfo).ShouldBeTrue();
+        File.Exists(Path.Combine(DataDir, "placeholder-ledger.json")).ShouldBeTrue();
     }
 
     [Fact]
@@ -513,8 +510,8 @@ public sealed class SyncServiceTests : IDisposable
 
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(1, report.Written);
-        Assert.True(File.Exists(BunnyStrm));
+        report.Written.ShouldBe(1);
+        File.Exists(BunnyStrm).ShouldBeTrue();
     }
 
     [Theory]
@@ -525,10 +522,10 @@ public sealed class SyncServiceTests : IDisposable
         _library.Locations.Add(_tmp.Sub(location.Split('/')));
         Offer(Bunny());
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.Contains("library folder", ex.Message, StringComparison.Ordinal);
-        Assert.False(MoviePlaceholder(BunnyDir));
+        ex.Message.ShouldContain("library folder", Case.Sensitive);
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -542,10 +539,10 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.MoviesPlaceholderPath = owner;
         Offer(Bunny());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.True(File.Exists(ownerNfo));
-        Assert.False(File.Exists(Path.Combine(owner, ".jellyshare")));
+        File.Exists(ownerNfo).ShouldBeTrue();
+        File.Exists(Path.Combine(owner, ".jellyshare")).ShouldBeFalse();
     }
 
     [Fact]
@@ -558,7 +555,7 @@ public sealed class SyncServiceTests : IDisposable
 
         await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(BunnyDir));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
     }
 
     [Fact]
@@ -569,11 +566,11 @@ public sealed class SyncServiceTests : IDisposable
         File.WriteAllText(foreign, "x");
         Offer(Bunny());
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
 
-        Assert.Contains(".jellyshare", ex.Message, StringComparison.Ordinal);
-        Assert.True(File.Exists(foreign));
-        Assert.False(File.Exists(Path.Combine(MoviesRoot, ".jellyshare")));
+        ex.Message.ShouldContain(".jellyshare", Case.Sensitive);
+        File.Exists(foreign).ShouldBeTrue();
+        File.Exists(Path.Combine(MoviesRoot, ".jellyshare")).ShouldBeFalse();
     }
 
     [Fact]
@@ -584,8 +581,8 @@ public sealed class SyncServiceTests : IDisposable
 
         await _sync.RunAsync(CancellationToken.None);
 
-        Assert.True(File.Exists(Path.Combine(MoviesRoot, ".jellyshare")));
-        Assert.True(MoviePlaceholder(BunnyDir));
+        File.Exists(Path.Combine(MoviesRoot, ".jellyshare")).ShouldBeTrue();
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
     }
 
     [Fact]
@@ -595,7 +592,7 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
         _library.Locations.Add(_tmp.Sub("ph"));
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None));
+        await Should.ThrowAsync<InvalidOperationException>(() => _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None));
     }
 
     [Fact]
@@ -615,16 +612,16 @@ public sealed class SyncServiceTests : IDisposable
         await imageStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         // Placeholders are on disk and scanned before any image arrives, and the lock is free for a reconcile.
-        Assert.True(File.Exists(BunnyStrm));
-        Assert.Contains(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)), _scans.Reported);
+        File.Exists(BunnyStrm).ShouldBeTrue();
+        _scans.Reported.ShouldContain(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)));
         var reconcile = _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
-        Assert.Same(reconcile, await Task.WhenAny(reconcile, Task.Delay(TimeSpan.FromSeconds(10))));
-        Assert.False(run.IsCompleted);
+        (await Task.WhenAny(reconcile, Task.Delay(TimeSpan.FromSeconds(10)))).ShouldBeSameAs(reconcile);
+        run.IsCompleted.ShouldBeFalse();
 
         releaseImages.SetResult();
         var report = await run;
-        Assert.Equal(1, report.ImagesWritten);
-        Assert.True(File.Exists(Path.Combine(MoviesRoot, BunnyDir, "poster.jpg")));
+        report.ImagesWritten.ShouldBe(1);
+        File.Exists(Path.Combine(MoviesRoot, BunnyDir, "poster.jpg")).ShouldBeTrue();
     }
 
     [Fact]
@@ -636,7 +633,7 @@ public sealed class SyncServiceTests : IDisposable
 
         await _sync.RunAsync(CancellationToken.None);
 
-        Assert.InRange(_client.MaxConcurrentImages, 2, 4);
+        _client.MaxConcurrentImages.ShouldBeInRange(2, 4);
     }
 
     [Fact]
@@ -645,14 +642,14 @@ public sealed class SyncServiceTests : IDisposable
         Offer(Bunny() with { ImageTypes = ["Primary"] });
         await _sync.RunAsync(CancellationToken.None);
         var poster = Path.Combine(MoviesRoot, BunnyDir, "poster.jpg");
-        Assert.False(File.Exists(poster));
+        File.Exists(poster).ShouldBeFalse();
 
         _client.Images[(_alice.Id, "bunny", "Primary")] = [9];
         var report = await _sync.RunAsync(CancellationToken.None);
 
-        Assert.Equal(0, report.Written);
-        Assert.Equal(1, report.ImagesWritten);
-        Assert.True(File.Exists(poster));
+        report.Written.ShouldBe(0);
+        report.ImagesWritten.ShouldBe(1);
+        File.Exists(poster).ShouldBeTrue();
     }
 
     [Fact]
@@ -671,7 +668,7 @@ public sealed class SyncServiceTests : IDisposable
         await _sync.RunAsync(CancellationToken.None);
 
         var folders = _client.ImageRequests.Select(r => r.Item).Distinct().Count();
-        Assert.Equal(SyncService.MaxImageRetriesPerRun, folders);
+        folders.ShouldBe(SyncService.MaxImageRetriesPerRun);
     }
 
     [Fact]
@@ -681,15 +678,15 @@ public sealed class SyncServiceTests : IDisposable
         var release = new TaskCompletionSource();
         _client.BeforeFetch = () => release.Task;
 
-        Assert.True(_sync.TryStartBackground());
+        _sync.TryStartBackground().ShouldBeTrue();
         await WaitUntil(() => _sync.IsRunning);
-        Assert.False(_sync.TryStartBackground());
+        _sync.TryStartBackground().ShouldBeFalse();
 
         release.SetResult();
         await WaitUntil(() => !_sync.IsRunning);
-        Assert.NotNull(_sync.LastReport);
-        Assert.Null(_sync.LastError);
-        Assert.True(MoviePlaceholder(BunnyDir));
+        _sync.LastReport.ShouldNotBeNull();
+        _sync.LastError.ShouldBeNull();
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
     }
 
     [Fact]
@@ -698,13 +695,13 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.RelayBaseOverride = "http://10.0.0.2:8096";
         Offer(Bunny());
 
-        Assert.True(_sync.TryStartBackground());
+        _sync.TryStartBackground().ShouldBeTrue();
         await WaitUntil(() => !_sync.IsRunning && _sync.LastError is not null);
-        Assert.Contains("RelayBaseOverride", _sync.LastError, StringComparison.Ordinal);
+        _sync.LastError.ShouldContain("RelayBaseOverride", Case.Sensitive);
 
         _config.Settings.RelayBaseOverride = null;
         await _sync.RunAsync(CancellationToken.None);
-        Assert.Null(_sync.LastError);
+        _sync.LastError.ShouldBeNull();
     }
 
     [Fact]
@@ -716,12 +713,12 @@ public sealed class SyncServiceTests : IDisposable
         var first = _sync.RunAsync(CancellationToken.None);
         await WaitUntil(() => _sync.IsRunning);
 
-        Assert.False(_sync.TryStartBackground(queueIfRunning: true));
+        _sync.TryStartBackground(queueIfRunning: true).ShouldBeFalse();
         release.SetResult();
         await first;
 
         await WaitUntil(() => _client.Fetches.Count >= 2 && !_sync.IsRunning);
-        Assert.Equal(2, _client.Fetches.Count);
+        _client.Fetches.Count.ShouldBe(2);
     }
 
     private static async Task WaitUntil(Func<bool> condition)
@@ -729,7 +726,7 @@ public sealed class SyncServiceTests : IDisposable
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (!condition())
         {
-            Assert.True(DateTime.UtcNow < deadline, "condition not reached in time");
+            (DateTime.UtcNow < deadline).ShouldBeTrue("condition not reached in time");
             await Task.Delay(10);
         }
     }
@@ -751,11 +748,11 @@ public sealed class SyncServiceTests : IDisposable
         var a = _sync.RunAsync(CancellationToken.None);
         var b = _sync.RunAsync(CancellationToken.None);
         await Task.Delay(100);
-        Assert.Equal(1, _client.Entered);
+        _client.Entered.ShouldBe(1);
         release.SetResult();
         await Task.WhenAll(a, b);
 
-        Assert.Equal(1, maxInside);
-        Assert.Equal(2, _client.Fetches.Count);
+        maxInside.ShouldBe(1);
+        _client.Fetches.Count.ShouldBe(2);
     }
 }

@@ -5,11 +5,10 @@ using JellyShare.Data.Files.Stores;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Storage;
 
-public class PlaceholderWriterTests
+public sealed class PlaceholderWriterTests
 {
     private const string MovieDir = "Sintel (2010) [tmdbid-45745]";
 
@@ -48,13 +47,16 @@ public class PlaceholderWriterTests
 
         var result = await new PlaceholderWriter().ApplyAsync(diff, root, null, CancellationToken.None);
 
-        Assert.Equal("keep", File.ReadAllText(outside));
-        Assert.Equal(9, result.Refused);
-        Assert.Equal(1, result.Written);
-        Assert.True(File.Exists(Path.Combine(root, MovieDir, "Sintel (2010).strm")));
-        Assert.True(File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)));
-        Assert.False(File.Exists(Path.Combine(root, "dir", "payload.exe")));
-        Assert.All(result.ChangedDirs, d => Assert.StartsWith(Path.GetFullPath(root), d, StringComparison.Ordinal));
+        File.ReadAllText(outside).ShouldBe("keep");
+        result.Refused.ShouldBe(9);
+        result.Written.ShouldBe(1);
+        File.Exists(Path.Combine(root, MovieDir, "Sintel (2010).strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)).ShouldBeTrue();
+        File.Exists(Path.Combine(root, "dir", "payload.exe")).ShouldBeFalse();
+        foreach (var d in result.ChangedDirs)
+        {
+            d.ShouldStartWith(Path.GetFullPath(root), Case.Sensitive);
+        }
     }
 
     [Fact]
@@ -71,22 +73,21 @@ public class PlaceholderWriterTests
             BeforeCommit = (tempPath, finalPath) =>
             {
                 seenDuringWrite.Add(File.ReadAllText(finalPath));
-                Assert.Equal("new content", File.ReadAllText(tempPath));
+                File.ReadAllText(tempPath).ShouldBe("new content");
                 throw new IOException("simulated crash before commit");
             },
         };
 
-        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(
-            () => writer.ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None));
-        Assert.IsType<IOException>(ex.InnerException);
+        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None));
+        ex.InnerException.ShouldBeOfType<IOException>();
 
-        Assert.Equal(["old"], seenDuringWrite);
-        Assert.Equal("old", File.ReadAllText(target));
-        Assert.Empty(Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories));
+        seenDuringWrite.ShouldBe(["old"]);
+        File.ReadAllText(target).ShouldBe("old");
+        Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).ShouldBeEmpty();
 
         await new PlaceholderWriter().ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None);
-        Assert.Equal("new content", File.ReadAllText(target));
-        Assert.Empty(Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories));
+        File.ReadAllText(target).ShouldBe("new content");
+        Directory.GetFiles(root, "*.tmp", SearchOption.AllDirectories).ShouldBeEmpty();
     }
 
     [Fact]
@@ -113,9 +114,9 @@ public class PlaceholderWriterTests
             null,
             CancellationToken.None);
 
-        Assert.Equal(2, result.Deleted);
-        Assert.False(Directory.Exists(Path.Combine(root, series, "Season 02")));
-        Assert.True(File.Exists(Path.Combine(root, series, "Season 01", "Pioneer One S01E02.strm")));
+        result.Deleted.ShouldBe(2);
+        Directory.Exists(Path.Combine(root, series, "Season 02")).ShouldBeFalse();
+        File.Exists(Path.Combine(root, series, "Season 01", "Pioneer One S01E02.strm")).ShouldBeTrue();
 
         await new PlaceholderWriter().ApplyAsync(
             Diff(deletes: [$"{series}/Season 01/Pioneer One S01E02.strm", $"{series}/tvshow.nfo"]),
@@ -123,9 +124,9 @@ public class PlaceholderWriterTests
             null,
             CancellationToken.None);
 
-        Assert.False(Directory.Exists(Path.Combine(root, series)));
-        Assert.True(Directory.Exists(root));
-        Assert.True(File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)));
+        Directory.Exists(Path.Combine(root, series)).ShouldBeFalse();
+        Directory.Exists(root).ShouldBeTrue();
+        File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)).ShouldBeTrue();
     }
 
     [Fact]
@@ -134,13 +135,13 @@ public class PlaceholderWriterTests
         using var tmp = new TempDir();
         var root = tmp.Sub("root");
         await new PlaceholderWriter().ApplyAsync(Diff([Movie("strm")]), root, null, CancellationToken.None);
-        Assert.True(File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)));
+        File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)).ShouldBeTrue();
 
         await new PlaceholderWriter().ApplyAsync(
             Diff(deletes: [$"{MovieDir}/Sintel (2010).strm", PlaceholderWriter.MarkerName]), root, null, CancellationToken.None);
 
-        Assert.True(File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)));
-        Assert.Single(Directory.GetFileSystemEntries(root));
+        File.Exists(Path.Combine(root, PlaceholderWriter.MarkerName)).ShouldBeTrue();
+        Directory.GetFileSystemEntries(root).ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -153,14 +154,14 @@ public class PlaceholderWriterTests
             root,
             (dir, type, _) => Task.FromResult<Stream?>(new MemoryStream(Encoding.UTF8.GetBytes(type))),
             CancellationToken.None);
-        Assert.True(File.Exists(Path.Combine(root, MovieDir, "poster.jpg")));
-        Assert.True(File.Exists(Path.Combine(root, MovieDir, "fanart.jpg")));
+        File.Exists(Path.Combine(root, MovieDir, "poster.jpg")).ShouldBeTrue();
+        File.Exists(Path.Combine(root, MovieDir, "fanart.jpg")).ShouldBeTrue();
 
         var result = await new PlaceholderWriter().ApplyAsync(
             Diff(deletes: [$"{MovieDir}/Sintel (2010).strm", $"{MovieDir}/Sintel (2010).nfo"]), root, null, CancellationToken.None);
 
-        Assert.False(Directory.Exists(Path.Combine(root, MovieDir)));
-        Assert.Contains(Path.GetFullPath(Path.Combine(root, MovieDir)), result.ChangedDirs);
+        Directory.Exists(Path.Combine(root, MovieDir)).ShouldBeFalse();
+        result.ChangedDirs.ShouldContain(Path.GetFullPath(Path.Combine(root, MovieDir)));
     }
 
     [Fact]
@@ -190,13 +191,11 @@ public class PlaceholderWriterTests
             },
             CancellationToken.None);
 
-        Assert.Equal(3, result.Written);
-        Assert.Equal(1, result.ImagesWritten);
-        Assert.Equal(
-            [(MovieDir, "Primary"), (MovieDir, "Backdrop"), (series, "Primary"), (series, "Backdrop")],
-            calls.OrderBy(c => c.Dir == MovieDir ? 0 : 1).ThenBy(c => c.Type == "Primary" ? 0 : 1).ToList());
-        Assert.Equal([1, 2, 3], File.ReadAllBytes(Path.Combine(root, series, "poster.jpg")));
-        Assert.False(File.Exists(Path.Combine(root, series, "fanart.jpg")));
+        result.Written.ShouldBe(3);
+        result.ImagesWritten.ShouldBe(1);
+        calls.OrderBy(c => c.Dir == MovieDir ? 0 : 1).ThenBy(c => c.Type == "Primary" ? 0 : 1).ToList().ShouldBe([(MovieDir, "Primary"), (MovieDir, "Backdrop"), (series, "Primary"), (series, "Backdrop")]);
+        File.ReadAllBytes(Path.Combine(root, series, "poster.jpg")).ShouldBe([1, 2, 3]);
+        File.Exists(Path.Combine(root, series, "fanart.jpg")).ShouldBeFalse();
 
         calls.Clear();
         await new PlaceholderWriter().ApplyAsync(
@@ -208,7 +207,7 @@ public class PlaceholderWriterTests
                 return Task.FromResult<Stream?>(null);
             },
             CancellationToken.None);
-        Assert.Equal([(series, "Backdrop")], calls);
+        calls.ShouldBe([(series, "Backdrop")]);
     }
 
     [Fact]
@@ -220,12 +219,12 @@ public class PlaceholderWriterTests
         File.WriteAllText(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
         File.WriteAllText(Path.Combine(root, "Blocked"), "file where a folder should be");
 
-        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
+        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
             Diff([Movie("strm"), new FileWrite("Blocked/x.strm", "x")]), root, null, CancellationToken.None));
 
-        Assert.Equal(1, ex.Partial.Written);
-        Assert.Equal([Path.GetFullPath(Path.Combine(root, MovieDir))], ex.Partial.ChangedDirs);
-        Assert.IsType<IOException>(ex.InnerException, exactMatch: false);
+        ex.Partial.Written.ShouldBe(1);
+        ex.Partial.ChangedDirs.ShouldBe([Path.GetFullPath(Path.Combine(root, MovieDir))]);
+        ex.InnerException.ShouldBeAssignableTo<IOException>();
     }
 
     [Fact]
@@ -236,11 +235,11 @@ public class PlaceholderWriterTests
         using var cts = new CancellationTokenSource();
         var writer = new PlaceholderWriter { BeforeCommit = (_, final) => { if (final.EndsWith(".nfo", StringComparison.Ordinal)) { cts.Cancel(); } } };
 
-        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(() => writer.ApplyAsync(
+        var ex = await Should.ThrowAsync<PlaceholderWriteException>(() => writer.ApplyAsync(
             Diff([Movie("nfo"), Movie("strm"), new FileWrite("Other/o.strm", "o")]), root, null, cts.Token));
 
-        Assert.IsAssignableFrom<OperationCanceledException>(ex.InnerException);
-        Assert.Contains(Path.GetFullPath(Path.Combine(root, MovieDir)), ex.Partial.ChangedDirs);
+        ex.InnerException.ShouldBeAssignableTo<OperationCanceledException>();
+        ex.Partial.ChangedDirs.ShouldContain(Path.GetFullPath(Path.Combine(root, MovieDir)));
     }
 
     [Theory]
@@ -251,7 +250,7 @@ public class PlaceholderWriterTests
     public void Writer_IsStrictlyInside_HandlesSiblingPrefixes(string root, string candidate, bool expected)
     {
         using var tmp = new TempDir();
-        Assert.Equal(expected, PlaceholderWriter.IsStrictlyInside(Path.GetFullPath(tmp.Sub(root)), Path.GetFullPath(tmp.Sub(candidate))));
+        PlaceholderWriter.IsStrictlyInside(Path.GetFullPath(tmp.Sub(root)), Path.GetFullPath(tmp.Sub(candidate))).ShouldBe(expected);
     }
 
     [Fact]
@@ -260,9 +259,9 @@ public class PlaceholderWriterTests
         using var tmp = new TempDir();
         var root = Path.GetFullPath(tmp.Sub("Root"));
         var candidate = Path.GetFullPath(tmp.Sub("ROOT", "a.strm"));
-        Assert.Equal(OperatingSystem.IsWindows(), PlaceholderWriter.IsStrictlyInside(root, candidate));
-        Assert.Null(PlaceholderWriter.Resolve(root, "../root2/a.strm"));
-        Assert.Null(PlaceholderWriter.Resolve(root, "../Root2/a/b.strm"));
+        PlaceholderWriter.IsStrictlyInside(root, candidate).ShouldBe(OperatingSystem.IsWindows());
+        PlaceholderWriter.Resolve(root, "../root2/a.strm").ShouldBeNull();
+        PlaceholderWriter.Resolve(root, "../Root2/a/b.strm").ShouldBeNull();
     }
 
     [Fact]
@@ -288,11 +287,11 @@ public class PlaceholderWriterTests
             null,
             CancellationToken.None);
 
-        Assert.Equal(3, result.Refused);
-        Assert.Equal("keep", File.ReadAllText(Path.Combine(outside, "Season 01", "victim.strm")));
-        Assert.False(File.Exists(Path.Combine(outside, "Season 01", "evil.strm")));
-        Assert.False(File.Exists(Path.Combine(outside, "x.nfo")));
-        Assert.DoesNotContain("Linked/Season 01/victim.strm", PlaceholderWriter.ScanExisting(root).Keys);
+        result.Refused.ShouldBe(3);
+        File.ReadAllText(Path.Combine(outside, "Season 01", "victim.strm")).ShouldBe("keep");
+        File.Exists(Path.Combine(outside, "Season 01", "evil.strm")).ShouldBeFalse();
+        File.Exists(Path.Combine(outside, "x.nfo")).ShouldBeFalse();
+        PlaceholderWriter.ScanExisting(root).Keys.ShouldNotContain("Linked/Season 01/victim.strm");
     }
 
     private static bool TryLink(string link, string target)
@@ -332,9 +331,9 @@ public class PlaceholderWriterTests
 
         var existing = PlaceholderWriter.ScanExisting(root);
 
-        Assert.Equal(2, existing.Count);
-        Assert.Equal(PlaceholderPlanner.Hash("url"), existing[$"{MovieDir}/Sintel (2010).strm"]);
-        Assert.Equal(PlaceholderPlanner.Hash("<movie/>"), existing[$"{MovieDir}/Sintel (2010).nfo"]);
-        Assert.Empty(PlaceholderWriter.ScanExisting(tmp.Sub("missing")));
+        existing.Count.ShouldBe(2);
+        existing[$"{MovieDir}/Sintel (2010).strm"].ShouldBe(PlaceholderPlanner.Hash("url"));
+        existing[$"{MovieDir}/Sintel (2010).nfo"].ShouldBe(PlaceholderPlanner.Hash("<movie/>"));
+        PlaceholderWriter.ScanExisting(tmp.Sub("missing")).ShouldBeEmpty();
     }
 }

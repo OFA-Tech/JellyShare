@@ -1,9 +1,8 @@
 using JellyShare.Application.Features.Relay;
-using Xunit;
 
 namespace JellyShare.UnitTests.Relay;
 
-public class RelayBaseTests
+public sealed class RelayBaseTests
 {
     [Theory]
     [InlineData(null, 8096, "/jellyfin", "http://127.0.0.1:8096/jellyfin")]
@@ -20,7 +19,7 @@ public class RelayBaseTests
     // and the sync refuses to run with OverrideError.
     [InlineData("http://10.0.0.2:8096/jf/", 8096, "/jellyfin", "http://127.0.0.1:8096/jellyfin")]
     public void RelayBase_Resolve(string? overrideValue, int port, string? baseUrl, string expected)
-        => Assert.Equal(expected, RelayBase.Resolve(overrideValue, port, baseUrl));
+        => RelayBase.Resolve(overrideValue, port, baseUrl).ShouldBe(expected);
 
     [Theory]
     [InlineData(null)]
@@ -29,7 +28,7 @@ public class RelayBaseTests
     [InlineData("http://localhost:8096/jellyfin")]
     [InlineData("https://[::1]:8920")]
     public void RelayBase_OverrideError_LoopbackOrUnset_IsNull(string? value)
-        => Assert.Null(RelayBase.OverrideError(value));
+        => RelayBase.OverrideError(value).ShouldBeNull();
 
     [Theory]
     [InlineData("http://10.0.0.2:8096")]
@@ -38,5 +37,5 @@ public class RelayBaseTests
     [InlineData("not a url")]
     [InlineData("http://127.0.0.1:8096/?x=1")]
     public void RelayBase_OverrideError_NonLoopback_IsClearError(string value)
-        => Assert.Contains("RelayBaseOverride", RelayBase.OverrideError(value), StringComparison.Ordinal);
+        => RelayBase.OverrideError(value).ShouldContain("RelayBaseOverride", Case.Sensitive);
 }

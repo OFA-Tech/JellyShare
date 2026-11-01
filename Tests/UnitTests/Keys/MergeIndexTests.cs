@@ -1,10 +1,9 @@
 using JellyShare.Domain.Keys;
-using Xunit;
 using static JellyShare.UnitTests.Fakes.TestItems;
 
 namespace JellyShare.UnitTests.Keys;
 
-public class MergeIndexTests
+public sealed class MergeIndexTests
 {
     private static Dictionary<string, string> Tvdb(string id) => new() { ["Tvdb"] = id };
 
@@ -13,8 +12,8 @@ public class MergeIndexTests
     {
         var index = MergeIndex.Build(new[] { (PeerA, Movie("Home Video")) });
 
-        Assert.Equal(1, index.UnmatchedCount);
-        Assert.Empty(index.Entries);
+        index.UnmatchedCount.ShouldBe(1);
+        index.Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -26,11 +25,11 @@ public class MergeIndexTests
             (PeerB, Movie("Sintel", tmdb: "45745")),
         });
 
-        var entry = Assert.Single(index.Entries);
-        Assert.Equal(2, entry.Sources.Count);
-        Assert.Equal(new[] { PeerA, PeerB }, entry.Sources.Select(s => s.PeerId).ToArray());
-        Assert.Equal("movie:tmdb:45745", entry.CanonicalKey);
-        Assert.Equal(0, index.UnmatchedCount);
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.Sources.Count.ShouldBe(2);
+        entry.Sources.Select(s => s.PeerId).ToArray().ShouldBe(new[] { PeerA, PeerB });
+        entry.CanonicalKey.ShouldBe("movie:tmdb:45745");
+        index.UnmatchedCount.ShouldBe(0);
     }
 
     [Fact]
@@ -42,11 +41,11 @@ public class MergeIndexTests
             (PeerB, Movie("Sintel", imdb: "tt1727587")),
         });
 
-        var entry = Assert.Single(index.Entries);
-        Assert.Equal(2, entry.Sources.Count);
-        Assert.Equal("movie:tmdb:45745", entry.CanonicalKey);
-        Assert.Contains("movie:imdb:tt1727587", entry.Keys);
-        Assert.Contains("movie:tmdb:45745", entry.Keys);
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.Sources.Count.ShouldBe(2);
+        entry.CanonicalKey.ShouldBe("movie:tmdb:45745");
+        entry.Keys.ShouldContain("movie:imdb:tt1727587");
+        entry.Keys.ShouldContain("movie:tmdb:45745");
     }
 
     [Fact]
@@ -54,7 +53,7 @@ public class MergeIndexTests
     {
         var index = MergeIndex.Build(new[] { (PeerA, Movie("Sintel", imdb: "tt1727587")) });
 
-        Assert.Equal("movie:imdb:tt1727587", Assert.Single(index.Entries).CanonicalKey);
+        index.Entries.ShouldHaveSingleItem().CanonicalKey.ShouldBe("movie:imdb:tt1727587");
     }
 
     [Fact]
@@ -62,9 +61,9 @@ public class MergeIndexTests
     {
         var index = MergeIndex.Build(new[] { (PeerA, Episode("Show", Tvdb("153021"), 2, 1)) });
 
-        var entry = Assert.Single(index.Entries);
-        Assert.Equal("ep:tvdb:153021:s2e1", entry.CanonicalKey);
-        Assert.Same(entry, index.Find("ep:tvdb:153021:s2e1"));
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.CanonicalKey.ShouldBe("ep:tvdb:153021:s2e1");
+        index.Find("ep:tvdb:153021:s2e1").ShouldBeSameAs(entry);
     }
 
     [Fact]
@@ -73,7 +72,7 @@ public class MergeIndexTests
         var seriesIds = new Dictionary<string, string> { ["Tvdb"] = "153021", ["Tmdb"] = "99" };
         var index = MergeIndex.Build(new[] { (PeerA, Episode("Show", seriesIds, 2, 1)) });
 
-        Assert.Equal("ep:tmdb:99:s2e1", Assert.Single(index.Entries).CanonicalKey);
+        index.Entries.ShouldHaveSingleItem().CanonicalKey.ShouldBe("ep:tmdb:99:s2e1");
     }
 
     [Fact]
@@ -85,7 +84,7 @@ public class MergeIndexTests
             (PeerA, Episode("Show", Tvdb("153021"), 1, 2)),
         });
 
-        Assert.Equal(2, index.Entries.Count);
+        index.Entries.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -97,7 +96,7 @@ public class MergeIndexTests
             (PeerB, Episode("Show", Tvdb("153021"), 1, 1)),
         });
 
-        Assert.Equal(2, Assert.Single(index.Entries).Sources.Count);
+        index.Entries.ShouldHaveSingleItem().Sources.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -109,8 +108,8 @@ public class MergeIndexTests
             (PeerB, Movie("Dune", tmdb: "841")),
         });
 
-        Assert.Equal(2, index.Entries.Count);
-        Assert.All(index.Entries, e => Assert.Single(e.Sources));
+        index.Entries.Count.ShouldBe(2);
+        index.Entries.ShouldAllBe(e => e.Sources.Count == 1);
     }
 
     [Fact]
@@ -122,8 +121,8 @@ public class MergeIndexTests
             (PeerA, Episode("Show", Tvdb("153021"), 1, null)),
         });
 
-        Assert.Equal(2, index.UnmatchedCount);
-        Assert.Empty(index.Entries);
+        index.UnmatchedCount.ShouldBe(2);
+        index.Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -137,15 +136,9 @@ public class MergeIndexTests
         var forward = MergeIndex.Build(new[] { a, b, c, d });
         var reversed = MergeIndex.Build(new[] { d, c, b, a });
 
-        Assert.Equal(
-            forward.Entries.Select(e => e.CanonicalKey).ToArray(),
-            reversed.Entries.Select(e => e.CanonicalKey).ToArray());
-        Assert.Equal(
-            forward.Entries.Select(e => string.Join('|', e.Keys)).ToArray(),
-            reversed.Entries.Select(e => string.Join('|', e.Keys)).ToArray());
-        Assert.Equal(
-            new[] { "movie:tmdb:438631", "movie:tmdb:45745", "movie:tmdb:7" },
-            forward.Entries.Select(e => e.CanonicalKey).ToArray());
+        reversed.Entries.Select(e => e.CanonicalKey).ToArray().ShouldBe(forward.Entries.Select(e => e.CanonicalKey).ToArray());
+        reversed.Entries.Select(e => string.Join('|', e.Keys)).ToArray().ShouldBe(forward.Entries.Select(e => string.Join('|', e.Keys)).ToArray());
+        forward.Entries.Select(e => e.CanonicalKey).ToArray().ShouldBe(new[] { "movie:tmdb:438631", "movie:tmdb:45745", "movie:tmdb:7" });
     }
 
     [Fact]
@@ -157,12 +150,12 @@ public class MergeIndexTests
             (PeerB, Movie("X", tmdb: "10", imdb: "tt1")),
         });
 
-        Assert.Empty(index.Entries);
-        Assert.Null(index.Find("movie:tmdb:9"));
-        Assert.Null(index.Find("movie:tmdb:10"));
-        Assert.Null(index.Find("movie:imdb:tt1"));
-        Assert.Equal(2, index.UnmatchedCount);
-        Assert.Equal(2, index.ConflictCount);
+        index.Entries.ShouldBeEmpty();
+        index.Find("movie:tmdb:9").ShouldBeNull();
+        index.Find("movie:tmdb:10").ShouldBeNull();
+        index.Find("movie:imdb:tt1").ShouldBeNull();
+        index.UnmatchedCount.ShouldBe(2);
+        index.ConflictCount.ShouldBe(2);
     }
 
     [Fact]
@@ -175,10 +168,10 @@ public class MergeIndexTests
             (PeerC, Movie("Y", tmdb: "5")),
         });
 
-        var entry = Assert.Single(index.Entries);
-        Assert.Equal("movie:tmdb:5", entry.CanonicalKey);
-        Assert.Equal(2, index.UnmatchedCount);
-        Assert.Equal(2, index.ConflictCount);
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.CanonicalKey.ShouldBe("movie:tmdb:5");
+        index.UnmatchedCount.ShouldBe(2);
+        index.ConflictCount.ShouldBe(2);
     }
 
     [Fact]
@@ -190,9 +183,9 @@ public class MergeIndexTests
             (PeerB, Episode("Show", new Dictionary<string, string> { ["Tvdb"] = "2", ["Tmdb"] = "7" }, 1, 1)),
         });
 
-        Assert.Empty(index.Entries);
-        Assert.Equal(2, index.UnmatchedCount);
-        Assert.Equal(2, index.ConflictCount);
+        index.Entries.ShouldBeEmpty();
+        index.UnmatchedCount.ShouldBe(2);
+        index.ConflictCount.ShouldBe(2);
     }
 
     [Fact]
@@ -204,9 +197,9 @@ public class MergeIndexTests
             (PeerB, Movie("X", tmdb: "9", imdb: "tt1")),
         });
 
-        Assert.Equal(2, Assert.Single(index.Entries).Sources.Count);
-        Assert.Equal(0, index.ConflictCount);
-        Assert.Equal(0, index.UnmatchedCount);
+        index.Entries.ShouldHaveSingleItem().Sources.Count.ShouldBe(2);
+        index.ConflictCount.ShouldBe(0);
+        index.UnmatchedCount.ShouldBe(0);
     }
 
     [Fact]
@@ -219,10 +212,10 @@ public class MergeIndexTests
         var forward = MergeIndex.Build(new[] { a, b, c });
         var reversed = MergeIndex.Build(new[] { c, b, a });
 
-        Assert.Equal("movie:tmdb:438631", Assert.Single(forward.Entries).CanonicalKey);
-        Assert.Equal("movie:tmdb:438631", Assert.Single(reversed.Entries).CanonicalKey);
-        Assert.Equal(forward.ConflictCount, reversed.ConflictCount);
-        Assert.Equal(forward.UnmatchedCount, reversed.UnmatchedCount);
+        forward.Entries.ShouldHaveSingleItem().CanonicalKey.ShouldBe("movie:tmdb:438631");
+        reversed.Entries.ShouldHaveSingleItem().CanonicalKey.ShouldBe("movie:tmdb:438631");
+        reversed.ConflictCount.ShouldBe(forward.ConflictCount);
+        reversed.UnmatchedCount.ShouldBe(forward.UnmatchedCount);
     }
 
     [Fact]
@@ -230,9 +223,9 @@ public class MergeIndexTests
     {
         var index = MergeIndex.Build(new[] { (PeerA, Movie("Sintel", tmdb: "45745", imdb: "tt1727587")) });
 
-        Assert.NotNull(index.Find("movie:imdb:tt1727587"));
-        Assert.Same(index.Find("movie:imdb:tt1727587"), index.Find("movie:tmdb:45745"));
-        Assert.Null(index.Find("movie:tmdb:0"));
+        index.Find("movie:imdb:tt1727587").ShouldNotBeNull();
+        index.Find("movie:tmdb:45745").ShouldBeSameAs(index.Find("movie:imdb:tt1727587"));
+        index.Find("movie:tmdb:0").ShouldBeNull();
     }
 
     [Fact]
@@ -245,7 +238,7 @@ public class MergeIndexTests
             (PeerB, Movie("S", tmdb: "1", id: "b")),
         });
 
-        var entry = Assert.Single(index.Entries);
-        Assert.Equal(new[] { PeerC, PeerA, PeerB }, entry.Sources.Select(s => s.PeerId).ToArray());
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.Sources.Select(s => s.PeerId).ToArray().ShouldBe(new[] { PeerC, PeerA, PeerB });
     }
 }

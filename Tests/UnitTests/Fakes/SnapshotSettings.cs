@@ -9,7 +9,7 @@ namespace JellyShare.UnitTests.Fakes;
 /// property of a snapshot changes nothing until it is passed to <see cref="Store"/> (<c>ISettingsStore.Save</c>).
 /// Tests set up state through <see cref="Settings"/> and read results through <see cref="Current"/>.
 /// </summary>
-internal class SnapshotSettings : ISettingsProvider
+internal abstract class SnapshotSettings : ISettingsProvider
 {
     /// <summary>Gets the stored settings (what a test arranges, and what only a save changes).</summary>
     public JellyShareSettings Settings { get; } = new();

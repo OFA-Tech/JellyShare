@@ -1,11 +1,10 @@
 using JellyShare.Jellyfin.Filters;
 using Microsoft.AspNetCore.Mvc.Abstractions;
 using Microsoft.AspNetCore.Mvc.Routing;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Filters;
 
-public class PlaybackInfoTargetCheckTests
+public sealed class PlaybackInfoTargetCheckTests
 {
     private static ActionDescriptor Action(string template, params string[] parameters)
         => new()
@@ -24,7 +23,7 @@ public class PlaybackInfoTargetCheckTests
             Action("Items/{itemId}"),
         };
 
-        Assert.Null(PlaybackInfoFilter.TargetWarning(actions));
+        PlaybackInfoFilter.TargetWarning(actions).ShouldBeNull();
     }
 
     [Fact]
@@ -32,7 +31,7 @@ public class PlaybackInfoTargetCheckTests
     {
         var warning = PlaybackInfoFilter.TargetWarning(new[] { Action("Items/{itemId}/PlaybackInfoV2", "itemId", "enableDirectStream", "enableDirectPlay") });
 
-        Assert.Contains("PlaybackInfo", warning, StringComparison.Ordinal);
+        warning.ShouldContain("PlaybackInfo", Case.Sensitive);
     }
 
     [Fact]
@@ -40,6 +39,6 @@ public class PlaybackInfoTargetCheckTests
     {
         var warning = PlaybackInfoFilter.TargetWarning(new[] { Action("Items/{itemId}/PlaybackInfo", "id", "directStream", "directPlay") });
 
-        Assert.Contains("enableDirectStream", warning, StringComparison.Ordinal);
+        warning.ShouldContain("enableDirectStream", Case.Sensitive);
     }
 }

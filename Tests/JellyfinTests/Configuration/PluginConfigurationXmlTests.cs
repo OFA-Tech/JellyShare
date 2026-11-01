@@ -2,7 +2,6 @@ using System.Xml.Linq;
 using System.Xml.Serialization;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Jellyfin.Configuration;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Configuration;
 
@@ -65,20 +64,18 @@ public sealed class PluginConfigurationXmlTests
             cfg = (PluginConfiguration)serializer.Deserialize(reader)!;
         }
 
-        Assert.Equal(2, cfg.Shares.Count);
-        Assert.Equal("bob", cfg.Shares[0].Name);
-        Assert.Equal(2, cfg.Shares[0].LibraryIds.Count);
-        Assert.Null(cfg.Shares[0].MaxBitrate);
-        Assert.False(cfg.Shares[1].Enabled);
-        Assert.Equal(8_000_000, cfg.Shares[1].MaxBitrate);
-        Assert.Equal("js1_not-a-real-token", Assert.Single(cfg.Peers).Token);
-        Assert.Equal("http://127.0.0.1:8096", cfg.RelayBaseOverride);
+        cfg.Shares.Count.ShouldBe(2);
+        cfg.Shares[0].Name.ShouldBe("bob");
+        cfg.Shares[0].LibraryIds.Count.ShouldBe(2);
+        cfg.Shares[0].MaxBitrate.ShouldBeNull();
+        cfg.Shares[1].Enabled.ShouldBeFalse();
+        cfg.Shares[1].MaxBitrate.ShouldBe(8_000_000);
+        cfg.Peers.ShouldHaveSingleItem().Token.ShouldBe("js1_not-a-real-token");
+        cfg.RelayBaseOverride.ShouldBe("http://127.0.0.1:8096");
 
         using var writer = new StringWriter();
         serializer.Serialize(writer, cfg);
 
-        Assert.True(
-            XNode.DeepEquals(XDocument.Parse(Sample), XDocument.Parse(writer.ToString())),
-            writer.ToString());
+        XNode.DeepEquals(XDocument.Parse(Sample), XDocument.Parse(writer.ToString())).ShouldBeTrue(writer.ToString());
     }
 }

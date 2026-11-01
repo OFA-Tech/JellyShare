@@ -2,11 +2,10 @@ using System.Xml.Serialization;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Jellyfin.Configuration;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Configuration;
 
-public class PluginConfigurationTests
+public sealed class PluginConfigurationTests
 {
     private readonly ShareTokenService _service = new();
 
@@ -49,36 +48,36 @@ public class PluginConfigurationTests
 
         var xml = RoundTrip(cfg, out var copy);
 
-        Assert.Equal(2, copy.Shares.Count);
-        Assert.Single(copy.Peers);
-        Assert.Equal(12, copy.SyncIntervalHours);
-        Assert.Equal("http://127.0.0.1:8096", copy.RelayBaseOverride);
-        Assert.Equal("/data/ph/Movies", copy.MoviesPlaceholderPath);
-        Assert.Equal("/data/ph/Shows", copy.ShowsPlaceholderPath);
+        copy.Shares.Count.ShouldBe(2);
+        copy.Peers.ShouldHaveSingleItem();
+        copy.SyncIntervalHours.ShouldBe(12);
+        copy.RelayBaseOverride.ShouldBe("http://127.0.0.1:8096");
+        copy.MoviesPlaceholderPath.ShouldBe("/data/ph/Movies");
+        copy.ShowsPlaceholderPath.ShouldBe("/data/ph/Shows");
 
         var s = copy.Shares[0];
-        Assert.Equal(share.Id, s.Id);
-        Assert.Equal("alice", s.Name);
-        Assert.Equal(hash, s.TokenHash);
-        Assert.False(s.Enabled);
-        Assert.Equal(5, s.MaxStreams);
-        Assert.Equal(8_000_000, s.MaxBitrate);
-        Assert.Equal(new[] { lib1, lib2 }, s.LibraryIds);
-        Assert.True(copy.Shares[1].Enabled);
-        Assert.Null(copy.Shares[1].MaxBitrate);
-        Assert.Equal(2, copy.Shares[1].MaxStreams);
+        s.Id.ShouldBe(share.Id);
+        s.Name.ShouldBe("alice");
+        s.TokenHash.ShouldBe(hash);
+        s.Enabled.ShouldBeFalse();
+        s.MaxStreams.ShouldBe(5);
+        s.MaxBitrate.ShouldBe(8_000_000);
+        s.LibraryIds.ShouldBe(new[] { lib1, lib2 });
+        copy.Shares[1].Enabled.ShouldBeTrue();
+        copy.Shares[1].MaxBitrate.ShouldBeNull();
+        copy.Shares[1].MaxStreams.ShouldBe(2);
 
         var p = copy.Peers[0];
-        Assert.Equal(peer.Id, p.Id);
-        Assert.Equal("carol", p.Name);
-        Assert.Equal("https://carol.example", p.BaseUrl);
-        Assert.Equal("js1_remote-secret", p.Token);
-        Assert.False(p.Enabled);
-        Assert.Equal(3, p.Priority);
+        p.Id.ShouldBe(peer.Id);
+        p.Name.ShouldBe("carol");
+        p.BaseUrl.ShouldBe("https://carol.example");
+        p.Token.ShouldBe("js1_remote-secret");
+        p.Enabled.ShouldBeFalse();
+        p.Priority.ShouldBe(3);
 
-        Assert.Contains("js1_remote-secret", xml, StringComparison.Ordinal);
-        Assert.Contains(hash, xml, StringComparison.Ordinal);
-        Assert.DoesNotContain(token, xml, StringComparison.Ordinal);
+        xml.ShouldContain("js1_remote-secret", Case.Sensitive);
+        xml.ShouldContain(hash, Case.Sensitive);
+        xml.ShouldNotContain(token, Case.Sensitive);
     }
 
     [Fact]
@@ -86,18 +85,18 @@ public class PluginConfigurationTests
     {
         var empty = new PluginConfiguration();
         RoundTrip(empty, out var copy);
-        Assert.Empty(copy.Shares);
-        Assert.Empty(copy.Peers);
-        Assert.Equal(6, copy.SyncIntervalHours);
-        Assert.Null(copy.RelayBaseOverride);
+        copy.Shares.ShouldBeEmpty();
+        copy.Peers.ShouldBeEmpty();
+        copy.SyncIntervalHours.ShouldBe(6);
+        copy.RelayBaseOverride.ShouldBeNull();
 
         var cfg = new PluginConfiguration();
         cfg.Shares.Add(new PeerShare { Name = "a" });
         cfg.Peers.Add(new RemotePeer { Name = "b" });
         RoundTrip(cfg, out var copy2);
-        Assert.Single(copy2.Shares);
-        Assert.Single(copy2.Peers);
-        Assert.Empty(copy2.Shares[0].LibraryIds);
+        copy2.Shares.ShouldHaveSingleItem();
+        copy2.Peers.ShouldHaveSingleItem();
+        copy2.Shares[0].LibraryIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -109,10 +108,10 @@ public class PluginConfigurationTests
         cfg.Shares.Add(share);
         cfg.Peers.Add(peer);
 
-        Assert.DoesNotContain("deadbeefhash", share.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("js1_secret-value", peer.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("js1_secret-value", cfg.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("deadbeefhash", cfg.ToString(), StringComparison.Ordinal);
+        share.ToString().ShouldNotContain("deadbeefhash", Case.Sensitive);
+        peer.ToString().ShouldNotContain("js1_secret-value", Case.Sensitive);
+        cfg.ToString().ShouldNotContain("js1_secret-value", Case.Sensitive);
+        cfg.ToString().ShouldNotContain("deadbeefhash", Case.Sensitive);
     }
 
     [Fact]
@@ -122,8 +121,8 @@ public class PluginConfigurationTests
 
         PluginConfiguration.ResolvePlaceholderRoots(cfg, Path.Combine("data", "plugin"));
 
-        Assert.Equal(Path.Combine("data", "plugin", "placeholders", "Movies"), cfg.MoviesPlaceholderPath);
-        Assert.Equal(Path.Combine("data", "plugin", "placeholders", "Shows"), cfg.ShowsPlaceholderPath);
+        cfg.MoviesPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Movies"));
+        cfg.ShowsPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Shows"));
     }
 
     [Fact]
@@ -137,8 +136,8 @@ public class PluginConfigurationTests
 
         PluginConfiguration.ResolvePlaceholderRoots(cfg, "/d");
 
-        Assert.Equal("/custom/m", cfg.MoviesPlaceholderPath);
-        Assert.Equal(Path.Combine("/d", "placeholders", "Shows"), cfg.ShowsPlaceholderPath);
+        cfg.MoviesPlaceholderPath.ShouldBe("/custom/m");
+        cfg.ShowsPlaceholderPath.ShouldBe(Path.Combine("/d", "placeholders", "Shows"));
     }
 
     [Fact]
@@ -158,14 +157,14 @@ public class PluginConfigurationTests
 
         var settings = cfg.ToSettings();
 
-        Assert.Same(cfg.Shares, settings.Shares);
-        Assert.Same(cfg.Peers, settings.Peers);
-        Assert.Equal("/m", settings.MoviesPlaceholderPath);
-        Assert.Equal("/s", settings.ShowsPlaceholderPath);
-        Assert.Equal(12, settings.SyncIntervalHours);
-        Assert.Equal(30, settings.PresenceSweepSeconds);
-        Assert.Equal(2, settings.MaxConcurrentTranscodes);
-        Assert.Equal("http://127.0.0.1:8096", settings.RelayBaseOverride);
+        settings.Shares.ShouldBeSameAs(cfg.Shares);
+        settings.Peers.ShouldBeSameAs(cfg.Peers);
+        settings.MoviesPlaceholderPath.ShouldBe("/m");
+        settings.ShowsPlaceholderPath.ShouldBe("/s");
+        settings.SyncIntervalHours.ShouldBe(12);
+        settings.PresenceSweepSeconds.ShouldBe(30);
+        settings.MaxConcurrentTranscodes.ShouldBe(2);
+        settings.RelayBaseOverride.ShouldBe("http://127.0.0.1:8096");
     }
 
     [Fact]
@@ -181,18 +180,18 @@ public class PluginConfigurationTests
         writer.RelayBaseOverride = "http://localhost:8096";
         cfg.Apply(writer);
 
-        Assert.Single(reader.Shares);
-        Assert.Equal(2, cfg.Shares.Count);
-        Assert.Equal(24, cfg.SyncIntervalHours);
-        Assert.Equal("http://localhost:8096", cfg.RelayBaseOverride);
-        Assert.Equal(2, cfg.ToSettings().Shares.Count);
+        reader.Shares.ShouldHaveSingleItem();
+        cfg.Shares.Count.ShouldBe(2);
+        cfg.SyncIntervalHours.ShouldBe(24);
+        cfg.RelayBaseOverride.ShouldBe("http://localhost:8096");
+        cfg.ToSettings().Shares.Count.ShouldBe(2);
     }
 
     [Fact]
     public void ToSettings_And_Apply_RoundTripEveryProperty_WithNonDefaultValues()
     {
         var properties = typeof(JellyShareSettings).GetProperties().Where(p => p.DeclaringType == typeof(JellyShareSettings)).ToArray();
-        Assert.NotEmpty(properties);
+        properties.ShouldNotBeEmpty();
 
         // Every property gets a value different from its default, so a property missing from the mapping fails here.
         var original = new JellyShareSettings();
@@ -201,7 +200,7 @@ public class PluginConfigurationTests
         {
             var defaultValue = property.GetValue(new JellyShareSettings());
             var value = NonDefault(property.PropertyType, property.Name);
-            Assert.NotEqual(defaultValue, value);
+            value.ShouldNotBe(defaultValue);
             property.SetValue(original, value);
             expected[property.Name] = value;
         }
@@ -212,8 +211,8 @@ public class PluginConfigurationTests
 
         foreach (var property in properties)
         {
-            Assert.Equal(expected[property.Name], typeof(PluginConfiguration).GetProperty(property.Name)!.GetValue(cfg));
-            Assert.Equal(expected[property.Name], property.GetValue(back));
+            typeof(PluginConfiguration).GetProperty(property.Name)!.GetValue(cfg).ShouldBe(expected[property.Name]);
+            property.GetValue(back).ShouldBe(expected[property.Name]);
         }
     }
 
@@ -246,7 +245,7 @@ public class PluginConfigurationTests
     {
         static string[] Props(Type t) => t.GetProperties().Where(p => p.DeclaringType == t).Select(p => p.Name + ":" + p.PropertyType).ToArray();
 
-        Assert.Equal(Props(typeof(JellyShareSettings)), Props(typeof(PluginConfiguration)));
+        Props(typeof(PluginConfiguration)).ShouldBe(Props(typeof(JellyShareSettings)));
     }
 
     private static string RoundTrip(PluginConfiguration cfg, out PluginConfiguration copy)

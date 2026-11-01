@@ -7,11 +7,10 @@ using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Relay;
 
-public class RelayUrlTests
+public sealed class RelayUrlTests
 {
     private const string Base = "http://127.0.0.1:8096/jellyfin";
 
@@ -23,9 +22,9 @@ public class RelayUrlTests
     {
         var url = PlaceholderPaths.StrmContent(Base, key);
 
-        Assert.True(RelayUrl.TryGetKey(url, Base, out var parsed));
-        Assert.Equal(key, parsed);
-        Assert.True(RelayUrl.IsRelayUrl(url, Base));
+        RelayUrl.TryGetKey(url, Base, out var parsed).ShouldBeTrue();
+        parsed.ShouldBe(key);
+        RelayUrl.IsRelayUrl(url, Base).ShouldBeTrue();
     }
 
     [Fact]
@@ -33,9 +32,9 @@ public class RelayUrlTests
     {
         var url = PlaceholderPaths.StrmContent("http://127.0.0.1:8096", "movie:tmdb:1");
 
-        Assert.True(RelayUrl.TryGetKey(url, Base, out var key));
-        Assert.Equal("movie:tmdb:1", key);
-        Assert.True(RelayUrl.IsRelayUrl(url, Base));
+        RelayUrl.TryGetKey(url, Base, out var key).ShouldBeTrue();
+        key.ShouldBe("movie:tmdb:1");
+        RelayUrl.IsRelayUrl(url, Base).ShouldBeTrue();
     }
 
     [Theory]
@@ -46,8 +45,8 @@ public class RelayUrlTests
     [InlineData("file:///JellyShare/v1/play/x")]
     public void NonRelayPaths_AreNotRecognised(string? path)
     {
-        Assert.False(RelayUrl.IsRelayUrl(path, Base));
-        Assert.False(RelayUrl.TryGetKey(path, Base, out _));
+        RelayUrl.IsRelayUrl(path, Base).ShouldBeFalse();
+        RelayUrl.TryGetKey(path, Base, out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -59,14 +58,14 @@ public class RelayUrlTests
         MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:imdb:tt1", "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch);
         var index = new ConsumerIndexFiles(() => dir.Path);
 
-        Assert.Equal("movie:tmdb:1", index.Find("movie:tmdb:1")!.CanonicalKey);
-        Assert.Equal("movie:tmdb:1", index.Find("movie:imdb:tt1")!.CanonicalKey);
-        Assert.Null(index.Find("movie:tmdb:2"));
+        index.Find("movie:tmdb:1")!.CanonicalKey.ShouldBe("movie:tmdb:1");
+        index.Find("movie:imdb:tt1")!.CanonicalKey.ShouldBe("movie:tmdb:1");
+        index.Find("movie:tmdb:2").ShouldBeNull();
 
         MergedIndexStore.Save(path, Array.Empty<MergedEntry>(), DateTimeOffset.UnixEpoch.AddDays(1));
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
 
-        Assert.Null(index.Find("movie:tmdb:1"));
+        index.Find("movie:tmdb:1").ShouldBeNull();
     }
 
     [Fact]
@@ -85,10 +84,10 @@ public class RelayUrlTests
 
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            Assert.Null(index.Find("movie:tmdb:1"));
+            index.Find("movie:tmdb:1").ShouldBeNull();
         }
 
-        Assert.Equal("movie:tmdb:1", index.Find("movie:tmdb:1")!.CanonicalKey);
+        index.Find("movie:tmdb:1")!.CanonicalKey.ShouldBe("movie:tmdb:1");
     }
 
     [Fact]
@@ -104,13 +103,13 @@ public class RelayUrlTests
         var item = TestItems.Movie("M", tmdb: "1");
         MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch);
         var index = new ConsumerIndexFiles(() => dir.Path);
-        Assert.NotNull(index.Find("movie:tmdb:1"));
+        index.Find("movie:tmdb:1").ShouldNotBeNull();
 
         MergedIndexStore.Save(path, new[] { new MergedEntry("movie:tmdb:1", new[] { "movie:tmdb:1" }, new List<(Guid, CatalogItem)> { (TestItems.PeerA, item) }) }, DateTimeOffset.UnixEpoch.AddDays(1));
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(1));
         using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
         {
-            Assert.NotNull(index.Find("movie:tmdb:1"));
+            index.Find("movie:tmdb:1").ShouldNotBeNull();
         }
     }
 
@@ -121,6 +120,6 @@ public class RelayUrlTests
         File.WriteAllText(dir.Sub(ConsumerIndexFiles.PeerStateFileName), "{not json");
         var index = new ConsumerIndexFiles(() => dir.Path);
 
-        Assert.Empty(index.PeerStates());
+        index.PeerStates().ShouldBeEmpty();
     }
 }

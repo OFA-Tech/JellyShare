@@ -10,7 +10,6 @@ using JellyShare.UnitTests.Fakes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
@@ -112,7 +111,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var result = (await Controller(null).Catalog());
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
 
     [Fact]
@@ -121,10 +120,10 @@ public sealed class FederationControllerCatalogTests : IDisposable
         const string wrong = "js1_not-a-real-token-value";
         var controller = Controller(wrong);
 
-        var result = Assert.IsAssignableFrom<ObjectResult>((await controller.Catalog()));
+        var result = ((await controller.Catalog())).ShouldBeAssignableTo<ObjectResult>();
 
-        Assert.Equal(401, result.StatusCode);
-        Assert.DoesNotContain(wrong, System.Text.Json.JsonSerializer.Serialize(result.Value));
+        result.StatusCode.ShouldBe(401);
+        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
     }
 
     [Fact]
@@ -134,7 +133,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = (await Controller(_token).Catalog());
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
 
     [Fact]
@@ -142,37 +141,37 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token);
 
-        var result = Assert.IsType<OkObjectResult>((await controller.Catalog()));
+        var result = ((await controller.Catalog())).ShouldBeOfType<OkObjectResult>();
 
-        var catalog = Assert.IsType<CatalogResponse>(result.Value);
-        Assert.Equal(2, catalog.Items.Count);
-        Assert.DoesNotContain(catalog.Items, i => i.Id == OutsideId.ToString("N"));
-        Assert.Equal("\"" + catalog.Etag + "\"", controller.Response.Headers.ETag.ToString());
+        var catalog = result.Value.ShouldBeOfType<CatalogResponse>();
+        catalog.Items.Count.ShouldBe(2);
+        catalog.Items.ShouldNotContain(i => i.Id == OutsideId.ToString("N"));
+        controller.Response.Headers.ETag.ToString().ShouldBe("\"" + catalog.Etag + "\"");
     }
 
     [Fact]
     public async Task Catalog_IfNoneMatchMatches_Returns304WithoutBody()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>((await Controller(_token).Catalog())).Value).Etag;
+        var etag = (((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>().Value).ShouldBeOfType<CatalogResponse>().Etag;
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
         var result = (await controller.Catalog());
 
-        Assert.Equal(304, Assert.IsType<StatusCodeResult>(result).StatusCode);
-        Assert.Equal("\"" + etag + "\"", controller.Response.Headers.ETag.ToString());
+        result.ShouldBeOfType<StatusCodeResult>().StatusCode.ShouldBe(304);
+        controller.Response.Headers.ETag.ToString().ShouldBe("\"" + etag + "\"");
     }
 
     [Fact]
     public async Task Catalog_304_MaterializesNothing()
     {
-        var etag = Assert.IsType<CatalogResponse>(Assert.IsType<OkObjectResult>((await Controller(_token).Catalog())).Value).Etag;
+        var etag = (((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>().Value).ShouldBeOfType<CatalogResponse>().Etag;
         _materialized = 0;
 
         // A fresh builder (no cache): the 304 answer must still not build any catalog entry.
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"" + etag + "\"");
 
-        Assert.Equal(304, Assert.IsType<StatusCodeResult>((await controller.Catalog())).StatusCode);
-        Assert.Equal(0, _materialized);
+        (((await controller.Catalog())).ShouldBeOfType<StatusCodeResult>().StatusCode).ShouldBe(304);
+        _materialized.ShouldBe(0);
     }
 
     [Fact]
@@ -180,17 +179,17 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var controller = Controller(_token, h => h.Request.Headers.IfNoneMatch = "\"deadbeef\"");
 
-        Assert.IsType<OkObjectResult>((await controller.Catalog()));
+        ((await controller.Catalog())).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
     public async Task Catalog_RevocationIsImmediate()
     {
-        Assert.IsType<OkObjectResult>((await Controller(_token).Catalog()));
+        ((await Controller(_token).Catalog())).ShouldBeOfType<OkObjectResult>();
 
         _config.Settings.Shares.Clear();
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>((await Controller(_token).Catalog())).StatusCode);
+        (((await Controller(_token).Catalog())).ShouldBeAssignableTo<ObjectResult>().StatusCode).ShouldBe(401);
     }
 
     [Fact]
@@ -198,7 +197,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var result = Controller(null).Image(MovieId.ToString("N"), "Primary");
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
 
     [Fact]
@@ -206,7 +205,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var result = Controller(_token).Image(MovieId.ToString("N"), "Banner");
 
-        Assert.Equal(400, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(400);
     }
 
     [Fact]
@@ -214,7 +213,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var result = Controller(_token).Image("../../etc/passwd", "Primary");
 
-        Assert.IsType<NotFoundResult>(result);
+        result.ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
@@ -226,7 +225,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = Controller(_token).Image(OutsideId.ToString("N"), "Primary");
 
-        Assert.IsType<NotFoundResult>(result);
+        result.ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
@@ -234,7 +233,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
     {
         var result = Controller(_token).Image(MovieId.ToString("N"), "Logo");
 
-        Assert.IsType<NotFoundResult>(result);
+        result.ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
@@ -247,7 +246,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = Controller(_token).Image(MovieId.ToString("N"), "Primary");
 
-        Assert.IsType<NotFoundResult>(result);
+        result.ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
@@ -257,7 +256,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = Controller(_token).Image(MovieId.ToString("N"), "Primary");
 
-        Assert.IsType<NotFoundResult>(result);
+        result.ShouldBeOfType<NotFoundResult>();
     }
 
     [Theory]
@@ -272,9 +271,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = Controller(_token).Image(MovieId.ToString("N"), "primary");
 
-        var physical = Assert.IsType<PhysicalFileResult>(result);
-        Assert.Equal(file, physical.FileName);
-        Assert.Equal(contentType, physical.ContentType);
+        var physical = result.ShouldBeOfType<PhysicalFileResult>();
+        physical.FileName.ShouldBe(file);
+        physical.ContentType.ShouldBe(contentType);
     }
 
     [Fact]
@@ -286,7 +285,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         var result = Controller(_token).Image(SeriesId.ToString("N"), "Backdrop");
 
-        Assert.IsType<PhysicalFileResult>(result);
+        result.ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -295,11 +294,11 @@ public sealed class FederationControllerCatalogTests : IDisposable
         var type = typeof(FederationController);
 
         var catalog = type.GetMethod(nameof(FederationController.Catalog))!;
-        Assert.NotNull(catalog.GetCustomAttribute<AllowAnonymousAttribute>());
-        Assert.Equal("catalog", catalog.GetCustomAttribute<HttpGetAttribute>()!.Template);
+        catalog.GetCustomAttribute<AllowAnonymousAttribute>().ShouldNotBeNull();
+        catalog.GetCustomAttribute<HttpGetAttribute>()!.Template.ShouldBe("catalog");
 
         var image = type.GetMethod(nameof(FederationController.Image))!;
-        Assert.NotNull(image.GetCustomAttribute<AllowAnonymousAttribute>());
-        Assert.Equal("image/{itemId}/{imageType}", image.GetCustomAttribute<HttpGetAttribute>()!.Template);
+        image.GetCustomAttribute<AllowAnonymousAttribute>().ShouldNotBeNull();
+        image.GetCustomAttribute<HttpGetAttribute>()!.Template.ShouldBe("image/{itemId}/{imageType}");
     }
 }

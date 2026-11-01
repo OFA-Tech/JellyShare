@@ -4,11 +4,10 @@ using JellyShare.Application.Features.Placeholders;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Placeholders;
 
-public class NfoWriterTests
+public sealed class NfoWriterTests
 {
     private static readonly MediaInfo Media = new(
         "mkv", "h264", 1920, 1080, 5_000_000,
@@ -29,29 +28,29 @@ public class NfoWriterTests
     {
         var xml = XDocument.Parse(NfoWriter.Movie(Sintel()));
         var root = xml.Root!;
-        Assert.Equal("movie", root.Name.LocalName);
-        Assert.Equal("Sintel", root.Element("title")!.Value);
-        Assert.Equal("2010", root.Element("year")!.Value);
-        Assert.Equal("A girl & her <dragon>.", root.Element("plot")!.Value);
-        Assert.Equal("52", root.Element("runtime")!.Value);
+        root.Name.LocalName.ShouldBe("movie");
+        root.Element("title")!.Value.ShouldBe("Sintel");
+        root.Element("year")!.Value.ShouldBe("2010");
+        root.Element("plot")!.Value.ShouldBe("A girl & her <dragon>.");
+        root.Element("runtime")!.Value.ShouldBe("52");
 
         var tmdb = root.Elements("uniqueid").Single(e => (string?)e.Attribute("type") == "tmdb");
-        Assert.Equal("true", (string?)tmdb.Attribute("default"));
-        Assert.Equal("45745", tmdb.Value);
+        ((string?)tmdb.Attribute("default")).ShouldBe("true");
+        tmdb.Value.ShouldBe("45745");
         var imdb = root.Elements("uniqueid").Single(e => (string?)e.Attribute("type") == "imdb");
-        Assert.Null(imdb.Attribute("default"));
+        imdb.Attribute("default").ShouldBeNull();
 
         var details = root.Element("fileinfo")!.Element("streamdetails")!;
         var video = details.Element("video")!;
-        Assert.Equal("h264", video.Element("codec")!.Value);
-        Assert.Equal("1920", video.Element("width")!.Value);
-        Assert.Equal("1080", video.Element("height")!.Value);
+        video.Element("codec")!.Value.ShouldBe("h264");
+        video.Element("width")!.Value.ShouldBe("1920");
+        video.Element("height")!.Value.ShouldBe("1080");
         var audio = details.Elements("audio").ToList();
-        Assert.Equal(2, audio.Count);
-        Assert.Equal("aac", audio[0].Element("codec")!.Value);
-        Assert.Equal("eng", audio[0].Element("language")!.Value);
-        Assert.Equal("6", audio[1].Element("channels")!.Value);
-        Assert.Equal("eng", details.Element("subtitle")!.Element("language")!.Value);
+        audio.Count.ShouldBe(2);
+        audio[0].Element("codec")!.Value.ShouldBe("aac");
+        audio[0].Element("language")!.Value.ShouldBe("eng");
+        audio[1].Element("channels")!.Value.ShouldBe("6");
+        details.Element("subtitle")!.Element("language")!.Value.ShouldBe("eng");
     }
 
     [Fact]
@@ -59,11 +58,11 @@ public class NfoWriterTests
     {
         var movie = TestItems.Movie("X", tmdb: "1]/../x", imdb: "tt5");
         var ids = XDocument.Parse(NfoWriter.Movie(movie)).Root!.Elements("uniqueid").Select(e => e.Value).ToList();
-        Assert.Equal(["tt5"], ids);
+        ids.ShouldBe(["tt5"]);
 
         var ep = TestItems.Episode("S", new() { ["Tvdb"] = "a:b", ["Tmdb"] = "7" }, 1, 1);
         var series = XDocument.Parse(NfoWriter.Series(ep)).Root!.Elements("uniqueid").Select(e => e.Value).ToList();
-        Assert.Equal(["7"], series);
+        series.ShouldBe(["7"]);
     }
 
     [Fact]
@@ -73,8 +72,8 @@ public class NfoWriterTests
         var merged = new Dictionary<string, string> { ["tvdb"] = "1", ["imdb"] = "tt2" };
         var ids = XDocument.Parse(NfoWriter.Series(ep, null, merged)).Root!.Elements("uniqueid")
             .ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
-        Assert.Equal("tt2", ids["imdb"]);
-        Assert.Equal("1", ids["tvdb"]);
+        ids["imdb"].ShouldBe("tt2");
+        ids["tvdb"].ShouldBe("1");
     }
 
     [Fact]
@@ -82,8 +81,8 @@ public class NfoWriterTests
     {
         var xml = XDocument.Parse(NfoWriter.Movie(TestItems.Movie("X", imdb: "tt5")));
         var id = xml.Root!.Elements("uniqueid").Single();
-        Assert.Equal("imdb", (string?)id.Attribute("type"));
-        Assert.Equal("true", (string?)id.Attribute("default"));
+        ((string?)id.Attribute("type")).ShouldBe("imdb");
+        ((string?)id.Attribute("default")).ShouldBe("true");
     }
 
     [Fact]
@@ -92,11 +91,11 @@ public class NfoWriterTests
         var item = Sintel() with { Overview = "bad\u0001char é" };
         var a = NfoWriter.Movie(item);
         var b = NfoWriter.Movie(item);
-        Assert.Equal(a, b);
-        Assert.False(a.StartsWith('\uFEFF'));
-        Assert.Equal("badchar é", XDocument.Parse(a).Root!.Element("plot")!.Value);
-        Assert.DoesNotContain("utf-16", a, StringComparison.OrdinalIgnoreCase);
-        Assert.NotEqual(0xEF, Encoding.UTF8.GetBytes(a)[0]);
+        b.ShouldBe(a);
+        a.StartsWith('\uFEFF').ShouldBeFalse();
+        XDocument.Parse(a).Root!.Element("plot")!.Value.ShouldBe("badchar é");
+        a.ShouldNotContain("utf-16", Case.Insensitive);
+        Encoding.UTF8.GetBytes(a)[0].ShouldNotBe((byte)0xEF);
     }
 
     [Fact]
@@ -108,14 +107,14 @@ public class NfoWriterTests
             ProviderIds = new() { ["Tvdb"] = "999" },
         };
         var root = XDocument.Parse(NfoWriter.Episode(item)).Root!;
-        Assert.Equal("episodedetails", root.Name.LocalName);
-        Assert.Equal("Alone", root.Element("title")!.Value);
-        Assert.Equal("Pioneer One", root.Element("showtitle")!.Value);
-        Assert.Equal("2", root.Element("season")!.Value);
-        Assert.Equal("5", root.Element("episode")!.Value);
+        root.Name.LocalName.ShouldBe("episodedetails");
+        root.Element("title")!.Value.ShouldBe("Alone");
+        root.Element("showtitle")!.Value.ShouldBe("Pioneer One");
+        root.Element("season")!.Value.ShouldBe("2");
+        root.Element("episode")!.Value.ShouldBe("5");
 
         var overridden = XDocument.Parse(NfoWriter.Episode(item, "Owner Name")).Root!;
-        Assert.Equal("Owner Name", overridden.Element("showtitle")!.Value);
+        overridden.Element("showtitle")!.Value.ShouldBe("Owner Name");
     }
 
     [Fact]
@@ -127,13 +126,13 @@ public class NfoWriterTests
             1,
             1);
         var root = XDocument.Parse(NfoWriter.Series(item)).Root!;
-        Assert.Equal("tvshow", root.Name.LocalName);
-        Assert.Equal("Pioneer One", root.Element("title")!.Value);
+        root.Name.LocalName.ShouldBe("tvshow");
+        root.Element("title")!.Value.ShouldBe("Pioneer One");
         var ids = root.Elements("uniqueid").ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
-        Assert.Equal("153021", ids["tvdb"]);
-        Assert.Equal("tt1759761", ids["imdb"]);
-        Assert.Equal("77", ids["tmdb"]);
-        Assert.Equal("true", (string?)root.Elements("uniqueid").First().Attribute("default"));
+        ids["tvdb"].ShouldBe("153021");
+        ids["imdb"].ShouldBe("tt1759761");
+        ids["tmdb"].ShouldBe("77");
+        ((string?)root.Elements("uniqueid").First().Attribute("default")).ShouldBe("true");
     }
 
     [Fact]
@@ -144,10 +143,10 @@ public class NfoWriterTests
             "Owner Name",
             new Dictionary<string, string> { ["Tvdb"] = "153021", ["Imdb"] = "tt1759761" });
         var root = XDocument.Parse(NfoWriter.Series(item, local)).Root!;
-        Assert.Equal("Owner Name", root.Element("title")!.Value);
+        root.Element("title")!.Value.ShouldBe("Owner Name");
         var ids = root.Elements("uniqueid").ToDictionary(e => (string)e.Attribute("type")!, e => e.Value);
-        Assert.Equal("153021", ids["tvdb"]);
-        Assert.Equal("tt1759761", ids["imdb"]);
-        Assert.False(ids.ContainsKey("tmdb"));
+        ids["tvdb"].ShouldBe("153021");
+        ids["imdb"].ShouldBe("tt1759761");
+        ids.ContainsKey("tmdb").ShouldBeFalse();
     }
 }

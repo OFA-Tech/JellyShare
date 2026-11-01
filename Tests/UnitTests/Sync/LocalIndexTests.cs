@@ -2,11 +2,10 @@ using JellyShare.Application.Features.Sync;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Library;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Sync;
 
-public class LocalIndexTests
+public sealed class LocalIndexTests
 {
     private static readonly Dictionary<string, string> PioneerIds = new() { ["Tvdb"] = "153021" };
 
@@ -45,9 +44,9 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:1"], result.MovieKeys);
-        Assert.Equal(1, result.MissingFiles);
-        Assert.Equal(0, result.UncheckedFiles);
+        result.MovieKeys.ShouldBe(["movie:tmdb:1"]);
+        result.MissingFiles.ShouldBe(1);
+        result.UncheckedFiles.ShouldBe(0);
     }
 
     [Fact]
@@ -60,9 +59,9 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Empty(result.MovieKeys);
-        Assert.Equal(1, result.MissingFiles);
-        Assert.Equal(0, result.UncheckedFiles);
+        result.MovieKeys.ShouldBeEmpty();
+        result.MissingFiles.ShouldBe(1);
+        result.UncheckedFiles.ShouldBe(0);
     }
 
     [Fact]
@@ -77,9 +76,9 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Empty(result.MovieKeys);
-        Assert.Empty(result.EpisodeKeys);
-        Assert.Equal(2, result.MissingFiles);
+        result.MovieKeys.ShouldBeEmpty();
+        result.EpisodeKeys.ShouldBeEmpty();
+        result.MissingFiles.ShouldBe(2);
     }
 
     [Fact]
@@ -93,9 +92,9 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:1", "movie:tmdb:2"], result.MovieKeys.Order(StringComparer.Ordinal));
-        Assert.Equal(0, result.MissingFiles);
-        Assert.Equal(2, result.UncheckedFiles);
+        result.MovieKeys.Order(StringComparer.Ordinal).ShouldBe(["movie:tmdb:1", "movie:tmdb:2"]);
+        result.MissingFiles.ShouldBe(0);
+        result.UncheckedFiles.ShouldBe(2);
     }
 
     [Fact]
@@ -105,10 +104,10 @@ public class LocalIndexTests
         var file = tmp.Sub("a.mkv");
         File.WriteAllText(file, "x");
 
-        Assert.Equal(FilePresence.Present, LocalIndex.ProbeFile(file));
-        Assert.Equal(FilePresence.Missing, LocalIndex.ProbeFile(tmp.Sub("b.mkv")));
-        Assert.Equal(FilePresence.Missing, LocalIndex.ProbeFile(tmp.Sub("nodir", "b.mkv")));
-        Assert.Equal(FilePresence.Unknown, LocalIndex.ProbeFile("bad\0path.mkv"));
+        LocalIndex.ProbeFile(file).ShouldBe(FilePresence.Present);
+        LocalIndex.ProbeFile(tmp.Sub("b.mkv")).ShouldBe(FilePresence.Missing);
+        LocalIndex.ProbeFile(tmp.Sub("nodir", "b.mkv")).ShouldBe(FilePresence.Missing);
+        LocalIndex.ProbeFile("bad\0path.mkv").ShouldBe(FilePresence.Unknown);
     }
 
     private static LocalMedia Sintel(string path) => new("Movie", path, new Dictionary<string, string> { ["Tmdb"] = "45745" }, null, null, null);
@@ -122,10 +121,10 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["movie:tmdb:45745"], result.MovieKeys);
-        Assert.Equal(["ep:tvdb:153021:s1e1"], result.EpisodeKeys);
-        Assert.Equal(["movie:tmdb:45745"], index.GetLocalKeys("Movie"));
-        Assert.Equal(0, result.UncheckedFiles);
+        result.MovieKeys.ShouldBe(["movie:tmdb:45745"]);
+        result.EpisodeKeys.ShouldBe(["ep:tvdb:153021:s1e1"]);
+        index.GetLocalKeys("Movie").ShouldBe(["movie:tmdb:45745"]);
+        result.UncheckedFiles.ShouldBe(0);
     }
 
     [Fact]
@@ -134,8 +133,8 @@ public class LocalIndexTests
         var (index, library, _) = Create(p => !p.Contains("Sintel", StringComparison.Ordinal));
         library.Media.Add(Sintel("/media/Movies/Sintel.mkv"));
         var result = await index.BuildAsync(CancellationToken.None);
-        Assert.Empty(result.MovieKeys);
-        Assert.Equal(1, result.MissingFiles);
+        result.MovieKeys.ShouldBeEmpty();
+        result.MissingFiles.ShouldBe(1);
     }
 
     [Fact]
@@ -154,9 +153,9 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Empty(result.MovieKeys);
-        Assert.Empty(result.EpisodeKeys);
-        Assert.Empty(checkedPaths);
+        result.MovieKeys.ShouldBeEmpty();
+        result.EpisodeKeys.ShouldBeEmpty();
+        checkedPaths.ShouldBeEmpty();
     }
 
     [Fact]
@@ -169,8 +168,8 @@ public class LocalIndexTests
 
         var result = await index.BuildAsync(CancellationToken.None);
 
-        Assert.Equal(["imdb:tt1748166", "tvdb:153021"], result.Series.Keys.Order(StringComparer.Ordinal));
-        Assert.Equal("Pioneer One", result.Series["tvdb:153021"].Name);
+        result.Series.Keys.Order(StringComparer.Ordinal).ShouldBe(["imdb:tt1748166", "tvdb:153021"]);
+        result.Series["tvdb:153021"].Name.ShouldBe("Pioneer One");
     }
 
     [Fact]
@@ -196,9 +195,9 @@ public class LocalIndexTests
         var result = await index.BuildAsync(CancellationToken.None);
         hang.Set();
 
-        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(5));
-        Assert.Equal(["movie:tmdb:2", "movie:tmdb:3"], result.MovieKeys.Order(StringComparer.Ordinal));
-        Assert.Equal(2, result.UncheckedFiles);
-        Assert.Equal(1, result.MissingFiles);
+        (DateTime.UtcNow - started < TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        result.MovieKeys.Order(StringComparer.Ordinal).ShouldBe(["movie:tmdb:2", "movie:tmdb:3"]);
+        result.UncheckedFiles.ShouldBe(2);
+        result.MissingFiles.ShouldBe(1);
     }
 }

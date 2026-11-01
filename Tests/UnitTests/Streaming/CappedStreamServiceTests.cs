@@ -2,7 +2,6 @@ using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Enums;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Streaming;
 
@@ -31,8 +30,8 @@ public sealed class CappedStreamServiceTests
 
         var outcome = await Run(slot, output);
 
-        Assert.Equal(CappedStreamOutcome.Completed, outcome);
-        Assert.Equal(FakeFfmpegRunner.Payload, output.ToArray());
+        outcome.ShouldBe(CappedStreamOutcome.Completed);
+        output.ToArray().ShouldBe(FakeFfmpegRunner.Payload);
     }
 
     [Fact]
@@ -41,7 +40,7 @@ public sealed class CappedStreamServiceTests
         _runner.FailAlwaysWithoutOutput = true;
         using var slot = _service.TryReserve(Share, Item, 4)!;
 
-        Assert.Equal(CappedStreamOutcome.FailedWithoutOutput, await Run(slot, new MemoryStream()));
+        (await Run(slot, new MemoryStream())).ShouldBe(CappedStreamOutcome.FailedWithoutOutput);
     }
 
     [Fact]
@@ -50,7 +49,7 @@ public sealed class CappedStreamServiceTests
         _runner.ThrowStartFailure = true;
         using var slot = _service.TryReserve(Share, Item, 4)!;
 
-        Assert.Equal(CappedStreamOutcome.FailedWithoutOutput, await Run(slot, new MemoryStream()));
+        (await Run(slot, new MemoryStream())).ShouldBe(CappedStreamOutcome.FailedWithoutOutput);
     }
 
     [Fact]
@@ -64,7 +63,7 @@ public sealed class CappedStreamServiceTests
         await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await aborted.CancelAsync();
 
-        Assert.Equal(CappedStreamOutcome.ClientDisconnected, await run);
+        (await run).ShouldBe(CappedStreamOutcome.ClientDisconnected);
     }
 
     [Fact]
@@ -78,6 +77,6 @@ public sealed class CappedStreamServiceTests
         using var second = _service.TryReserve(Share, Item, 4)!;
         using var third = _service.TryReserve(Share, Item, 4)!;
 
-        Assert.Equal(CappedStreamOutcome.Superseded, await run);
+        (await run).ShouldBe(CappedStreamOutcome.Superseded);
     }
 }

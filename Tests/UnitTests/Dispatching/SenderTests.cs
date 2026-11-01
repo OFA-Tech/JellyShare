@@ -7,7 +7,6 @@ using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Dispatching;
 
@@ -48,8 +47,8 @@ public sealed class SenderTests
 
         var result = await sp.GetRequiredService<ISender>().Send(new EchoQuery("hi"));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("hi", result.Value);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.ShouldBe("hi");
     }
 
     [Fact]
@@ -57,10 +56,10 @@ public sealed class SenderTests
     {
         using var sp = Build();
 
-        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => sp.GetRequiredService<ISender>().Send(new UnhandledQuery()));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => sp.GetRequiredService<ISender>().Send(new UnhandledQuery()));
 
-        Assert.Contains(nameof(UnhandledQuery), ex.Message, StringComparison.Ordinal);
-        Assert.Contains("AddDispatcherSetup", ex.Message, StringComparison.Ordinal);
+        ex.Message.ShouldContain(nameof(UnhandledQuery), Case.Sensitive);
+        ex.Message.ShouldContain("AddDispatcherSetup", Case.Sensitive);
     }
 
     [Fact]
@@ -75,7 +74,7 @@ public sealed class SenderTests
 
         await sp.GetRequiredService<ISender>().Send(new EchoQuery("hi"));
 
-        Assert.Equal(["outer>", "inner>", "<inner", "<outer"], calls);
+        calls.ShouldBe(["outer>", "inner>", "<inner", "<outer"]);
     }
 
     [Fact]
@@ -83,7 +82,7 @@ public sealed class SenderTests
     {
         using var sp = Build();
 
-        await Assert.ThrowsAsync<ArgumentNullException>(() => sp.GetRequiredService<ISender>().Send<Result<string>>(null!));
+        await Should.ThrowAsync<ArgumentNullException>(() => sp.GetRequiredService<ISender>().Send<Result<string>>(null!));
     }
 
     [Fact]
@@ -92,13 +91,13 @@ public sealed class SenderTests
         var services = new ServiceCollection();
         services.AddDispatcherSetup();
 
-        Assert.Contains(services, d => d.ServiceType == typeof(ISender) && d.Lifetime == ServiceLifetime.Singleton);
+        services.ShouldContain(d => d.ServiceType == typeof(ISender) && d.Lifetime == ServiceLifetime.Singleton);
         var behaviors = services.Where(d => d.ServiceType == typeof(IPipelineBehavior<,>)).Select(d => d.ImplementationType).ToList();
-        Assert.Equal([typeof(LoggingBehavior<,>), typeof(ValidationBehavior<,>)], behaviors);
-        Assert.Contains(services, d => d.ServiceType == typeof(IRequestHandler<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand, Result<JellyShare.Domain.Models.Admin.CreatedShareResponse>>));
-        Assert.Contains(services, d => d.ServiceType == typeof(IValidator<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand>));
-        Assert.All(services, d => Assert.Equal(ServiceLifetime.Singleton, d.Lifetime));
-        Assert.DoesNotContain(services, d => d.ImplementationType == typeof(EchoQueryHandler));
+        behaviors.ShouldBe([typeof(LoggingBehavior<,>), typeof(ValidationBehavior<,>)]);
+        services.ShouldContain(d => d.ServiceType == typeof(IRequestHandler<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand, Result<JellyShare.Domain.Models.Admin.CreatedShareResponse>>));
+        services.ShouldContain(d => d.ServiceType == typeof(IValidator<JellyShare.Domain.Models.Requests.Shares.CreateShareCommand>));
+        services.ShouldAllBe(d => d.Lifetime == ServiceLifetime.Singleton);
+        services.ShouldNotContain(d => d.ImplementationType == typeof(EchoQueryHandler));
         await Task.CompletedTask;
     }
 
@@ -124,10 +123,10 @@ public sealed class ValidationBehaviorTests
 
         var result = await behavior.Handle(new EchoQuery(string.Empty), _ => { called = true; return Task.FromResult(Result.Success("x")); }, CancellationToken.None);
 
-        Assert.False(called);
-        Assert.True(result.IsFailure);
-        Assert.Equal("Echo.Empty", result.Error.Code);
-        Assert.Equal("Enter some text.", result.Error.Description);
+        called.ShouldBeFalse();
+        result.IsFailure.ShouldBeTrue();
+        result.Error.Code.ShouldBe("Echo.Empty");
+        result.Error.Description.ShouldBe("Enter some text.");
     }
 
     [Fact]
@@ -137,7 +136,7 @@ public sealed class ValidationBehaviorTests
 
         var result = await behavior.Handle(new EchoQuery("ok"), _ => Task.FromResult(Result.Success("handled")), CancellationToken.None);
 
-        Assert.Equal("handled", result.Value);
+        result.Value.ShouldBe("handled");
     }
 
     [Fact]
@@ -148,7 +147,7 @@ public sealed class ValidationBehaviorTests
 
         var result = await behavior.Handle(new EchoQuery("x"), _ => Task.FromResult(Result.Success("x")), CancellationToken.None);
 
-        Assert.Equal("First", result.Error.Code);
+        result.Error.Code.ShouldBe("First");
     }
 
     [Fact]
@@ -158,8 +157,8 @@ public sealed class ValidationBehaviorTests
 
         var result = await behavior.Handle(new NoValueCommand(), _ => Task.FromResult(Result.Success()), CancellationToken.None);
 
-        Assert.True(result.IsFailure);
-        Assert.Equal("NoValue.Invalid", result.Error.Code);
+        result.IsFailure.ShouldBeTrue();
+        result.Error.Code.ShouldBe("NoValue.Invalid");
     }
 
     public sealed record NoValueCommand : ICommand;
@@ -185,10 +184,10 @@ public sealed class LoggingBehaviorTests
 
         await behavior.Handle(new EchoQuery("secret-token-value"), _ => Task.FromResult(Result.Success("x")), CancellationToken.None);
 
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Debug, entry.Level);
-        Assert.Contains(nameof(EchoQuery), entry.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("secret-token-value", entry.Message, StringComparison.Ordinal);
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Debug);
+        entry.Message.ShouldContain(nameof(EchoQuery), Case.Sensitive);
+        entry.Message.ShouldNotContain("secret-token-value", Case.Sensitive);
     }
 
     [Fact]
@@ -199,9 +198,9 @@ public sealed class LoggingBehaviorTests
 
         await behavior.Handle(new EchoQuery("x"), _ => Task.FromResult(Result.Failure<string>(Error.NotFound("Echo.NotFound", "n"))), CancellationToken.None);
 
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Debug, entry.Level);
-        Assert.Contains("Echo.NotFound", entry.Message, StringComparison.Ordinal);
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Debug);
+        entry.Message.ShouldContain("Echo.NotFound", Case.Sensitive);
     }
 
     [Fact]
@@ -210,9 +209,9 @@ public sealed class LoggingBehaviorTests
         var logger = new LevelLogger<LoggingBehavior<EchoQuery, Result<string>>>();
         var behavior = new LoggingBehavior<EchoQuery, Result<string>>(logger);
 
-        await Assert.ThrowsAsync<IOException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new IOException("disk"), CancellationToken.None));
+        await Should.ThrowAsync<IOException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new IOException("disk"), CancellationToken.None));
 
-        Assert.Equal(LogLevel.Error, Assert.Single(logger.Entries).Level);
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Error);
     }
 
     [Fact]
@@ -221,8 +220,8 @@ public sealed class LoggingBehaviorTests
         var logger = new LevelLogger<LoggingBehavior<EchoQuery, Result<string>>>();
         var behavior = new LoggingBehavior<EchoQuery, Result<string>>(logger);
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new OperationCanceledException(), CancellationToken.None));
+        await Should.ThrowAsync<OperationCanceledException>(() => behavior.Handle(new EchoQuery("x"), _ => throw new OperationCanceledException(), CancellationToken.None));
 
-        Assert.Equal(LogLevel.Debug, Assert.Single(logger.Entries).Level);
+        logger.Entries.ShouldHaveSingleItem().Level.ShouldBe(LogLevel.Debug);
     }
 }

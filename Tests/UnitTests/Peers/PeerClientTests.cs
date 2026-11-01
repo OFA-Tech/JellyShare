@@ -4,11 +4,10 @@ using JellyShare.Data.Peers.Clients;
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Peers;
 
-public class PeerClientTests
+public sealed class PeerClientTests
 {
     private const string Token = "js1_SECRET-token-value";
 
@@ -40,8 +39,8 @@ public class PeerClientTests
     {
         var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
         var result = await client.FetchCatalogAsync(Peer(baseUrl), null, CancellationToken.None);
-        Assert.True(result.Ok, result.Error);
-        Assert.Equal(expected, handler.Requests.Single().RequestUri!.ToString());
+        result.Ok.ShouldBeTrue(result.Error);
+        handler.Requests.Single().RequestUri!.ToString().ShouldBe(expected);
     }
 
     [Theory]
@@ -52,9 +51,9 @@ public class PeerClientTests
     {
         var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
         var result = await client.FetchCatalogAsync(Peer(baseUrl), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal("invalid base url", result.Error);
-        Assert.Empty(handler.Requests);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("invalid base url");
+        handler.Requests.ShouldBeEmpty();
     }
 
     [Fact]
@@ -65,14 +64,14 @@ public class PeerClientTests
         await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
         using var _ = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
 
-        Assert.Equal(3, handler.Requests.Count);
-        Assert.All(handler.Requests, r =>
+        handler.Requests.Count.ShouldBe(3);
+        foreach (var r in handler.Requests)
         {
-            Assert.Equal(Token, r.Headers.GetValues("X-JellyShare-Token").Single());
-            Assert.DoesNotContain(Token, r.RequestUri!.ToString(), StringComparison.Ordinal);
-        });
-        Assert.Equal("https://h/jellyfin/JellyShare/v1/image/abc/Primary", handler.Requests[1].RequestUri!.ToString());
-        Assert.Equal("https://h/jellyfin/JellyShare/v1/stream/abc", handler.Requests[2].RequestUri!.ToString());
+            r.Headers.GetValues("X-JellyShare-Token").Single().ShouldBe(Token);
+            r.RequestUri!.ToString().ShouldNotContain(Token, Case.Sensitive);
+        }
+        handler.Requests[1].RequestUri!.ToString().ShouldBe("https://h/jellyfin/JellyShare/v1/image/abc/Primary");
+        handler.Requests[2].RequestUri!.ToString().ShouldBe("https://h/jellyfin/JellyShare/v1/stream/abc");
     }
 
     [Fact]
@@ -81,19 +80,19 @@ public class PeerClientTests
         var (client, _) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
 
-        Assert.True(result.Ok, result.Error);
+        result.Ok.ShouldBeTrue(result.Error);
         var items = result.Catalog!.Items;
-        Assert.Equal(2, items.Count);
+        items.Count.ShouldBe(2);
         var movie = items[0];
-        Assert.Empty(movie.ProviderIds);
-        Assert.Empty(movie.ImageTypes);
-        Assert.NotNull(movie.Media);
-        Assert.Empty(movie.Media.Audio);
-        Assert.Empty(movie.Media.Subtitles);
-        Assert.Null(movie.Year);
-        Assert.Equal("s1", items[1].SeriesId);
-        Assert.Equal(1312543, items[1].Media.BitRate);
-        Assert.Equal("abc", result.Catalog.Etag);
+        movie.ProviderIds.ShouldBeEmpty();
+        movie.ImageTypes.ShouldBeEmpty();
+        movie.Media.ShouldNotBeNull();
+        movie.Media.Audio.ShouldBeEmpty();
+        movie.Media.Subtitles.ShouldBeEmpty();
+        movie.Year.ShouldBeNull();
+        items[1].SeriesId.ShouldBe("s1");
+        items[1].Media.BitRate.ShouldBe(1312543);
+        result.Catalog.Etag.ShouldBe("abc");
     }
 
     [Fact]
@@ -102,9 +101,9 @@ public class PeerClientTests
         var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.NotModified)));
         var result = await client.FetchCatalogAsync(Peer(), "abc", CancellationToken.None);
 
-        Assert.True(result.NotModified);
-        Assert.Null(result.Catalog);
-        Assert.Equal("\"abc\"", handler.Requests.Single().Headers.IfNoneMatch.Single().ToString());
+        result.NotModified.ShouldBeTrue();
+        result.Catalog.ShouldBeNull();
+        handler.Requests.Single().Headers.IfNoneMatch.Single().ToString().ShouldBe("\"abc\"");
     }
 
     [Fact]
@@ -112,8 +111,8 @@ public class PeerClientTests
     {
         var (client, _) = Create(new FakeHandler(_ => Json("{\"error\":\"" + Token + "\"}", HttpStatusCode.Unauthorized)));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal("HTTP 401", result.Error);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("HTTP 401");
     }
 
     [Theory]
@@ -125,8 +124,8 @@ public class PeerClientTests
         var body = MinimalCatalog.Replace("\"1.0\"", "\"" + version + "\"", StringComparison.Ordinal);
         var (client, _) = Create(new FakeHandler(_ => Json(body)));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal(expected, result.Error);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe(expected);
     }
 
     [Fact]
@@ -134,7 +133,7 @@ public class PeerClientTests
     {
         var body = MinimalCatalog.Replace("\"1.0\"", "\"1.7\"", StringComparison.Ordinal);
         var (client, _) = Create(new FakeHandler(_ => Json(body)));
-        Assert.True((await client.FetchCatalogAsync(Peer(), null, CancellationToken.None)).Ok);
+        ((await client.FetchCatalogAsync(Peer(), null, CancellationToken.None)).Ok).ShouldBeTrue();
     }
 
     [Fact]
@@ -148,9 +147,9 @@ public class PeerClientTests
             }),
             TimeSpan.FromMilliseconds(100));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal("timeout", result.Error);
-        Assert.Equal(TimeSpan.FromSeconds(30), PeerClient.DefaultTimeout);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("timeout");
+        PeerClient.DefaultTimeout.ShouldBe(TimeSpan.FromSeconds(30));
     }
 
     [Fact]
@@ -168,10 +167,10 @@ public class PeerClientTests
         var catalog = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
         var image = await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
 
-        Assert.True(catalog.Ok, catalog.Error);
-        Assert.Null(image);
-        Assert.Equal(TimeSpan.FromSeconds(120), PeerClient.CatalogTimeout);
-        Assert.True(PeerClient.HttpClientTimeout > PeerClient.CatalogTimeout);
+        catalog.Ok.ShouldBeTrue(catalog.Error);
+        image.ShouldBeNull();
+        PeerClient.CatalogTimeout.ShouldBe(TimeSpan.FromSeconds(120));
+        (PeerClient.HttpClientTimeout > PeerClient.CatalogTimeout).ShouldBeTrue();
     }
 
     [Fact]
@@ -184,8 +183,11 @@ public class PeerClientTests
         using var _ = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
 
         var version = typeof(PeerClient).Assembly.GetName().Version!.ToString();
-        Assert.Equal(4, handler.Requests.Count);
-        Assert.All(handler.Requests, r => Assert.Equal("JellyShare/" + version, r.Headers.UserAgent.ToString()));
+        handler.Requests.Count.ShouldBe(4);
+        foreach (var r in handler.Requests)
+        {
+            r.Headers.UserAgent.ToString().ShouldBe("JellyShare/" + version);
+        }
     }
 
     [Fact]
@@ -195,7 +197,7 @@ public class PeerClientTests
         using var response = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
 
         // A disposed request message refuses new content.
-        Assert.Throws<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
+        Should.Throw<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
     }
 
     [Fact]
@@ -203,9 +205,9 @@ public class PeerClientTests
     {
         var (client, _) = Create(new FakeHandler(_ => throw new HttpRequestException("refused with " + Token)));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.DoesNotContain(Token, result.Error, StringComparison.Ordinal);
-        Assert.StartsWith("connection failed", result.Error, StringComparison.Ordinal);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldNotContain(Token, Case.Sensitive);
+        result.Error.ShouldStartWith("connection failed", Case.Sensitive);
     }
 
     private sealed class DroppingStream : Stream
@@ -265,9 +267,9 @@ public class PeerClientTests
 
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
 
-        Assert.False(result.Ok);
-        Assert.StartsWith("connection failed", result.Error, StringComparison.Ordinal);
-        Assert.DoesNotContain(Token, result.Error, StringComparison.Ordinal);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldStartWith("connection failed", Case.Sensitive);
+        result.Error.ShouldNotContain(Token, Case.Sensitive);
     }
 
     [Fact]
@@ -277,8 +279,8 @@ public class PeerClientTests
 
         var result = await client.PingAsync("https://h/jellyfin", CancellationToken.None);
 
-        Assert.False(result.Ok);
-        Assert.Equal(PingFailure.Unreachable, result.Failure);
+        result.Ok.ShouldBeFalse();
+        result.Failure.ShouldBe(PingFailure.Unreachable);
     }
 
     [Fact]
@@ -286,8 +288,8 @@ public class PeerClientTests
     {
         var (client, _) = Create(new FakeHandler(_ => Json("<html>")));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal("invalid catalog", result.Error);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("invalid catalog");
     }
 
     [Fact]
@@ -295,8 +297,8 @@ public class PeerClientTests
     {
         var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.PartialContent)));
         using var response = await client.OpenStreamAsync(Peer(), "abc", "bytes=100-", CancellationToken.None);
-        Assert.Equal(HttpStatusCode.PartialContent, response.StatusCode);
-        Assert.Equal("bytes=100-", handler.Requests.Single().Headers.Range!.ToString());
+        response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
+        handler.Requests.Single().Headers.Range!.ToString().ShouldBe("bytes=100-");
     }
 
     [Fact]
@@ -307,9 +309,9 @@ public class PeerClientTests
             Headers = { Location = new Uri("https://evil.example/collect") },
         }));
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
-        Assert.False(result.Ok);
-        Assert.Equal("HTTP 302 (redirects are not followed)", result.Error);
-        Assert.Single(handler.Requests);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("HTTP 302 (redirects are not followed)");
+        handler.Requests.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -324,11 +326,11 @@ public class PeerClientTests
         await client.GetImageAsync(peer, "abc", "Primary", CancellationToken.None);
         using var stream = await client.OpenStreamAsync(peer, "abc", null, CancellationToken.None);
 
-        Assert.False(result.Ok);
-        Assert.StartsWith("HTTP 30", result.Error, StringComparison.Ordinal);
-        Assert.Equal(HttpStatusCode.Redirect, stream.StatusCode);
-        Assert.Empty(server.RedirectTargetHits);
-        Assert.Equal(3, server.Hits);
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldStartWith("HTTP 30", Case.Sensitive);
+        stream.StatusCode.ShouldBe(HttpStatusCode.Redirect);
+        server.RedirectTargetHits.ShouldBeEmpty();
+        server.Hits.ShouldBe(3);
     }
 
     private sealed class RedirectServer : IDisposable
@@ -406,10 +408,10 @@ public class PeerClientTests
             : new HttpResponseMessage(HttpStatusCode.NotFound)));
 
         await using var found = await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
-        Assert.NotNull(found);
+        found.ShouldNotBeNull();
         using var ms = new MemoryStream();
         await found.CopyToAsync(ms);
-        Assert.Equal([1, 2, 3], ms.ToArray());
-        Assert.Null(await client.GetImageAsync(Peer(), "abc", "Backdrop", CancellationToken.None));
+        ms.ToArray().ShouldBe([1, 2, 3]);
+        (await client.GetImageAsync(Peer(), "abc", "Backdrop", CancellationToken.None)).ShouldBeNull();
     }
 }

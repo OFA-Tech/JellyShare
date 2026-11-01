@@ -4,11 +4,10 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Catalog;
 
-public class CatalogBuilderTests
+public sealed class CatalogBuilderTests
 {
     private const string MoviesRoot = "/data/placeholders/Movies";
     private const string ShowsRoot = "/data/placeholders/Shows";
@@ -70,7 +69,7 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source).Build(Share(LibA));
 
-        Assert.Equal(new[] { G(1).ToString("N") }, catalog.Items.Select(i => i.Id));
+        catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
 
     [Fact]
@@ -83,7 +82,7 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source).Build(Share(LibA));
 
-        Assert.Equal(new[] { G(1).ToString("N") }, catalog.Items.Select(i => i.Id));
+        catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
 
     [Fact]
@@ -96,7 +95,7 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source).Build(Share(LibA));
 
-        Assert.Single(catalog.Items);
+        catalog.Items.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -108,7 +107,7 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source, p => !p.Contains("/B/")).Build(Share(LibA));
 
-        Assert.Equal(new[] { G(1).ToString("N") }, catalog.Items.Select(i => i.Id));
+        catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
 
     [Fact]
@@ -120,7 +119,7 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source).Build(Share(LibA));
 
-        Assert.Equal(new[] { G(1).ToString("N") }, catalog.Items.Select(i => i.Id));
+        catalog.Items.Select(i => i.Id).ShouldBe(new[] { G(1).ToString("N") });
     }
 
     [Fact]
@@ -131,9 +130,9 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source).Build(Share());
 
-        Assert.Empty(catalog.Items);
-        Assert.Equal("1.0", catalog.ProtocolVersion);
-        Assert.Equal("Alice", catalog.ServerName);
+        catalog.Items.ShouldBeEmpty();
+        catalog.ProtocolVersion.ShouldBe("1.0");
+        catalog.ServerName.ShouldBe("Alice");
     }
 
     [Fact]
@@ -143,12 +142,12 @@ public class CatalogBuilderTests
         var source = new FakeSource();
         source.Items.Add((LibA, Local(G(1), "/media/Shows/S/Season 01/S.mkv", "Episode", seriesId: seriesId)));
 
-        var item = Assert.Single(Builder(source).Build(Share(LibA)).Items);
+        var item = Builder(source).Build(Share(LibA)).Items.ShouldHaveSingleItem();
 
-        Assert.Equal("Episode", item.Type);
-        Assert.Equal("Show", item.SeriesName);
-        Assert.Equal("9", item.SeriesProviderIds!["Tvdb"]);
-        Assert.Equal(seriesId, item.SeriesId);
+        item.Type.ShouldBe("Episode");
+        item.SeriesName.ShouldBe("Show");
+        item.SeriesProviderIds!["Tvdb"].ShouldBe("9");
+        item.SeriesId.ShouldBe(seriesId);
     }
 
     [Fact]
@@ -163,8 +162,8 @@ public class CatalogBuilderTests
         source.Items.Reverse();
         var second = builder.Build(Share(LibA)).Etag;
 
-        Assert.Equal(first, second);
-        Assert.Matches("^[0-9a-f]{64}$", first);
+        second.ShouldBe(first);
+        first.ShouldMatch("^[0-9a-f]{64}$");
     }
 
     [Fact]
@@ -178,7 +177,7 @@ public class CatalogBuilderTests
         source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv", modified: Modified.AddMinutes(1))));
         var after = Builder(source).Build(Share(LibA)).Etag;
 
-        Assert.NotEqual(before, after);
+        after.ShouldNotBe(before);
     }
 
     [Fact]
@@ -191,7 +190,7 @@ public class CatalogBuilderTests
         source.Items.Add((LibA, Local(G(2), MoviesRoot + "/B/B.mkv")));
         var after = Builder(source).Build(Share(LibA)).Etag;
 
-        Assert.Equal(before, after);
+        after.ShouldBe(before);
     }
 
     [Fact]
@@ -202,10 +201,10 @@ public class CatalogBuilderTests
 
         var json = JsonSerializer.Serialize(Builder(source).Build(Share(LibA)));
 
-        Assert.Contains("\"protocolVersion\":\"1.0\"", json);
-        Assert.Contains("\"serverName\":\"Alice\"", json);
-        Assert.Contains("\"etag\":", json);
-        Assert.Contains("\"items\":[{\"id\":", json);
+        json.ShouldContain("\"protocolVersion\":\"1.0\"", Case.Sensitive);
+        json.ShouldContain("\"serverName\":\"Alice\"", Case.Sensitive);
+        json.ShouldContain("\"etag\":", Case.Sensitive);
+        json.ShouldContain("\"items\":[{\"id\":", Case.Sensitive);
     }
 
     [Fact]
@@ -219,11 +218,11 @@ public class CatalogBuilderTests
         var builder = Builder(source);
         var share = Share(LibA);
 
-        Assert.True(builder.IsExposed(share, G(1)));
-        Assert.True(builder.IsExposed(share, G(2)));
-        Assert.True(builder.IsExposed(share, seriesId));
-        Assert.False(builder.IsExposed(share, G(3)));
-        Assert.False(builder.IsExposed(share, Guid.NewGuid()));
+        builder.IsExposed(share, G(1)).ShouldBeTrue();
+        builder.IsExposed(share, G(2)).ShouldBeTrue();
+        builder.IsExposed(share, seriesId).ShouldBeTrue();
+        builder.IsExposed(share, G(3)).ShouldBeFalse();
+        builder.IsExposed(share, Guid.NewGuid()).ShouldBeFalse();
     }
 
     [Fact]
@@ -238,8 +237,8 @@ public class CatalogBuilderTests
 
         var catalog = Builder(source, p => !p.Contains("/missing/")).Build(Share(LibA));
 
-        Assert.Single(catalog.Items);
-        Assert.Equal(1, _materialized);
+        catalog.Items.ShouldHaveSingleItem();
+        _materialized.ShouldBe(1);
     }
 
     [Fact]
@@ -251,9 +250,9 @@ public class CatalogBuilderTests
 
         var builder = Builder(source);
 
-        Assert.True(builder.IsExposed(Share(LibA), G(1)));
-        Assert.True(builder.IsExposed(Share(LibA), G(99)));
-        Assert.Equal(0, _materialized);
+        builder.IsExposed(Share(LibA), G(1)).ShouldBeTrue();
+        builder.IsExposed(Share(LibA), G(99)).ShouldBeTrue();
+        _materialized.ShouldBe(0);
     }
 
     [Fact]
@@ -267,8 +266,8 @@ public class CatalogBuilderTests
         source.Items.Add((LibB, Local(G(3), "/media/Other/S/Season 01/S.mkv", "Episode", seriesId: otherLibrary.ToString("N"))));
         var builder = Builder(source);
 
-        Assert.False(builder.IsExposed(Share(LibA), onlyPlaceholders));
-        Assert.False(builder.IsExposed(Share(LibA), otherLibrary));
+        builder.IsExposed(Share(LibA), onlyPlaceholders).ShouldBeFalse();
+        builder.IsExposed(Share(LibA), otherLibrary).ShouldBeFalse();
     }
 
     [Fact]
@@ -281,12 +280,12 @@ public class CatalogBuilderTests
         var builder = Builder(source, p => !p.Contains("/missing/"));
         var share = Share(LibA);
 
-        Assert.True(builder.IsExposed(share, G(1)));
-        Assert.False(builder.IsExposed(share, G(2)));
-        Assert.True(builder.IsExposed(share, G(99)));
+        builder.IsExposed(share, G(1)).ShouldBeTrue();
+        builder.IsExposed(share, G(2)).ShouldBeFalse();
+        builder.IsExposed(share, G(99)).ShouldBeTrue();
 
-        Assert.Equal(0, source.GetItemsCalls);
-        Assert.Equal(3, source.CandidateCalls);
+        source.GetItemsCalls.ShouldBe(0);
+        source.CandidateCalls.ShouldBe(3);
     }
 
     [Fact]
@@ -295,8 +294,8 @@ public class CatalogBuilderTests
         var source = new FakeSource();
         source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv")));
 
-        Assert.False(Builder(source).IsExposed(Share(), G(1)));
-        Assert.Equal(0, source.CandidateCalls);
+        Builder(source).IsExposed(Share(), G(1)).ShouldBeFalse();
+        source.CandidateCalls.ShouldBe(0);
     }
 
     [Fact]
@@ -309,10 +308,10 @@ public class CatalogBuilderTests
 
         var plan = builder.Plan(Share(LibA));
 
-        Assert.Matches("^[0-9a-f]{64}$", plan.Etag);
-        Assert.Equal(0, _materialized);
-        Assert.Equal(plan.Etag, plan.Build().Etag);
-        Assert.Equal(2, _materialized);
+        plan.Etag.ShouldMatch("^[0-9a-f]{64}$");
+        _materialized.ShouldBe(0);
+        plan.Build().Etag.ShouldBe(plan.Etag);
+        _materialized.ShouldBe(2);
     }
 
     [Fact]
@@ -326,8 +325,8 @@ public class CatalogBuilderTests
         var first = builder.Build(Share(LibA));
         var second = builder.Build(Share(LibA));
 
-        Assert.Same(first, second);
-        Assert.Equal(2, _materialized);
+        second.ShouldBeSameAs(first);
+        _materialized.ShouldBe(2);
     }
 
     [Fact]
@@ -342,7 +341,7 @@ public class CatalogBuilderTests
         source.Items.Add((LibA, Local(G(1), "/media/Movies/A/A.mkv", modified: Modified.AddMinutes(1))));
         var second = builder.Build(Share(LibA));
 
-        Assert.NotEqual(first.Etag, second.Etag);
-        Assert.Equal(Modified.AddMinutes(1), Assert.Single(second.Items).DateModified);
+        second.Etag.ShouldNotBe(first.Etag);
+        second.Items.ShouldHaveSingleItem().DateModified.ShouldBe(Modified.AddMinutes(1));
     }
 }

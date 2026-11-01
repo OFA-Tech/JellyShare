@@ -4,7 +4,6 @@ using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Results;
 using JellyShare.Jellyfin.Controllers.V1;
 using Microsoft.AspNetCore.Mvc;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
@@ -23,8 +22,8 @@ public sealed class JellyShareControllerBaseTests
     {
         var result = new Probe().Map(new Error("X.Code", "the message", type));
 
-        Assert.Equal(status, result.StatusCode ?? 200);
-        Assert.Equal("the message", Assert.IsType<ErrorResponse>(result.Value).Error);
+        (result.StatusCode ?? 200).ShouldBe(status);
+        result.Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("the message");
     }
 
     [Fact]
@@ -32,9 +31,9 @@ public sealed class JellyShareControllerBaseTests
     {
         var probe = new Probe();
 
-        Assert.IsType<BadRequestObjectResult>(probe.Map(Error.Validation("c", "d")));
-        Assert.IsType<NotFoundObjectResult>(probe.Map(Error.NotFound("c", "d")));
-        Assert.IsType<ConflictObjectResult>(probe.Map(Error.Conflict("c", "d")));
+        probe.Map(Error.Validation("c", "d")).ShouldBeOfType<BadRequestObjectResult>();
+        probe.Map(Error.NotFound("c", "d")).ShouldBeOfType<NotFoundObjectResult>();
+        probe.Map(Error.Conflict("c", "d")).ShouldBeOfType<ConflictObjectResult>();
     }
 
     [Fact]
@@ -42,8 +41,8 @@ public sealed class JellyShareControllerBaseTests
     {
         var probe = new Probe();
 
-        Assert.IsType<NoContentResult>(probe.Convert(Result.Success()));
-        Assert.Equal(7, Assert.IsType<OkObjectResult>(probe.Convert(Result.Success(7))).Value);
+        probe.Convert(Result.Success()).ShouldBeOfType<NoContentResult>();
+        probe.Convert(Result.Success(7)).ShouldBeOfType<OkObjectResult>().Value.ShouldBe(7);
     }
 
     private sealed class Probe : JellyShareControllerBase

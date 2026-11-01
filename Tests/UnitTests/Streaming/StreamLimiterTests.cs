@@ -1,6 +1,5 @@
 using JellyShare.Application.Features.Streaming;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Streaming;
 
@@ -19,9 +18,9 @@ public sealed class StreamLimiterTests
     {
         var limiter = new StreamLimiter(_clock);
 
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
-        Assert.Equal(1, limiter.Active(ShareA));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
+        limiter.Active(ShareA).ShouldBe(1);
     }
 
     [Fact]
@@ -29,55 +28,55 @@ public sealed class StreamLimiterTests
     {
         var limiter = new StreamLimiter(_clock);
 
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 2));
+        limiter.TryAcquire(ShareA, Item1, 2).ShouldBeTrue();
         for (var i = 0; i < 20; i++)
         {
-            Assert.True(limiter.TryAcquire(ShareA, Item1, 2));
+            limiter.TryAcquire(ShareA, Item1, 2).ShouldBeTrue();
         }
 
-        Assert.Equal(1, limiter.Active(ShareA));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 2));
-        Assert.False(limiter.TryAcquire(ShareA, Item3, 2));
+        limiter.Active(ShareA).ShouldBe(1);
+        limiter.TryAcquire(ShareA, Item2, 2).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item3, 2).ShouldBeFalse();
     }
 
     [Fact]
     public void ActiveSession_IsAlwaysAllowed_EvenWhenLimitWasLowered()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 2));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 2));
+        limiter.TryAcquire(ShareA, Item1, 2).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item2, 2).ShouldBeTrue();
 
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeTrue();
     }
 
     [Fact]
     public void Session_ExpiresAfter30sIdle()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
 
         _clock.Advance(TimeSpan.FromSeconds(29));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
 
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
-        Assert.Equal(1, limiter.Active(ShareA));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeTrue();
+        limiter.Active(ShareA).ShouldBe(1);
     }
 
     [Fact]
     public void Request_RefreshesSessionExpiry()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
 
         for (var i = 0; i < 4; i++)
         {
             _clock.Advance(TimeSpan.FromSeconds(20));
-            Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
+            limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
         }
 
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
     }
 
     [Fact]
@@ -85,12 +84,12 @@ public sealed class StreamLimiterTests
     {
         var limiter = new StreamLimiter(_clock);
 
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
-        Assert.True(limiter.TryAcquire(ShareB, Item1, 1));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
-        Assert.False(limiter.TryAcquire(ShareB, Item2, 1));
-        Assert.Equal(1, limiter.Active(ShareA));
-        Assert.Equal(1, limiter.Active(ShareB));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
+        limiter.TryAcquire(ShareB, Item1, 1).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
+        limiter.TryAcquire(ShareB, Item2, 1).ShouldBeFalse();
+        limiter.Active(ShareA).ShouldBe(1);
+        limiter.Active(ShareB).ShouldBe(1);
     }
 
     [Theory]
@@ -100,8 +99,8 @@ public sealed class StreamLimiterTests
     {
         var limiter = new StreamLimiter(_clock);
 
-        Assert.False(limiter.TryAcquire(ShareA, Item1, max));
-        Assert.Equal(0, limiter.Active(ShareA));
+        limiter.TryAcquire(ShareA, Item1, max).ShouldBeFalse();
+        limiter.Active(ShareA).ShouldBe(0);
     }
 
     [Fact]
@@ -109,25 +108,25 @@ public sealed class StreamLimiterTests
     {
         var limiter = new StreamLimiter(_clock);
 
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 2, out var first));
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 2, out var second));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1, out var rejected));
+        limiter.TryAcquire(ShareA, Item1, 2, out var first).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item1, 2, out var second).ShouldBeTrue();
+        limiter.TryAcquire(ShareA, Item2, 1, out var rejected).ShouldBeFalse();
 
-        Assert.True(first);
-        Assert.False(second);
-        Assert.False(rejected);
+        first.ShouldBeTrue();
+        second.ShouldBeFalse();
+        rejected.ShouldBeFalse();
     }
 
     [Fact]
     public void Session_HeldWhileBodyInFlight_DoesNotExpire()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var lease).ShouldBeTrue();
 
         _clock.Advance(TimeSpan.FromMinutes(10));
 
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
-        Assert.Equal(1, limiter.Active(ShareA));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
+        limiter.Active(ShareA).ShouldBe(1);
         lease!.Dispose();
     }
 
@@ -135,69 +134,69 @@ public sealed class StreamLimiterTests
     public void Session_ReleasedAfterBody_ExpiresAfter30s()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var lease).ShouldBeTrue();
         _clock.Advance(TimeSpan.FromMinutes(10));
 
         lease!.Dispose();
         _clock.Advance(TimeSpan.FromSeconds(29));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
 
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeTrue();
     }
 
     [Fact]
     public void Session_WithTwoLeases_StaysHeldUntilBothDisposed()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var first));
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var second));
-        Assert.True(first!.IsNewSession);
-        Assert.False(second!.IsNewSession);
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var first).ShouldBeTrue();
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var second).ShouldBeTrue();
+        first!.IsNewSession.ShouldBeTrue();
+        second!.IsNewSession.ShouldBeFalse();
 
         first.Dispose();
         first.Dispose();
         _clock.Advance(TimeSpan.FromMinutes(5));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
 
         second.Dispose();
         _clock.Advance(TimeSpan.FromSeconds(30));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeTrue();
     }
 
     [Fact]
     public void Abort_OfNewSession_ReleasesSlotImmediately()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var lease).ShouldBeTrue();
 
         lease!.Abort();
 
-        Assert.Equal(0, limiter.Active(ShareA));
-        Assert.True(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.Active(ShareA).ShouldBe(0);
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeTrue();
     }
 
     [Fact]
     public void Abort_OfExistingSession_KeepsIt()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquire(ShareA, Item1, 1));
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out var lease));
+        limiter.TryAcquire(ShareA, Item1, 1).ShouldBeTrue();
+        limiter.TryAcquireLease(ShareA, Item1, 1, out var lease).ShouldBeTrue();
 
         lease!.Abort();
 
-        Assert.Equal(1, limiter.Active(ShareA));
-        Assert.False(limiter.TryAcquire(ShareA, Item2, 1));
+        limiter.Active(ShareA).ShouldBe(1);
+        limiter.TryAcquire(ShareA, Item2, 1).ShouldBeFalse();
     }
 
     [Fact]
     public void TryAcquireLease_OverLimit_ReturnsNoLease()
     {
         var limiter = new StreamLimiter(_clock);
-        Assert.True(limiter.TryAcquireLease(ShareA, Item1, 1, out _));
+        limiter.TryAcquireLease(ShareA, Item1, 1, out _).ShouldBeTrue();
 
-        Assert.False(limiter.TryAcquireLease(ShareA, Item2, 1, out var rejected));
-        Assert.Null(rejected);
+        limiter.TryAcquireLease(ShareA, Item2, 1, out var rejected).ShouldBeFalse();
+        rejected.ShouldBeNull();
     }
 
     [Fact]
@@ -215,7 +214,7 @@ public sealed class StreamLimiterTests
             }
         });
 
-        Assert.Equal(max, allowed);
-        Assert.Equal(max, limiter.Active(ShareA));
+        allowed.ShouldBe(max);
+        limiter.Active(ShareA).ShouldBe(max);
     }
 }

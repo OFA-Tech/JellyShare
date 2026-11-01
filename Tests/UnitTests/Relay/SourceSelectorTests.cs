@@ -7,11 +7,10 @@ using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Relay;
 
-public class SourceSelectorTests
+public sealed class SourceSelectorTests
 {
     private static readonly Guid A = TestItems.PeerA;
     private static readonly Guid B = TestItems.PeerB;
@@ -35,8 +34,8 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B, C), peers, NoState());
 
-        Assert.Equal(new[] { B, C, A }, order.Select(s => s.Peer.Id));
-        Assert.Equal("item-" + B.ToString("N")[..4], order[0].Item.Id);
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, C, A });
+        order[0].Item.Id.ShouldBe("item-" + B.ToString("N")[..4]);
     }
 
     [Fact]
@@ -52,7 +51,7 @@ public class SourceSelectorTests
         var order = SourceSelector.Order(Entry(A, B, C), peers, states);
 
         // A peer that failed its last sync may be back already: it is still tried, after the healthy ones.
-        Assert.Equal(new[] { A, C }, order.Select(s => s.Peer.Id));
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { A, C });
     }
 
     [Fact]
@@ -61,7 +60,7 @@ public class SourceSelectorTests
         var peers = new[] { Peer(A, "alice") };
         var states = new Dictionary<Guid, PeerState> { [A] = new() { FailingSinceUtc = DateTimeOffset.UnixEpoch } };
 
-        Assert.Equal(new[] { A }, SourceSelector.Order(Entry(A), peers, states).Select(s => s.Peer.Id));
+        SourceSelector.Order(Entry(A), peers, states).Select(s => s.Peer.Id).ShouldBe(new[] { A });
     }
 
     [Fact]
@@ -71,7 +70,7 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B, C), peers, NoState());
 
-        Assert.Equal(new[] { B, C, A }, order.Select(s => s.Peer.Id));
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, C, A });
     }
 
     [Fact]
@@ -81,7 +80,7 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(C, B, A), peers, NoState());
 
-        Assert.Equal(new[] { A, B, C }, order.Select(s => s.Peer.Id));
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { A, B, C });
     }
 
     [Fact]
@@ -91,7 +90,7 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B), peers, NoState());
 
-        Assert.Equal(new[] { B }, order.Select(s => s.Peer.Id));
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { B });
     }
 
     [Fact]
@@ -104,6 +103,6 @@ public class SourceSelectorTests
 
         var order = SourceSelector.Order(Entry(A, B), peers, store);
 
-        Assert.Equal(new[] { B, A }, order.Select(s => s.Peer.Id));
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { B, A });
     }
 }

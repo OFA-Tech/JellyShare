@@ -1,6 +1,5 @@
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Results;
-using Xunit;
 
 namespace JellyShare.UnitTests.Dispatching;
 
@@ -11,9 +10,9 @@ public sealed class ResultTests
     {
         var result = Result.Success();
 
-        Assert.True(result.IsSuccess);
-        Assert.False(result.IsFailure);
-        Assert.Same(Error.None, result.Error);
+        result.IsSuccess.ShouldBeTrue();
+        result.IsFailure.ShouldBeFalse();
+        result.Error.ShouldBeSameAs(Error.None);
     }
 
     [Fact]
@@ -21,8 +20,8 @@ public sealed class ResultTests
     {
         var result = Result.Success(42);
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal(42, result.Value);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.ShouldBe(42);
     }
 
     [Fact]
@@ -32,9 +31,9 @@ public sealed class ResultTests
 
         var result = Result.Failure<int>(error);
 
-        Assert.True(result.IsFailure);
-        Assert.Same(error, result.Error);
-        Assert.Throws<InvalidOperationException>(() => result.Value);
+        result.IsFailure.ShouldBeTrue();
+        result.Error.ShouldBeSameAs(error);
+        Should.Throw<InvalidOperationException>(() => result.Value);
     }
 
     [Fact]
@@ -42,13 +41,13 @@ public sealed class ResultTests
     {
         Result<string> result = Error.Conflict("X.Conflict", "conflict");
 
-        Assert.True(result.IsFailure);
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
+        result.IsFailure.ShouldBeTrue();
+        result.Error.Type.ShouldBe(ErrorType.Conflict);
     }
 
     [Fact]
     public void Failure_WithoutAnError_IsRejected()
-        => Assert.Throws<ArgumentException>(() => Result.Failure(Error.None));
+        => Should.Throw<ArgumentException>(() => Result.Failure(Error.None));
 
     [Theory]
     [InlineData(ErrorType.Validation)]
@@ -73,8 +72,8 @@ public sealed class ResultTests
             _ => Error.Unexpected("c", "d"),
         };
 
-        Assert.Equal(type, error.Type);
-        Assert.Equal("c", error.Code);
-        Assert.Equal("d", error.Description);
+        error.Type.ShouldBe(type);
+        error.Code.ShouldBe("c");
+        error.Description.ShouldBe("d");
     }
 }

@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <!-- Runtime copies of what the Jellyfin host provides (Domain/Application only compile against them). -->
@@ -23,6 +24,11 @@
     <ProjectReference Include="..\..\Source\Infrastructure\Api\Data.Peers\JellyShare.Data.Peers.csproj" />
     <ProjectReference Include="..\..\Source\Infrastructure\Data\Data.Files\JellyShare.Data.Files.csproj" />
     <ProjectReference Include="..\..\Source\Infrastructure\Platform\Media\JellyShare.Media.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
   </ItemGroup>
 
 </Project>

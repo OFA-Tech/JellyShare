@@ -1,5 +1,4 @@
 using JellyShare.Application.Features.Relay;
-using Xunit;
 
 namespace JellyShare.UnitTests.Relay;
 
@@ -13,7 +12,7 @@ public sealed class PlaybackBitrateRuleTests
     [InlineData(2_000_000, 3_000_000, 2_000_000)]
     [InlineData(null, 3_000_000, 3_000_000)]
     public void EffectiveMaxBitrate_IsRequestedCappedByRemoteLimit(int? requested, int? remoteLimit, int? expected)
-        => Assert.Equal(expected, PlaybackBitrateRule.EffectiveMaxBitrate(requested, remoteLimit));
+        => PlaybackBitrateRule.EffectiveMaxBitrate(requested, remoteLimit).ShouldBe(expected);
 
     [Theory]
     [InlineData(5_000_000, 1_000_000, null, 1_000_000)]
@@ -26,5 +25,5 @@ public sealed class PlaybackBitrateRuleTests
     [InlineData(null, 1_000_000, null, null)]
     [InlineData(0, 1_000_000, null, null)]
     public void ForcedTranscodeLimit_OnlyWhenTheLimitIsBelowTheSource(int? source, int? requested, int? remoteLimit, int? expected)
-        => Assert.Equal(expected, PlaybackBitrateRule.ForcedTranscodeLimit(source, requested, remoteLimit));
+        => PlaybackBitrateRule.ForcedTranscodeLimit(source, requested, remoteLimit).ShouldBe(expected);
 }

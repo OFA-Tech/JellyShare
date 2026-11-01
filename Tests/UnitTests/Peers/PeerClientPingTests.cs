@@ -4,11 +4,10 @@ using JellyShare.Data.Peers.Clients;
 using JellyShare.Domain.Enums;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Peers;
 
-public class PeerClientPingTests
+public sealed class PeerClientPingTests
 {
     private static HttpResponseMessage Resp(HttpStatusCode code, string body, string type = "application/json")
         => new(code) { Content = new StringContent(body, Encoding.UTF8, type) };
@@ -23,12 +22,12 @@ public class PeerClientPingTests
 
         var result = await Client(handler).PingAsync(" http://h/jellyfin/ ", CancellationToken.None);
 
-        Assert.True(result.Ok);
-        Assert.Equal("Alice", result.ServerName);
-        Assert.Equal("1.0", result.ProtocolVersion);
-        var request = Assert.Single(handler.Requests);
-        Assert.Equal("http://h/jellyfin/JellyShare/v1/ping", request.RequestUri!.ToString());
-        Assert.False(request.Headers.Contains("X-JellyShare-Token"));
+        result.Ok.ShouldBeTrue();
+        result.ServerName.ShouldBe("Alice");
+        result.ProtocolVersion.ShouldBe("1.0");
+        var request = handler.Requests.ShouldHaveSingleItem();
+        request.RequestUri!.ToString().ShouldBe("http://h/jellyfin/JellyShare/v1/ping");
+        request.Headers.Contains("X-JellyShare-Token").ShouldBeFalse();
     }
 
     [Theory]
@@ -41,8 +40,8 @@ public class PeerClientPingTests
 
         var result = await Client(handler).PingAsync(url, CancellationToken.None);
 
-        Assert.Equal(PingFailure.InvalidUrl, result.Failure);
-        Assert.Empty(handler.Requests);
+        result.Failure.ShouldBe(PingFailure.InvalidUrl);
+        handler.Requests.ShouldBeEmpty();
     }
 
     [Theory]
@@ -56,8 +55,8 @@ public class PeerClientPingTests
     {
         var result = await Client(new FakeHandler(_ => Resp(code, body, type))).PingAsync("http://h", CancellationToken.None);
 
-        Assert.False(result.Ok);
-        Assert.Equal(PingFailure.NotJellyShare, result.Failure);
+        result.Ok.ShouldBeFalse();
+        result.Failure.ShouldBe(PingFailure.NotJellyShare);
     }
 
     [Fact]
@@ -72,7 +71,7 @@ public class PeerClientPingTests
 
         var result = await Client(handler).PingAsync("http://h", CancellationToken.None);
 
-        Assert.Equal(PingFailure.Redirect, result.Failure);
+        result.Failure.ShouldBe(PingFailure.Redirect);
     }
 
     [Theory]
@@ -85,8 +84,8 @@ public class PeerClientPingTests
 
         var result = await Client(new FakeHandler(_ => Resp(HttpStatusCode.OK, body))).PingAsync("http://h", CancellationToken.None);
 
-        Assert.False(result.Ok);
-        Assert.Equal(PingFailure.IncompatibleProtocol, result.Failure);
+        result.Ok.ShouldBeFalse();
+        result.Failure.ShouldBe(PingFailure.IncompatibleProtocol);
     }
 
     [Fact]
@@ -97,10 +96,10 @@ public class PeerClientPingTests
 
         var result = await Client(new FakeHandler(_ => Resp(HttpStatusCode.OK, body))).PingAsync("http://h", CancellationToken.None);
 
-        Assert.True(result.Ok);
-        Assert.Equal(100, result.ServerName!.Length);
-        Assert.StartsWith("ABxxx", result.ServerName, StringComparison.Ordinal);
-        Assert.DoesNotContain(result.ServerName, c => char.IsControl(c));
+        result.Ok.ShouldBeTrue();
+        result.ServerName!.Length.ShouldBe(100);
+        result.ServerName.ShouldStartWith("ABxxx", Case.Sensitive);
+        result.ServerName.ShouldNotContain(c => char.IsControl(c));
     }
 
     [Fact]
@@ -110,7 +109,7 @@ public class PeerClientPingTests
 
         var result = await Client(handler).PingAsync("http://h", CancellationToken.None);
 
-        Assert.Equal(PingFailure.Unreachable, result.Failure);
+        result.Failure.ShouldBe(PingFailure.Unreachable);
     }
 
     [Fact]
@@ -124,6 +123,6 @@ public class PeerClientPingTests
 
         var result = await Client(handler, TimeSpan.FromMilliseconds(100)).PingAsync("http://h", CancellationToken.None);
 
-        Assert.Equal(PingFailure.Timeout, result.Failure);
+        result.Failure.ShouldBe(PingFailure.Timeout);
     }
 }

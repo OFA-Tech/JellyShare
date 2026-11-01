@@ -7,7 +7,6 @@ using JellyShare.Domain.Interfaces.Streaming;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Streaming;
-using Xunit;
 
 namespace JellyShare.UnitTests.Fakes;
 
@@ -68,7 +67,7 @@ internal sealed class FakeFfmpegRunner : IFfmpegRunner
     {
         for (var i = 0; i < count; i++)
         {
-            Assert.True(await _starts.WaitAsync(TimeSpan.FromSeconds(5)), "runner did not start");
+            (await _starts.WaitAsync(TimeSpan.FromSeconds(5))).ShouldBeTrue("runner did not start");
         }
     }
 

@@ -2,7 +2,6 @@ using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Requests.Peers;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Peers;
 
@@ -31,12 +30,12 @@ public sealed class PeerHandlerTests : IDisposable
 
         var result = await _h.Send(new AddPeerCommand(" bob ", "http://bob:8096/", " " + Token + " ", null));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("bob", result.Value.Name);
-        Assert.Equal("http://bob:8096", result.Value.BaseUrl);
-        Assert.Equal(5, result.Value.Priority);
-        Assert.True(result.Value.HasToken);
-        Assert.Equal(Token, _h.Saver.Saved!.Peers.Single(p => p.Name == "bob").Token);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.Name.ShouldBe("bob");
+        result.Value.BaseUrl.ShouldBe("http://bob:8096");
+        result.Value.Priority.ShouldBe(5);
+        result.Value.HasToken.ShouldBeTrue();
+        _h.Saver.Saved!.Peers.Single(p => p.Name == "bob").Token.ShouldBe(Token);
     }
 
     [Theory]
@@ -49,9 +48,9 @@ public sealed class PeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new AddPeerCommand(name, url, token, true));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal(message, result.Error.Description);
-        Assert.Equal(0, _h.Saver.Saves);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe(message);
+        _h.Saver.Saves.ShouldBe(0);
     }
 
     [Fact]
@@ -59,15 +58,15 @@ public sealed class PeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new AddPeerCommand("bob", "http://bob:8096", new string('x', 513), true));
 
-        Assert.Equal("The token is too long (at most 512 characters). Check that you pasted only the token.", result.Error.Description);
+        result.Error.Description.ShouldBe("The token is too long (at most 512 characters). Check that you pasted only the token.");
     }
 
     [Fact]
     public void Commands_NeverPrintTheToken()
     {
-        Assert.DoesNotContain(Token, new AddPeerCommand("bob", "http://bob", Token, true).ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(Token, new UpdatePeerCommand(Guid.Empty, "bob", "http://bob", Token, true).ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(Token, new TestPeerQuery("http://bob", Token, null).ToString(), StringComparison.Ordinal);
+        (new AddPeerCommand("bob", "http://bob", Token, true).ToString()).ShouldNotContain(Token, Case.Sensitive);
+        (new UpdatePeerCommand(Guid.Empty, "bob", "http://bob", Token, true).ToString()).ShouldNotContain(Token, Case.Sensitive);
+        (new TestPeerQuery("http://bob", Token, null).ToString()).ShouldNotContain(Token, Case.Sensitive);
     }
 
     // ---- update ----
@@ -79,12 +78,12 @@ public sealed class PeerHandlerTests : IDisposable
 
         var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice2", "https://alice/jf", "", false));
 
-        Assert.True(result.IsSuccess);
-        var saved = Assert.Single(_h.Saver.Saved!.Peers);
-        Assert.Equal(Token, saved.Token);
-        Assert.Equal(3, saved.Priority);
-        Assert.Equal("https://alice/jf", saved.BaseUrl);
-        Assert.False(saved.Enabled);
+        result.IsSuccess.ShouldBeTrue();
+        var saved = _h.Saver.Saved!.Peers.ShouldHaveSingleItem();
+        saved.Token.ShouldBe(Token);
+        saved.Priority.ShouldBe(3);
+        saved.BaseUrl.ShouldBe("https://alice/jf");
+        saved.Enabled.ShouldBeFalse();
     }
 
     [Fact]
@@ -94,7 +93,7 @@ public sealed class PeerHandlerTests : IDisposable
 
         await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", "new-token", null));
 
-        Assert.Equal("new-token", Assert.Single(_h.Saver.Saved!.Peers).Token);
+        _h.Saver.Saved!.Peers.ShouldHaveSingleItem().Token.ShouldBe("new-token");
     }
 
     [Fact]
@@ -102,8 +101,8 @@ public sealed class PeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new UpdatePeerCommand(Guid.NewGuid(), "", "bad", null, null));
 
-        Assert.Equal(ErrorType.NotFound, result.Error.Type);
-        Assert.Equal("Peer not found.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Description.ShouldBe("Peer not found.");
     }
 
     [Theory]
@@ -116,9 +115,9 @@ public sealed class PeerHandlerTests : IDisposable
 
         var result = await _h.Send(new UpdatePeerCommand(peer.Id, name, url, token, null));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal(message, result.Error.Description);
-        Assert.Equal(0, _h.Saver.Saves);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe(message);
+        _h.Saver.Saves.ShouldBe(0);
     }
 
     // ---- delete ----
@@ -130,9 +129,9 @@ public sealed class PeerHandlerTests : IDisposable
 
         var result = await _h.Send(new DeletePeerCommand(peer.Id));
 
-        Assert.True(result.IsSuccess);
-        Assert.Empty(_h.Saver.Saved!.Peers);
-        Assert.True(_h.Sync.LastQueueIfRunning);
+        result.IsSuccess.ShouldBeTrue();
+        _h.Saver.Saved!.Peers.ShouldBeEmpty();
+        _h.Sync.LastQueueIfRunning.ShouldBe(true);
     }
 
     [Fact]
@@ -140,9 +139,9 @@ public sealed class PeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new DeletePeerCommand(Guid.NewGuid()));
 
-        Assert.Equal(ErrorType.NotFound, result.Error.Type);
-        Assert.Equal("Peer not found.", result.Error.Description);
-        Assert.Null(_h.Sync.LastQueueIfRunning);
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Description.ShouldBe("Peer not found.");
+        _h.Sync.LastQueueIfRunning.ShouldBeNull();
     }
 
     // ---- reorder ----
@@ -156,11 +155,11 @@ public sealed class PeerHandlerTests : IDisposable
 
         var result = await _h.Send(new ReorderPeersCommand([c.Id, Guid.NewGuid(), c.Id, a.Id]));
 
-        Assert.True(result.IsSuccess);
+        result.IsSuccess.ShouldBeTrue();
         var priorities = _h.Saver.Saved!.Peers.ToDictionary(p => p.Name, p => p.Priority);
-        Assert.Equal(0, priorities["c"]);
-        Assert.Equal(1, priorities["a"]);
-        Assert.Equal(2, priorities["b"]);
-        Assert.NotSame(b, _h.Saver.Saved.Peers.Single(p => p.Name == "b"));
+        priorities["c"].ShouldBe(0);
+        priorities["a"].ShouldBe(1);
+        priorities["b"].ShouldBe(2);
+        _h.Saver.Saved.Peers.Single(p => p.Name == "b").ShouldNotBeSameAs(b);
     }
 }

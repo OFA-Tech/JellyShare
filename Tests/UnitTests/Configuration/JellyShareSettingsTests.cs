@@ -1,5 +1,4 @@
 using JellyShare.Domain.Models.Configuration;
-using Xunit;
 
 namespace JellyShare.UnitTests.Configuration;
 
@@ -10,17 +9,17 @@ public sealed class JellyShareSettingsTests
     {
         var settings = new JellyShareSettings();
 
-        Assert.Empty(settings.Shares);
-        Assert.Empty(settings.Peers);
-        Assert.Equal(string.Empty, settings.MoviesPlaceholderPath);
-        Assert.Equal(string.Empty, settings.ShowsPlaceholderPath);
-        Assert.Equal(6, settings.SyncIntervalHours);
-        Assert.Equal(60, settings.PresenceSweepSeconds);
-        Assert.Equal(4, settings.MaxConcurrentTranscodes);
-        Assert.Null(settings.RelayBaseOverride);
-        Assert.True(new PeerShare().Enabled);
-        Assert.Equal(2, new PeerShare().MaxStreams);
-        Assert.True(new RemotePeer().Enabled);
+        settings.Shares.ShouldBeEmpty();
+        settings.Peers.ShouldBeEmpty();
+        settings.MoviesPlaceholderPath.ShouldBe(string.Empty);
+        settings.ShowsPlaceholderPath.ShouldBe(string.Empty);
+        settings.SyncIntervalHours.ShouldBe(6);
+        settings.PresenceSweepSeconds.ShouldBe(60);
+        settings.MaxConcurrentTranscodes.ShouldBe(4);
+        settings.RelayBaseOverride.ShouldBeNull();
+        (new PeerShare().Enabled).ShouldBeTrue();
+        (new PeerShare().MaxStreams).ShouldBe(2);
+        (new RemotePeer().Enabled).ShouldBeTrue();
     }
 
     [Fact]
@@ -30,8 +29,8 @@ public sealed class JellyShareSettingsTests
 
         JellyShareSettings.ResolvePlaceholderRoots(settings, Path.Combine("data", "plugin"));
 
-        Assert.Equal(Path.Combine("data", "plugin", "placeholders", "Movies"), settings.MoviesPlaceholderPath);
-        Assert.Equal(Path.Combine("data", "plugin", "placeholders", "Shows"), settings.ShowsPlaceholderPath);
+        settings.MoviesPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Movies"));
+        settings.ShowsPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Shows"));
     }
 
     [Fact]
@@ -41,8 +40,8 @@ public sealed class JellyShareSettingsTests
 
         JellyShareSettings.ResolvePlaceholderRoots(settings, "/d");
 
-        Assert.Equal("/custom/m", settings.MoviesPlaceholderPath);
-        Assert.Equal(Path.Combine("/d", "placeholders", "Shows"), settings.ShowsPlaceholderPath);
+        settings.MoviesPlaceholderPath.ShouldBe("/custom/m");
+        settings.ShowsPlaceholderPath.ShouldBe(Path.Combine("/d", "placeholders", "Shows"));
     }
 
     [Fact]
@@ -52,7 +51,7 @@ public sealed class JellyShareSettingsTests
         settings.Shares.Add(new PeerShare { Name = "a", TokenHash = "deadbeefhash" });
         settings.Peers.Add(new RemotePeer { Name = "b", Token = "js1_secret-value" });
 
-        Assert.DoesNotContain("deadbeefhash", settings.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("js1_secret-value", settings.ToString(), StringComparison.Ordinal);
+        settings.ToString().ShouldNotContain("deadbeefhash", Case.Sensitive);
+        settings.ToString().ShouldNotContain("js1_secret-value", Case.Sensitive);
     }
 }

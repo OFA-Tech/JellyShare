@@ -1,4 +1,3 @@
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Fakes;
 

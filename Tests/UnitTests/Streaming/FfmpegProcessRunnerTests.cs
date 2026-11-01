@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using JellyShare.Media.Runners;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Streaming;
 
@@ -26,9 +25,9 @@ public sealed class FfmpegProcessRunnerTests
 
         var result = await new FfmpegProcessRunner(NullLogger<FfmpegProcessRunner>.Instance).RunAsync(exe, args, output, CancellationToken.None);
 
-        Assert.Equal(0, result.ExitCode);
-        Assert.Equal(output.Length, result.BytesWritten);
-        Assert.StartsWith("hello", System.Text.Encoding.ASCII.GetString(output.ToArray()));
+        result.ExitCode.ShouldBe(0);
+        result.BytesWritten.ShouldBe(output.Length);
+        System.Text.Encoding.ASCII.GetString(output.ToArray()).ShouldStartWith("hello", Case.Sensitive);
     }
 
     [Fact]
@@ -44,17 +43,17 @@ public sealed class FfmpegProcessRunnerTests
         var pid = runner.LastProcessId;
         var clock = Stopwatch.StartNew();
         cts.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
+        await Should.ThrowAsync<OperationCanceledException>(() => run.WaitAsync(TimeSpan.FromSeconds(10)));
 
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(5));
-        Assert.NotNull(pid);
-        Assert.Throws<ArgumentException>(() => Process.GetProcessById(pid!.Value));
+        (clock.Elapsed < TimeSpan.FromSeconds(5)).ShouldBeTrue();
+        pid.ShouldNotBeNull();
+        Should.Throw<ArgumentException>(() => Process.GetProcessById(pid!.Value));
     }
 
     [Fact]
     public async Task Run_MissingExecutable_Throws()
     {
-        await Assert.ThrowsAnyAsync<Exception>(() => new FfmpegProcessRunner(NullLogger<FfmpegProcessRunner>.Instance)
+        await Should.ThrowAsync<Exception>(() => new FfmpegProcessRunner(NullLogger<FfmpegProcessRunner>.Instance)
             .RunAsync(Path.Combine(Path.GetTempPath(), "no-such-ffmpeg-" + Guid.NewGuid().ToString("N")), Array.Empty<string>(), Stream.Null, CancellationToken.None));
     }
 

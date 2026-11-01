@@ -1,9 +1,8 @@
 using JellyShare.Application.Features.Admin;
-using Xunit;
 
 namespace JellyShare.UnitTests.Admin;
 
-public class LibraryPathsTests
+public sealed class LibraryPathsTests
 {
     private readonly List<string> _calls = new();
 
@@ -21,16 +20,16 @@ public class LibraryPathsTests
     {
         Run();
 
-        Assert.Equal(["stop", "add", "queue"], _calls);
+        _calls.ShouldBe(["stop", "add", "queue"]);
     }
 
     [Fact]
     public void AddFails_MonitorIsStartedAgain_AndTheErrorPropagates_NoScan()
     {
-        var ex = Assert.Throws<ArgumentException>(() => Run(add: () => throw new ArgumentException("bad path")));
+        var ex = Should.Throw<ArgumentException>(() => Run(add: () => throw new ArgumentException("bad path")));
 
-        Assert.Equal("bad path", ex.Message);
-        Assert.Equal(["stop", "start"], _calls);
+        ex.Message.ShouldBe("bad path");
+        _calls.ShouldBe(["stop", "start"]);
     }
 
     [Fact]
@@ -38,6 +37,6 @@ public class LibraryPathsTests
     {
         Run(queue: () => throw new InvalidOperationException("no scan"));
 
-        Assert.Equal(["stop", "add", "log:no scan", "start"], _calls);
+        _calls.ShouldBe(["stop", "add", "log:no scan", "start"]);
     }
 }

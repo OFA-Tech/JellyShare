@@ -9,7 +9,6 @@ using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Sync;
 
@@ -74,7 +73,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
         AddLocalSintel();
         Offer(Bunny(), Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(BunnyDir));
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
         _scans.Reported.Clear();
 
         // Bunny's placeholder was deleted by hand: a targeted reconcile must not recreate it.
@@ -82,12 +81,12 @@ public sealed class SyncServiceReconcileTests : IDisposable
         _missing.Add(SintelPath);
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.False(MoviePlaceholder(BunnyDir));
-        Assert.Equal(2, report.Written);
-        Assert.Equal(1, report.Entries);
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
-        Assert.Single(_client.Fetches);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
+        report.Written.ShouldBe(2);
+        report.Entries.ShouldBe(1);
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -97,16 +96,16 @@ public sealed class SyncServiceReconcileTests : IDisposable
         AddLocalSintel();
         Offer(Bunny(), Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
         _scans.Reported.Clear();
 
         _missing.Clear();
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(SintelDir));
-        Assert.True(MoviePlaceholder(BunnyDir));
-        Assert.Equal(2, report.Deleted);
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Deleted.ShouldBe(2);
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
     }
 
     [Fact]
@@ -118,9 +117,9 @@ public sealed class SyncServiceReconcileTests : IDisposable
 
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
 
-        Assert.Equal(0, report.Entries);
-        Assert.Equal(0, report.Written + report.Deleted);
-        Assert.Empty(_scans.Reported);
+        report.Entries.ShouldBe(0);
+        (report.Written + report.Deleted).ShouldBe(0);
+        _scans.Reported.ShouldBeEmpty();
     }
 
     [Fact]
@@ -130,8 +129,8 @@ public sealed class SyncServiceReconcileTests : IDisposable
 
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
 
-        Assert.Equal(0, report.Entries);
-        Assert.False(Directory.Exists(MoviesRoot) && Directory.EnumerateDirectories(MoviesRoot).Any());
+        report.Entries.ShouldBe(0);
+        (Directory.Exists(MoviesRoot) && Directory.EnumerateDirectories(MoviesRoot).Any()).ShouldBeFalse();
     }
 
     [Fact]
@@ -140,16 +139,16 @@ public sealed class SyncServiceReconcileTests : IDisposable
         Offer(Pioneer(1, 1), Pioneer(1, 2));
         await _sync.RunAsync(CancellationToken.None);
         var series = Path.Combine(ShowsRoot, PioneerDir);
-        Assert.True(Directory.Exists(series));
-        Assert.True(File.Exists(Path.Combine(series, "tvshow.nfo")));
+        Directory.Exists(series).ShouldBeTrue();
+        File.Exists(Path.Combine(series, "tvshow.nfo")).ShouldBeTrue();
 
         AddLocalPioneer(1, 1);
         var key = MediaKey.For(Pioneer(1, 1)).First();
         var report = await _sync.ReconcileAsync([key], CancellationToken.None);
 
-        Assert.Equal(2, report.Deleted);
-        Assert.True(File.Exists(Path.Combine(series, "tvshow.nfo")));
-        Assert.Single(Directory.GetFiles(series, "*.strm", SearchOption.AllDirectories));
+        report.Deleted.ShouldBe(2);
+        File.Exists(Path.Combine(series, "tvshow.nfo")).ShouldBeTrue();
+        Directory.GetFiles(series, "*.strm", SearchOption.AllDirectories).ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -166,14 +165,14 @@ public sealed class SyncServiceReconcileTests : IDisposable
         _missing.Add(SintelPath);
         var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
 
-        Assert.Equal(2, report.Written);
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Equal(fullReads, _library.Reads);
-        Assert.Equal(1, _library.ScopedReads);
-        Assert.Contains("45745", _library.LastScope!.MovieIds["tmdb"]);
-        Assert.Empty(_library.LastScope.SeriesIds);
-        Assert.Empty(reads);
-        Assert.Equal(loads, _sync.MergedIndexLoads);
+        report.Written.ShouldBe(2);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        _library.Reads.ShouldBe(fullReads);
+        _library.ScopedReads.ShouldBe(1);
+        _library.LastScope!.MovieIds["tmdb"].ShouldContain("45745");
+        _library.LastScope.SeriesIds.ShouldBeEmpty();
+        reads.ShouldBeEmpty();
+        _sync.MergedIndexLoads.ShouldBe(loads);
     }
 
     [Fact]
@@ -187,7 +186,7 @@ public sealed class SyncServiceReconcileTests : IDisposable
 
         var report = await _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None);
 
-        Assert.Equal(0, report.Entries);
+        report.Entries.ShouldBe(0);
     }
 
     [Fact]
@@ -199,9 +198,9 @@ public sealed class SyncServiceReconcileTests : IDisposable
 
         var report = await _sync.ReconcileAsync([MediaKey.For(Pioneer(1, 1)).First()], CancellationToken.None);
 
-        Assert.Equal(2, report.Deleted);
-        Assert.Contains("153021", _library.LastScope!.SeriesIds["tvdb"]);
-        Assert.Empty(_library.LastScope.MovieIds);
+        report.Deleted.ShouldBe(2);
+        _library.LastScope!.SeriesIds["tvdb"].ShouldContain("153021");
+        _library.LastScope.MovieIds.ShouldBeEmpty();
     }
 
     [Fact]
@@ -222,8 +221,8 @@ public sealed class SyncServiceReconcileTests : IDisposable
         var reconcile = _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None);
         await Task.Delay(200);
 
-        Assert.False(run.IsCompleted);
-        Assert.False(reconcile.IsCompleted);
+        run.IsCompleted.ShouldBeFalse();
+        reconcile.IsCompleted.ShouldBeFalse();
 
         gate.SetResult();
         await Task.WhenAll(run, reconcile);

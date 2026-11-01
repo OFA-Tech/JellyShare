@@ -31,7 +31,6 @@ using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
@@ -83,7 +82,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         CreateShare();
 
-        Assert.Equal("no-store", _http.Response.Headers.CacheControl.ToString());
+        _http.Response.Headers.CacheControl.ToString().ShouldBe("no-store");
     }
 
     public void Dispose()
@@ -96,7 +95,7 @@ public sealed class AdminControllerTests : IDisposable
     private static IActionResult Run(Task<IActionResult> action) => action.GetAwaiter().GetResult();
 
     private static T Value<T>(IActionResult result)
-        => Assert.IsType<T>(Assert.IsType<OkObjectResult>(result).Value);
+        => result.ShouldBeOfType<OkObjectResult>().Value.ShouldBeOfType<T>();
 
     private static string ErrorOf(IActionResult result)
     {
@@ -107,7 +106,7 @@ public sealed class AdminControllerTests : IDisposable
             ObjectResult o => o.Value,
             _ => null,
         };
-        return Assert.IsType<ErrorResponse>(value).Error;
+        return value.ShouldBeOfType<ErrorResponse>().Error;
     }
 
     private CreatedShareResponse CreateShare(string name = "bob", int streams = 2, int? bitrate = null, params Guid[] libs)
@@ -131,21 +130,21 @@ public sealed class AdminControllerTests : IDisposable
     {
         var type = typeof(AdminController);
         var policy = type.GetCustomAttributes<AuthorizeAttribute>().SingleOrDefault();
-        Assert.NotNull(policy);
-        Assert.Equal(Policies.RequiresElevation, policy!.Policy);
-        Assert.Empty(type.GetCustomAttributes<AllowAnonymousAttribute>());
+        policy.ShouldNotBeNull();
+        policy!.Policy.ShouldBe(Policies.RequiresElevation);
+        type.GetCustomAttributes<AllowAnonymousAttribute>().ShouldBeEmpty();
 
         var actions = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
             .Where(m => m.GetCustomAttributes<HttpMethodAttribute>().Any())
             .ToList();
-        Assert.True(actions.Count >= 11);
+        (actions.Count >= 11).ShouldBeTrue();
         foreach (var action in actions)
         {
-            Assert.Empty(action.GetCustomAttributes<AllowAnonymousAttribute>());
+            action.GetCustomAttributes<AllowAnonymousAttribute>().ShouldBeEmpty();
         }
 
         Assert.All(type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly), m =>
-            Assert.True(m.GetCustomAttributes<HttpMethodAttribute>().Any(), m.Name + " is public but has no route"));
+            m.GetCustomAttributes<HttpMethodAttribute>().Any().ShouldBeTrue(m.Name + " is public but has no route"));
     }
 
     // ---- shares ----
@@ -155,25 +154,25 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare("bob", 3, 8_000_000);
 
-        Assert.StartsWith("js1_", created.Token, StringComparison.Ordinal);
-        var share = Assert.Single(_config.Current.Shares);
-        Assert.Equal(created.Id, share.Id);
-        Assert.Equal("bob", share.Name);
-        Assert.Equal(Sha256Hex(created.Token), share.TokenHash);
-        Assert.NotEqual(created.Token, share.TokenHash);
-        Assert.Equal(3, share.MaxStreams);
-        Assert.Equal(8_000_000, share.MaxBitrate);
-        Assert.True(share.Enabled);
-        Assert.Equal([FakeLibraries.MoviesId], share.LibraryIds);
-        Assert.NotNull(_tokens.Verify(created.Token, _config.Current.Shares));
-        Assert.True(_saver.Saves >= 1);
-        Assert.Equal(created.Id, Assert.Single(_saver.Saved!.Shares).Id);
+        created.Token.ShouldStartWith("js1_", Case.Sensitive);
+        var share = _config.Current.Shares.ShouldHaveSingleItem();
+        share.Id.ShouldBe(created.Id);
+        share.Name.ShouldBe("bob");
+        share.TokenHash.ShouldBe(Sha256Hex(created.Token));
+        share.TokenHash.ShouldNotBe(created.Token);
+        share.MaxStreams.ShouldBe(3);
+        share.MaxBitrate.ShouldBe(8_000_000);
+        share.Enabled.ShouldBeTrue();
+        share.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+        _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
+        (_saver.Saves >= 1).ShouldBeTrue();
+        _saver.Saved!.Shares.ShouldHaveSingleItem().Id.ShouldBe(created.Id);
     }
 
     [Fact]
     public void CreateShare_TwoCalls_GiveDifferentTokens()
     {
-        Assert.NotEqual(CreateShare("a").Token, CreateShare("b").Token);
+        CreateShare("b").Token.ShouldNotBe(CreateShare("a").Token);
     }
 
     [Fact]
@@ -182,9 +181,9 @@ public sealed class AdminControllerTests : IDisposable
         var created = CreateShare();
         var json = JsonSerializer.Serialize(Status());
 
-        Assert.DoesNotContain(created.Token, json, StringComparison.Ordinal);
-        Assert.DoesNotContain(Sha256Hex(created.Token), json, StringComparison.Ordinal);
-        Assert.DoesNotContain("TokenHash", json, StringComparison.OrdinalIgnoreCase);
+        json.ShouldNotContain(created.Token, Case.Sensitive);
+        json.ShouldNotContain(Sha256Hex(created.Token), Case.Sensitive);
+        json.ShouldNotContain("TokenHash", Case.Insensitive);
     }
 
     [Theory]
@@ -198,9 +197,9 @@ public sealed class AdminControllerTests : IDisposable
     {
         var result = Run(_c.CreateShare(new CreateShareRequest(name, [FakeLibraries.MoviesId], streams, bitrate)));
 
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Empty(_config.Current.Shares);
-        Assert.Equal(0, _saver.Saves);
+        result.ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Shares.ShouldBeEmpty();
+        _saver.Saves.ShouldBe(0);
     }
 
     [Fact]
@@ -208,14 +207,14 @@ public sealed class AdminControllerTests : IDisposable
     {
         var result = Run(_c.CreateShare(new CreateShareRequest("bob", [Guid.NewGuid()], 2, null)));
 
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Empty(_config.Current.Shares);
+        result.ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Shares.ShouldBeEmpty();
     }
 
     [Fact]
     public void CreateShare_NullBody_IsBadRequest()
     {
-        Assert.IsType<BadRequestObjectResult>(Run(_c.CreateShare(null!)));
+        Run(_c.CreateShare(null!)).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -228,27 +227,27 @@ public sealed class AdminControllerTests : IDisposable
 
         var view = Value<ShareView>(result);
         var share = _config.Current.Shares.Single();
-        Assert.Equal("bobby", share.Name);
-        Assert.Equal([FakeLibraries.ShowsId, FakeLibraries.MoviesId], share.LibraryIds);
-        Assert.Equal(5, share.MaxStreams);
-        Assert.Equal(4_000_000, share.MaxBitrate);
-        Assert.False(share.Enabled);
-        Assert.Equal(hashBefore, share.TokenHash);
-        Assert.Equal("bobby", Assert.Single(_saver.Saved!.Shares).Name);
-        Assert.Equal(created.Id, view.Id);
-        Assert.False(view.Enabled);
-        Assert.Null(_tokens.Verify(created.Token, _config.Current.Shares));
+        share.Name.ShouldBe("bobby");
+        share.LibraryIds.ShouldBe([FakeLibraries.ShowsId, FakeLibraries.MoviesId]);
+        share.MaxStreams.ShouldBe(5);
+        share.MaxBitrate.ShouldBe(4_000_000);
+        share.Enabled.ShouldBeFalse();
+        share.TokenHash.ShouldBe(hashBefore);
+        _saver.Saved!.Shares.ShouldHaveSingleItem().Name.ShouldBe("bobby");
+        view.Id.ShouldBe(created.Id);
+        view.Enabled.ShouldBeFalse();
+        _tokens.Verify(created.Token, _config.Current.Shares).ShouldBeNull();
 
         Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.MoviesId], 5, null, true)));
-        Assert.NotNull(_tokens.Verify(created.Token, _config.Current.Shares));
-        Assert.Null(_config.Current.Shares.Single().MaxBitrate);
+        _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
+        _config.Current.Shares.Single().MaxBitrate.ShouldBeNull();
     }
 
     [Fact]
     public void UpdateShare_Unknown_IsNotFound()
     {
         var result = Run(_c.UpdateShare(Guid.NewGuid(), new UpdateShareRequest("x", [], 2, null, true)));
-        Assert.IsType<NotFoundObjectResult>(result);
+        result.ShouldBeOfType<NotFoundObjectResult>();
     }
 
     [Fact]
@@ -259,9 +258,9 @@ public sealed class AdminControllerTests : IDisposable
 
         var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("", [FakeLibraries.MoviesId], 2, null, true)));
 
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Equal("bob", _config.Current.Shares.Single().Name);
-        Assert.Equal(saves, _saver.Saves);
+        result.ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Shares.Single().Name.ShouldBe("bob");
+        _saver.Saves.ShouldBe(saves);
     }
 
     [Fact]
@@ -269,21 +268,21 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare();
         var other = CreateShare("carol");
-        Assert.NotNull(_tokens.Verify(created.Token, _config.Current.Shares));
+        _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
 
         var result = Run(_c.DeleteShare(created.Id));
 
-        Assert.IsType<NoContentResult>(result);
-        Assert.Null(_tokens.Verify(created.Token, _config.Current.Shares));
-        Assert.NotNull(_tokens.Verify(other.Token, _config.Current.Shares));
-        Assert.Equal(other.Id, Assert.Single(_config.Current.Shares).Id);
-        Assert.Equal(other.Id, Assert.Single(_saver.Saved!.Shares).Id);
+        result.ShouldBeOfType<NoContentResult>();
+        _tokens.Verify(created.Token, _config.Current.Shares).ShouldBeNull();
+        _tokens.Verify(other.Token, _config.Current.Shares).ShouldNotBeNull();
+        _config.Current.Shares.ShouldHaveSingleItem().Id.ShouldBe(other.Id);
+        _saver.Saved!.Shares.ShouldHaveSingleItem().Id.ShouldBe(other.Id);
     }
 
     [Fact]
     public void RevokeShare_Unknown_IsNotFound()
     {
-        Assert.IsType<NotFoundObjectResult>(Run(_c.DeleteShare(Guid.NewGuid())));
+        Run(_c.DeleteShare(Guid.NewGuid())).ShouldBeOfType<NotFoundObjectResult>();
     }
 
     // ---- peers ----
@@ -296,18 +295,18 @@ public sealed class AdminControllerTests : IDisposable
         var result = Run(_c.AddPeer(new AddPeerRequest("  carol ", " http://carol:8096/jellyfin/ ", Token, null)));
 
         var view = Value<PeerView>(result);
-        Assert.Equal("carol", view.Name);
-        Assert.Equal("http://carol:8096/jellyfin", view.BaseUrl);
-        Assert.True(view.HasToken);
-        Assert.True(view.Enabled);
-        Assert.Equal(5, view.Priority);
-        Assert.DoesNotContain(Token, JsonSerializer.Serialize(view), StringComparison.Ordinal);
+        view.Name.ShouldBe("carol");
+        view.BaseUrl.ShouldBe("http://carol:8096/jellyfin");
+        view.HasToken.ShouldBeTrue();
+        view.Enabled.ShouldBeTrue();
+        view.Priority.ShouldBe(5);
+        JsonSerializer.Serialize(view).ShouldNotContain(Token, Case.Sensitive);
         var stored = _config.Current.Peers.Single(p => p.Name == "carol");
-        Assert.Equal(Token, stored.Token);
-        Assert.NotEqual(Guid.Empty, stored.Id);
-        Assert.Equal(view.Id, stored.Id);
-        Assert.True(_saver.Saves >= 1);
-        Assert.Contains(_saver.Saved!.Peers, p => p.Id == view.Id);
+        stored.Token.ShouldBe(Token);
+        stored.Id.ShouldNotBe(Guid.Empty);
+        stored.Id.ShouldBe(view.Id);
+        (_saver.Saves >= 1).ShouldBeTrue();
+        _saver.Saved!.Peers.ShouldContain(p => p.Id == view.Id);
     }
 
     [Theory]
@@ -320,8 +319,8 @@ public sealed class AdminControllerTests : IDisposable
     {
         var result = Run(_c.AddPeer(new AddPeerRequest(name, url, token, true)));
 
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Empty(_config.Current.Peers);
+        result.ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Peers.ShouldBeEmpty();
     }
 
     [Fact]
@@ -333,12 +332,12 @@ public sealed class AdminControllerTests : IDisposable
 
         var view = Value<PeerView>(result);
         var stored = _config.Current.Peers.Single();
-        Assert.Equal("alice2", stored.Name);
-        Assert.Equal("http://alice2:8096", stored.BaseUrl);
-        Assert.False(stored.Enabled);
-        Assert.Equal(Token, stored.Token);
-        Assert.Equal(peer.Priority, stored.Priority);
-        Assert.False(view.Enabled);
+        stored.Name.ShouldBe("alice2");
+        stored.BaseUrl.ShouldBe("http://alice2:8096");
+        stored.Enabled.ShouldBeFalse();
+        stored.Token.ShouldBe(Token);
+        stored.Priority.ShouldBe(peer.Priority);
+        view.Enabled.ShouldBeFalse();
     }
 
     [Fact]
@@ -348,8 +347,8 @@ public sealed class AdminControllerTests : IDisposable
 
         Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice", peer.BaseUrl, "js1_new", true)));
 
-        Assert.Equal("js1_new", _config.Current.Peers.Single().Token);
-        Assert.Equal("js1_new", Assert.Single(_saver.Saved!.Peers).Token);
+        _config.Current.Peers.Single().Token.ShouldBe("js1_new");
+        _saver.Saved!.Peers.ShouldHaveSingleItem().Token.ShouldBe("js1_new");
     }
 
     [Fact]
@@ -360,13 +359,13 @@ public sealed class AdminControllerTests : IDisposable
 
         Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("renamed", "http://other:8096", "js1_new", false)));
 
-        Assert.Equal("alice", peer.Name);
-        Assert.Equal("http://alice:8096", peer.BaseUrl);
-        Assert.Equal(Token, peer.Token);
-        Assert.True(peer.Enabled);
-        Assert.NotSame(listBefore, _config.Current.Peers);
-        Assert.NotSame(peer, _config.Current.Peers.Single());
-        Assert.Equal("renamed", Assert.Single(_saver.Saved!.Peers).Name);
+        peer.Name.ShouldBe("alice");
+        peer.BaseUrl.ShouldBe("http://alice:8096");
+        peer.Token.ShouldBe(Token);
+        peer.Enabled.ShouldBeTrue();
+        _config.Current.Peers.ShouldNotBeSameAs(listBefore);
+        _config.Current.Peers.Single().ShouldNotBeSameAs(peer);
+        _saver.Saved!.Peers.ShouldHaveSingleItem().Name.ShouldBe("renamed");
     }
 
     [Fact]
@@ -377,12 +376,12 @@ public sealed class AdminControllerTests : IDisposable
 
         Run(_c.UpdateShare(created.Id, new UpdateShareRequest("renamed", [FakeLibraries.ShowsId], 7, 1_000_000, false)));
 
-        Assert.Equal("bob", before.Name);
-        Assert.Equal(2, before.MaxStreams);
-        Assert.True(before.Enabled);
-        Assert.NotSame(before, _config.Current.Shares.Single());
-        Assert.Equal("renamed", _config.Current.Shares.Single().Name);
-        Assert.Equal("renamed", Assert.Single(_saver.Saved!.Shares).Name);
+        before.Name.ShouldBe("bob");
+        before.MaxStreams.ShouldBe(2);
+        before.Enabled.ShouldBeTrue();
+        _config.Current.Shares.Single().ShouldNotBeSameAs(before);
+        _config.Current.Shares.Single().Name.ShouldBe("renamed");
+        _saver.Saved!.Shares.ShouldHaveSingleItem().Name.ShouldBe("renamed");
     }
 
     [Fact]
@@ -393,9 +392,9 @@ public sealed class AdminControllerTests : IDisposable
 
         Run(_c.ReorderPeers(new ReorderPeersRequest([b.Id, a.Id])));
 
-        Assert.Equal(0, a.Priority);
-        Assert.Equal(1, b.Priority);
-        Assert.Equal(["b", "a"], Status().Peers.Select(p => p.Name));
+        a.Priority.ShouldBe(0);
+        b.Priority.ShouldBe(1);
+        Status().Peers.Select(p => p.Name).ShouldBe(["b", "a"]);
     }
 
     [Theory]
@@ -403,18 +402,18 @@ public sealed class AdminControllerTests : IDisposable
     [InlineData("js1_bad\u0000token")]
     public void Peer_TokenWithControlCharacters_IsBadRequest(string token)
     {
-        Assert.IsType<BadRequestObjectResult>(Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", token, true))));
-        Assert.Empty(_config.Current.Peers);
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", token, true))).ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Peers.ShouldBeEmpty();
         var peer = SeedPeer();
-        Assert.IsType<BadRequestObjectResult>(Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("n", "http://x:8096", token, true))));
-        Assert.Equal(Token, _config.Current.Peers.Single().Token);
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("n", "http://x:8096", token, true))).ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Peers.Single().Token.ShouldBe(Token);
     }
 
     [Fact]
     public void Peer_TokenLongerThan512_IsBadRequest_512IsFine()
     {
-        Assert.IsType<BadRequestObjectResult>(Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 513), true))));
-        Assert.IsType<OkObjectResult>(Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 512), true))));
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 513), true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 512), true))).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
@@ -423,11 +422,11 @@ public sealed class AdminControllerTests : IDisposable
         foreach (var token in new[] { "js1_bad\ntoken", new string('a', 513) })
         {
             var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", token), CancellationToken.None));
-            Assert.False(response.Ok);
-            Assert.Contains("token", response.Error, StringComparison.OrdinalIgnoreCase);
+            response.Ok.ShouldBeFalse();
+            response.Error.ShouldContain("token", Case.Insensitive);
         }
 
-        Assert.Empty(_peers.PingedUrls);
+        _peers.PingedUrls.ShouldBeEmpty();
     }
 
     [Theory]
@@ -438,9 +437,9 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare();
 
-        Assert.IsType<BadRequestObjectResult>(Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], streams, null))));
-        Assert.IsType<BadRequestObjectResult>(Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], streams, null, true))));
-        Assert.Equal(2, _config.Current.Shares.Single().MaxStreams);
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], streams, null))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], streams, null, true))).ShouldBeOfType<BadRequestObjectResult>();
+        _config.Current.Shares.Single().MaxStreams.ShouldBe(2);
     }
 
     [Fact]
@@ -448,17 +447,17 @@ public sealed class AdminControllerTests : IDisposable
     {
         var created = CreateShare();
 
-        Assert.IsType<BadRequestObjectResult>(Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_001))));
-        Assert.IsType<BadRequestObjectResult>(Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], 2, int.MaxValue, true))));
-        Assert.IsType<OkObjectResult>(Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_000))));
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_001))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], 2, int.MaxValue, true))).ShouldBeOfType<BadRequestObjectResult>();
+        Run(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_000))).ShouldBeOfType<OkObjectResult>();
     }
 
     [Fact]
     public void UpdatePeer_Unknown_IsNotFound_InvalidUrl_IsBadRequest()
     {
-        Assert.IsType<NotFoundObjectResult>(Run(_c.UpdatePeer(Guid.NewGuid(), new UpdatePeerRequest("a", "http://x", null, true))));
+        Run(_c.UpdatePeer(Guid.NewGuid(), new UpdatePeerRequest("a", "http://x", null, true))).ShouldBeOfType<NotFoundObjectResult>();
         var peer = SeedPeer();
-        Assert.IsType<BadRequestObjectResult>(Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("a", "nope", null, true))));
+        Run(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("a", "nope", null, true))).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -467,11 +466,11 @@ public sealed class AdminControllerTests : IDisposable
         var a = SeedPeer("a", 0);
         var b = SeedPeer("b", 1);
 
-        Assert.IsType<NoContentResult>(Run(_c.DeletePeer(a.Id)));
+        Run(_c.DeletePeer(a.Id)).ShouldBeOfType<NoContentResult>();
 
-        Assert.Equal(b.Id, Assert.Single(_config.Current.Peers).Id);
-        Assert.Equal(b.Id, Assert.Single(_saver.Saved!.Peers).Id);
-        Assert.IsType<NotFoundObjectResult>(Run(_c.DeletePeer(a.Id)));
+        _config.Current.Peers.ShouldHaveSingleItem().Id.ShouldBe(b.Id);
+        _saver.Saved!.Peers.ShouldHaveSingleItem().Id.ShouldBe(b.Id);
+        Run(_c.DeletePeer(a.Id)).ShouldBeOfType<NotFoundObjectResult>();
     }
 
     [Fact]
@@ -484,10 +483,10 @@ public sealed class AdminControllerTests : IDisposable
 
         var result = Run(_c.ReorderPeers(new ReorderPeersRequest([c.Id, Guid.NewGuid(), a.Id])));
 
-        Assert.IsType<NoContentResult>(result);
-        Assert.Equal(["c", "a", "b", "d"], Status().Peers.Select(p => p.Name));
-        Assert.Equal([0, 1, 2, 3], _config.Current.Peers.OrderBy(p => p.Priority).Select(p => p.Priority));
-        Assert.Equal(["c", "a", "b", "d"], _saver.Saved!.Peers.OrderBy(p => p.Priority).Select(p => p.Name));
+        result.ShouldBeOfType<NoContentResult>();
+        Status().Peers.Select(p => p.Name).ShouldBe(["c", "a", "b", "d"]);
+        _config.Current.Peers.OrderBy(p => p.Priority).Select(p => p.Priority).ShouldBe([0, 1, 2, 3]);
+        _saver.Saved!.Peers.OrderBy(p => p.Priority).Select(p => p.Name).ShouldBe(["c", "a", "b", "d"]);
         _ = (a, b, c, d);
     }
 
@@ -502,13 +501,13 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(" http://alice:8096/ ", Token), CancellationToken.None));
 
-        Assert.True(response.Ok, response.Error);
-        Assert.Equal("Alice", response.ServerName);
-        Assert.Equal("1.0", response.ProtocolVersion);
-        Assert.Equal(2, response.Titles);
-        Assert.Null(response.Error);
-        Assert.Equal("http://alice:8096/", _peers.PingedUrls.Single().Trim() + "/");
-        Assert.Empty(_config.Current.Peers);
+        response.Ok.ShouldBeTrue(response.Error);
+        response.ServerName.ShouldBe("Alice");
+        response.ProtocolVersion.ShouldBe("1.0");
+        response.Titles.ShouldBe(2);
+        response.Error.ShouldBeNull();
+        (_peers.PingedUrls.Single().Trim() + "/").ShouldBe("http://alice:8096/");
+        _config.Current.Peers.ShouldBeEmpty();
     }
 
     public static IEnumerable<object[]> TestFailures() =>
@@ -529,10 +528,10 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, Token), CancellationToken.None));
 
-        Assert.False(response.Ok);
-        Assert.Contains(expected, response.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Token, response.Error!, StringComparison.Ordinal);
-        Assert.Empty(_peers.Fetches);
+        response.Ok.ShouldBeFalse();
+        response.Error.ShouldContain(expected, Case.Insensitive);
+        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        _peers.Fetches.ShouldBeEmpty();
     }
 
     [Theory]
@@ -550,10 +549,10 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", Token), CancellationToken.None));
 
-        Assert.False(response.Ok);
-        Assert.Contains(expected, response.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Token, response.Error!, StringComparison.Ordinal);
-        Assert.DoesNotContain(Token, JsonSerializer.Serialize(response), StringComparison.Ordinal);
+        response.Ok.ShouldBeFalse();
+        response.Error.ShouldContain(expected, Case.Insensitive);
+        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        JsonSerializer.Serialize(response).ShouldNotContain(Token, Case.Sensitive);
     }
 
     [Fact]
@@ -561,9 +560,9 @@ public sealed class AdminControllerTests : IDisposable
     {
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", "  "), CancellationToken.None));
 
-        Assert.False(response.Ok);
-        Assert.Contains("token", response.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(_peers.PingedUrls);
+        response.Ok.ShouldBeFalse();
+        response.Error.ShouldContain("token", Case.Insensitive);
+        _peers.PingedUrls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -576,8 +575,8 @@ public sealed class AdminControllerTests : IDisposable
         // The fake keys catalogs by peer id, so the controller must test with the saved peer's id and stored token.
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(peer.BaseUrl, "", peer.Id), CancellationToken.None));
 
-        Assert.True(response.Ok, response.Error);
-        Assert.Equal(1, response.Titles);
+        response.Ok.ShouldBeTrue(response.Error);
+        response.Titles.ShouldBe(1);
     }
 
     [Theory]
@@ -591,7 +590,7 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, "", peer.Id), CancellationToken.None));
 
-        Assert.True(response.Ok, response.Error);
+        response.Ok.ShouldBeTrue(response.Error);
     }
 
     [Theory]
@@ -607,11 +606,11 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, "", peer.Id), CancellationToken.None));
 
-        Assert.False(response.Ok);
-        Assert.Contains("token", response.Error, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain(Token, response.Error!, StringComparison.Ordinal);
-        Assert.Empty(_peers.PingedUrls);
-        Assert.Empty(_peers.Fetches);
+        response.Ok.ShouldBeFalse();
+        response.Error.ShouldContain("token", Case.Insensitive);
+        response.Error!.ShouldNotContain(Token, Case.Sensitive);
+        _peers.PingedUrls.ShouldBeEmpty();
+        _peers.Fetches.ShouldBeEmpty();
     }
 
     [Fact]
@@ -622,8 +621,8 @@ public sealed class AdminControllerTests : IDisposable
 
         var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://other:8096", "js1_typed", peer.Id), CancellationToken.None));
 
-        Assert.True(response.Ok, response.Error);
-        Assert.Equal("http://other:8096", _peers.PingedUrls.Single());
+        response.Ok.ShouldBeTrue(response.Error);
+        _peers.PingedUrls.Single().ShouldBe("http://other:8096");
     }
 
     // ---- sync ----
@@ -631,13 +630,13 @@ public sealed class AdminControllerTests : IDisposable
     [Fact]
     public void Sync_StartsInBackground_Returns202_AndStatusShowsRunning()
     {
-        var result = Assert.IsAssignableFrom<ObjectResult>(Run(_c.Sync()));
+        var result = Run(_c.Sync()).ShouldBeAssignableTo<ObjectResult>();
 
-        Assert.Equal(202, result.StatusCode);
-        Assert.Equal(new SyncStartResponse(true, false), result.Value);
-        Assert.Equal(1, _sync.BackgroundStarts);
-        Assert.Equal(0, _sync.Runs);
-        Assert.True(Status().SyncRunning);
+        result.StatusCode.ShouldBe(202);
+        result.Value.ShouldBe(new SyncStartResponse(true, false));
+        _sync.BackgroundStarts.ShouldBe(1);
+        _sync.Runs.ShouldBe(0);
+        Status().SyncRunning.ShouldBeTrue();
     }
 
     [Fact]
@@ -645,11 +644,11 @@ public sealed class AdminControllerTests : IDisposable
     {
         _sync.IsRunning = true;
 
-        var result = Assert.IsAssignableFrom<ObjectResult>(Run(_c.Sync()));
+        var result = Run(_c.Sync()).ShouldBeAssignableTo<ObjectResult>();
 
-        Assert.Equal(202, result.StatusCode);
-        Assert.Equal(new SyncStartResponse(false, true), result.Value);
-        Assert.Equal(0, _sync.BackgroundStarts);
+        result.StatusCode.ShouldBe(202);
+        result.Value.ShouldBe(new SyncStartResponse(false, true));
+        _sync.BackgroundStarts.ShouldBe(0);
     }
 
     [Fact]
@@ -657,8 +656,8 @@ public sealed class AdminControllerTests : IDisposable
     {
         _sync.LastError = "JellyShare: the movie and show placeholder folders must be separate";
 
-        Assert.Contains("separate", Status().SyncError, StringComparison.Ordinal);
-        Assert.False(Status().SyncRunning);
+        Status().SyncError.ShouldContain("separate", Case.Sensitive);
+        Status().SyncRunning.ShouldBeFalse();
     }
 
     [Fact]
@@ -667,9 +666,9 @@ public sealed class AdminControllerTests : IDisposable
         var peer = SeedPeer();
         _sync.IsRunning = true;
 
-        Assert.IsType<NoContentResult>(Run(_c.DeletePeer(peer.Id)));
+        Run(_c.DeletePeer(peer.Id)).ShouldBeOfType<NoContentResult>();
 
-        Assert.True(_sync.LastQueueIfRunning);
+        _sync.LastQueueIfRunning.ShouldBe(true);
     }
 
     // ---- status ----
@@ -693,25 +692,25 @@ public sealed class AdminControllerTests : IDisposable
 
         var s = Status();
 
-        Assert.Equal(ProtocolInfo.Version, s.ProtocolVersion);
-        Assert.Equal("Alice", s.ServerName);
-        var share = Assert.Single(s.Shares);
-        Assert.Equal(created.Id, share.Id);
-        Assert.Equal(2, share.ActiveStreams);
-        Assert.Equal(5_000_000, share.MaxBitrate);
-        Assert.Equal(["alice", "bob2"], s.Peers.Select(p => p.Name));
-        Assert.Equal(when, s.Peers[0].LastSuccessUtc);
-        Assert.Equal(3, s.Peers[0].Titles);
-        Assert.Null(s.Peers[0].LastError);
-        Assert.Equal("HTTP 401", s.Peers[1].LastError);
-        Assert.Equal(when, s.Peers[1].FailingSinceUtc);
-        Assert.True(s.Peers[0].HasToken);
-        Assert.Equal(3, s.LastSync!.Offered);
-        Assert.Equal(_config.Current.MoviesPlaceholderPath, s.Movies.Path);
-        Assert.Equal(_config.Current.ShowsPlaceholderPath, s.Shows.Path);
-        Assert.False(s.Movies.Attached);
-        Assert.False(s.Shows.Attached);
-        Assert.Equal(3, s.Libraries.Count);
+        s.ProtocolVersion.ShouldBe(ProtocolInfo.Version);
+        s.ServerName.ShouldBe("Alice");
+        var share = s.Shares.ShouldHaveSingleItem();
+        share.Id.ShouldBe(created.Id);
+        share.ActiveStreams.ShouldBe(2);
+        share.MaxBitrate.ShouldBe(5_000_000);
+        s.Peers.Select(p => p.Name).ShouldBe(["alice", "bob2"]);
+        s.Peers[0].LastSuccessUtc.ShouldBe(when);
+        s.Peers[0].Titles.ShouldBe(3);
+        s.Peers[0].LastError.ShouldBeNull();
+        s.Peers[1].LastError.ShouldBe("HTTP 401");
+        s.Peers[1].FailingSinceUtc.ShouldBe(when);
+        s.Peers[0].HasToken.ShouldBeTrue();
+        s.LastSync!.Offered.ShouldBe(3);
+        s.Movies.Path.ShouldBe(_config.Current.MoviesPlaceholderPath);
+        s.Shows.Path.ShouldBe(_config.Current.ShowsPlaceholderPath);
+        s.Movies.Attached.ShouldBeFalse();
+        s.Shows.Attached.ShouldBeFalse();
+        s.Libraries.Count.ShouldBe(3);
     }
 
     [Fact]
@@ -722,12 +721,12 @@ public sealed class AdminControllerTests : IDisposable
 
         var s = Status();
 
-        Assert.True(s.Movies.Attached);
-        Assert.Equal(FakeLibraries.MoviesId, s.Movies.LibraryId);
-        Assert.Equal("Movies", s.Movies.LibraryName);
-        Assert.True(s.Shows.Attached);
-        Assert.Equal("Shows", s.Shows.LibraryName);
-        Assert.False(s.Shows.AutomaticSeriesGrouping);
+        s.Movies.Attached.ShouldBeTrue();
+        s.Movies.LibraryId.ShouldBe(FakeLibraries.MoviesId);
+        s.Movies.LibraryName.ShouldBe("Movies");
+        s.Shows.Attached.ShouldBeTrue();
+        s.Shows.LibraryName.ShouldBe("Shows");
+        s.Shows.AutomaticSeriesGrouping.ShouldBe(false);
     }
 
     [Fact]
@@ -735,10 +734,10 @@ public sealed class AdminControllerTests : IDisposable
     {
         SeedPeer();
 
-        var peer = Assert.Single(Status().Peers);
+        var peer = Status().Peers.ShouldHaveSingleItem();
 
-        Assert.Null(peer.LastSuccessUtc);
-        Assert.Null(peer.Titles);
+        peer.LastSuccessUtc.ShouldBeNull();
+        peer.Titles.ShouldBeNull();
     }
 
     // ---- attach ----
@@ -749,9 +748,9 @@ public sealed class AdminControllerTests : IDisposable
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 
         var root = Value<PlaceholderRootView>(result);
-        Assert.Equal(("Movies", _config.Current.MoviesPlaceholderPath), Assert.Single(_libs.Added));
-        Assert.True(root.Attached);
-        Assert.True(File.Exists(Path.Combine(_config.Current.MoviesPlaceholderPath, ".jellyshare")));
+        _libs.Added.ShouldHaveSingleItem().ShouldBe(("Movies", _config.Current.MoviesPlaceholderPath));
+        root.Attached.ShouldBeTrue();
+        File.Exists(Path.Combine(_config.Current.MoviesPlaceholderPath, ".jellyshare")).ShouldBeTrue();
     }
 
     [Fact]
@@ -759,7 +758,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         await _c.Attach(new AttachLibraryRequest(FakeLibraries.ShowsId, "shows"), CancellationToken.None);
 
-        Assert.Equal(("Shows", _config.Current.ShowsPlaceholderPath), Assert.Single(_libs.Added));
+        _libs.Added.ShouldHaveSingleItem().ShouldBe(("Shows", _config.Current.ShowsPlaceholderPath));
     }
 
     [Theory]
@@ -771,24 +770,24 @@ public sealed class AdminControllerTests : IDisposable
     {
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, type), CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
-        Assert.Empty(_libs.Added);
+        result.ShouldBeOfType<BadRequestObjectResult>();
+        _libs.Added.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Attach_LibraryOfWrongKind_IsBadRequest()
     {
-        Assert.IsType<BadRequestObjectResult>(await _c.Attach(new AttachLibraryRequest(FakeLibraries.ShowsId, "Movies"), CancellationToken.None));
-        Assert.IsType<BadRequestObjectResult>(await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Shows"), CancellationToken.None));
-        Assert.IsType<BadRequestObjectResult>(await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Movies"), CancellationToken.None));
-        Assert.Empty(_libs.Added);
+        (await _c.Attach(new AttachLibraryRequest(FakeLibraries.ShowsId, "Movies"), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        (await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Shows"), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        (await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Movies"), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+        _libs.Added.ShouldBeEmpty();
     }
 
     [Fact]
     public async Task Attach_UnknownLibrary_IsNotFound()
     {
-        Assert.IsType<NotFoundObjectResult>(await _c.Attach(new AttachLibraryRequest(Guid.NewGuid(), "Movies"), CancellationToken.None));
-        Assert.Empty(_libs.Added);
+        (await _c.Attach(new AttachLibraryRequest(Guid.NewGuid(), "Movies"), CancellationToken.None)).ShouldBeOfType<NotFoundObjectResult>();
+        _libs.Added.ShouldBeEmpty();
     }
 
     [Fact]
@@ -797,8 +796,8 @@ public sealed class AdminControllerTests : IDisposable
         await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
         var again = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 
-        Assert.Single(_libs.Added);
-        Assert.True(Value<PlaceholderRootView>(again).Attached);
+        _libs.Added.ShouldHaveSingleItem();
+        Value<PlaceholderRootView>(again).Attached.ShouldBeTrue();
     }
 
     [Theory]
@@ -812,11 +811,11 @@ public sealed class AdminControllerTests : IDisposable
 
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 
-        var obj = Assert.IsAssignableFrom<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        var message = Assert.IsType<ErrorResponse>(obj.Value).Error;
-        Assert.Contains("boom from Jellyfin", message, StringComparison.Ordinal);
-        Assert.Contains("Could not add", message, StringComparison.Ordinal);
+        var obj = result.ShouldBeAssignableTo<ObjectResult>();
+        obj.StatusCode.ShouldBe(500);
+        var message = obj.Value.ShouldBeOfType<ErrorResponse>().Error;
+        message.ShouldContain("boom from Jellyfin", Case.Sensitive);
+        message.ShouldContain("Could not add", Case.Sensitive);
     }
 
     [Fact]
@@ -824,8 +823,7 @@ public sealed class AdminControllerTests : IDisposable
     {
         _libs.AddThrows = new OperationCanceledException();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(
-            () => _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None));
+        await Should.ThrowAsync<OperationCanceledException>(() => _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None));
     }
 
     [Fact]
@@ -835,8 +833,8 @@ public sealed class AdminControllerTests : IDisposable
 
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 
-        Assert.IsType<ConflictObjectResult>(result);
-        Assert.Empty(_libs.Added);
+        result.ShouldBeOfType<ConflictObjectResult>();
+        _libs.Added.ShouldBeEmpty();
     }
 
     [Fact]
@@ -848,8 +846,8 @@ public sealed class AdminControllerTests : IDisposable
 
         var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
 
-        Assert.Contains(".jellyshare", ErrorOf(Assert.IsType<ConflictObjectResult>(result)), StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(root, ".jellyshare")));
-        Assert.Empty(_libs.Added);
+        ErrorOf(result.ShouldBeOfType<ConflictObjectResult>()).ShouldContain(".jellyshare", Case.Sensitive);
+        File.Exists(Path.Combine(root, ".jellyshare")).ShouldBeFalse();
+        _libs.Added.ShouldBeEmpty();
     }
 }

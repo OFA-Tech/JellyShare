@@ -1,10 +1,9 @@
 using System.Text.RegularExpressions;
 using JellyShare.Jellyfin;
-using Xunit;
 
 namespace JellyShare.JellyfinTests;
 
-public class PluginTests
+public sealed class PluginTests
 {
     [Fact]
     public void PluginId_MatchesBuildYamlGuid()
@@ -15,16 +14,16 @@ public class PluginTests
             dir = dir.Parent;
         }
 
-        Assert.NotNull(dir);
+        dir.ShouldNotBeNull();
         var yaml = File.ReadAllText(Path.Combine(dir!.FullName, "build.yaml"));
         var match = Regex.Match(yaml, @"^guid:\s*""?([0-9a-fA-F-]{36})""?\s*$", RegexOptions.Multiline);
-        Assert.True(match.Success, "build.yaml has no guid line");
-        Assert.Equal(Guid.Parse(match.Groups[1].Value), Plugin.PluginId);
+        match.Success.ShouldBeTrue("build.yaml has no guid line");
+        Plugin.PluginId.ShouldBe(Guid.Parse(match.Groups[1].Value));
     }
 
     [Fact]
     public void PluginName_IsJellyShare()
     {
-        Assert.Equal("JellyShare", Plugin.PluginName);
+        Plugin.PluginName.ShouldBe("JellyShare");
     }
 }

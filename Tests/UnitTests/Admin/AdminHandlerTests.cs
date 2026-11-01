@@ -4,7 +4,6 @@ using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Requests.Admin;
 using JellyShare.Domain.Models.Requests.Sync;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Admin;
 
@@ -28,18 +27,18 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new GetStatusQuery());
 
-        Assert.True(result.IsSuccess);
+        result.IsSuccess.ShouldBeTrue();
         var status = result.Value;
-        Assert.Equal(ProtocolInfo.Version, status.ProtocolVersion);
-        Assert.Equal("Alice", status.ServerName);
-        Assert.Equal("bob", Assert.Single(status.Shares).Name);
-        Assert.Equal(["first", "second"], status.Peers.Select(p => p.Name));
-        Assert.True(status.Movies.Attached);
-        Assert.Equal(FakeLibraries.MoviesId, status.Movies.LibraryId);
-        Assert.False(status.Shows.Attached);
-        Assert.True(status.SyncRunning);
-        Assert.Equal("boom", status.SyncError);
-        Assert.Equal(3, status.Libraries.Count);
+        status.ProtocolVersion.ShouldBe(ProtocolInfo.Version);
+        status.ServerName.ShouldBe("Alice");
+        status.Shares.ShouldHaveSingleItem().Name.ShouldBe("bob");
+        status.Peers.Select(p => p.Name).ShouldBe(["first", "second"]);
+        status.Movies.Attached.ShouldBeTrue();
+        status.Movies.LibraryId.ShouldBe(FakeLibraries.MoviesId);
+        status.Shows.Attached.ShouldBeFalse();
+        status.SyncRunning.ShouldBeTrue();
+        status.SyncError.ShouldBe("boom");
+        status.Libraries.Count.ShouldBe(3);
     }
 
     // ---- start sync ----
@@ -49,9 +48,9 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var result = await _h.Send(new StartSyncCommand());
 
-        Assert.True(result.Value.Started);
-        Assert.False(result.Value.AlreadyRunning);
-        Assert.Equal(1, _h.Sync.BackgroundStarts);
+        result.Value.Started.ShouldBeTrue();
+        result.Value.AlreadyRunning.ShouldBeFalse();
+        _h.Sync.BackgroundStarts.ShouldBe(1);
     }
 
     [Fact]
@@ -61,8 +60,8 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new StartSyncCommand());
 
-        Assert.False(result.Value.Started);
-        Assert.True(result.Value.AlreadyRunning);
+        result.Value.Started.ShouldBeFalse();
+        result.Value.AlreadyRunning.ShouldBeTrue();
     }
 
     // ---- attach ----
@@ -72,10 +71,10 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "movies"));
 
-        Assert.True(result.IsSuccess);
-        Assert.True(result.Value.Attached);
-        Assert.Equal(("Movies", _h.Config.Settings.MoviesPlaceholderPath), Assert.Single(_h.Libraries.Added));
-        Assert.True(File.Exists(Path.Combine(_h.Config.Settings.MoviesPlaceholderPath, ".jellyshare")));
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.Attached.ShouldBeTrue();
+        _h.Libraries.Added.ShouldHaveSingleItem().ShouldBe(("Movies", _h.Config.Settings.MoviesPlaceholderPath));
+        File.Exists(Path.Combine(_h.Config.Settings.MoviesPlaceholderPath, ".jellyshare")).ShouldBeTrue();
     }
 
     [Fact]
@@ -83,8 +82,8 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Music"));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal("Type must be Movies or Shows.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe("Type must be Movies or Shows.");
     }
 
     [Fact]
@@ -94,8 +93,8 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.ShowsId, "Shows"));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal("The placeholder folder is not configured.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe("The placeholder folder is not configured.");
     }
 
     [Fact]
@@ -103,8 +102,8 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var result = await _h.Send(new AttachLibraryCommand(Guid.NewGuid(), "Movies"));
 
-        Assert.Equal(ErrorType.NotFound, result.Error.Type);
-        Assert.Equal("Library not found.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Description.ShouldBe("Library not found.");
     }
 
     [Fact]
@@ -112,8 +111,8 @@ public sealed class AdminHandlerTests : IDisposable
     {
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MusicId, "Movies"));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal("'Music' is not a Movies library.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe("'Music' is not a Movies library.");
     }
 
     [Fact]
@@ -123,8 +122,8 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Movies"));
 
-        Assert.True(result.Value.Attached);
-        Assert.Empty(_h.Libraries.Added);
+        result.Value.Attached.ShouldBeTrue();
+        _h.Libraries.Added.ShouldBeEmpty();
     }
 
     [Fact]
@@ -134,8 +133,8 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Movies"));
 
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
-        Assert.Equal("This folder is already part of the library 'Music'. Remove it there first.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Conflict);
+        result.Error.Description.ShouldBe("This folder is already part of the library 'Music'. Remove it there first.");
     }
 
     [Fact]
@@ -147,9 +146,9 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Movies"));
 
-        Assert.Equal(ErrorType.Conflict, result.Error.Type);
-        Assert.Contains("no .jellyshare marker", result.Error.Description, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(root, ".jellyshare")));
+        result.Error.Type.ShouldBe(ErrorType.Conflict);
+        result.Error.Description.ShouldContain("no .jellyshare marker", Case.Sensitive);
+        File.Exists(Path.Combine(root, ".jellyshare")).ShouldBeFalse();
     }
 
     [Fact]
@@ -159,7 +158,7 @@ public sealed class AdminHandlerTests : IDisposable
 
         var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Movies"));
 
-        Assert.Equal(ErrorType.Unexpected, result.Error.Type);
-        Assert.Equal("Could not add the placeholder folder to 'Movies': library is busy", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Unexpected);
+        result.Error.Description.ShouldBe("Could not add the placeholder folder to 'Movies': library is busy");
     }
 }

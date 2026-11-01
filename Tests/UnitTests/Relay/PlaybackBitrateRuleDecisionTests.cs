@@ -5,7 +5,6 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Relay;
 
@@ -17,30 +16,30 @@ public sealed class PlaybackBitrateRuleDecisionTests
 
     [Fact]
     public void RemoteLimit_UserLimitWins_OverTheServerLimit()
-        => Assert.Equal(2_000_000, PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, Wan, IsLan));
+        => PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, Wan, IsLan).ShouldBe(2_000_000);
 
     [Theory]
     [InlineData(null)]
     [InlineData(0)]
     [InlineData(-1)]
     public void RemoteLimit_NoUserLimit_UsesTheServerLimit(int? user)
-        => Assert.Equal(8_000_000, PlaybackBitrateRule.RemoteLimit(user, 8_000_000, Wan, IsLan));
+        => PlaybackBitrateRule.RemoteLimit(user, 8_000_000, Wan, IsLan).ShouldBe(8_000_000);
 
     [Fact]
     public void RemoteLimit_NoLimitAnywhere_IsNull()
-        => Assert.Null(PlaybackBitrateRule.RemoteLimit(null, 0, Wan, IsLan));
+        => PlaybackBitrateRule.RemoteLimit(null, 0, Wan, IsLan).ShouldBeNull();
 
     [Fact]
     public void RemoteLimit_LocalNetworkCaller_IsNotLimited()
-        => Assert.Null(PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, Lan, IsLan));
+        => PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, Lan, IsLan).ShouldBeNull();
 
     [Fact]
     public void RemoteLimit_UnknownAddress_IsNull()
-        => Assert.Null(PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, null, IsLan));
+        => PlaybackBitrateRule.RemoteLimit(2_000_000, 8_000_000, null, IsLan).ShouldBeNull();
 
     [Fact]
     public void RemoteLimit_IPv4MappedAddress_IsCheckedAsIPv4()
-        => Assert.Null(PlaybackBitrateRule.RemoteLimit(2_000_000, 0, Lan.MapToIPv6(), IsLan));
+        => PlaybackBitrateRule.RemoteLimit(2_000_000, 0, Lan.MapToIPv6(), IsLan).ShouldBeNull();
 
     private static MergedEntry Entry(params (Guid Peer, int? Bitrate)[] sources)
         => new(
@@ -59,7 +58,7 @@ public sealed class PlaybackBitrateRuleDecisionTests
         var entry = Entry((TestItems.PeerA, 9_000_000), (TestItems.PeerB, 4_000_000));
         var peers = new[] { Peer(TestItems.PeerA, 5), Peer(TestItems.PeerB, 1) };
 
-        Assert.Equal(4_000_000, PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()));
+        PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()).ShouldBe(4_000_000);
     }
 
     [Fact]
@@ -68,7 +67,7 @@ public sealed class PlaybackBitrateRuleDecisionTests
         var entry = Entry((TestItems.PeerA, 9_000_000), (TestItems.PeerB, null), (TestItems.PeerC, 6_000_000));
         var peers = new[] { Peer(TestItems.PeerB, 0), Peer(TestItems.PeerA, 5), Peer(TestItems.PeerC, 6) };
 
-        Assert.Equal(9_000_000, PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()));
+        PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()).ShouldBe(9_000_000);
     }
 
     [Fact]
@@ -77,6 +76,6 @@ public sealed class PlaybackBitrateRuleDecisionTests
         var entry = Entry((TestItems.PeerA, null), (TestItems.PeerB, 0));
         var peers = new[] { Peer(TestItems.PeerA, 0), Peer(TestItems.PeerB, 1) };
 
-        Assert.Null(PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()));
+        PlaybackBitrateRule.CatalogBitrate(entry, peers, new Dictionary<Guid, PeerState>()).ShouldBeNull();
     }
 }

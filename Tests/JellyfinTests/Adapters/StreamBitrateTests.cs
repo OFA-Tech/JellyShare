@@ -1,6 +1,5 @@
 using JellyShare.Jellyfin.Adapters;
 using MediaBrowser.Model.Entities;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Adapters;
 
@@ -13,7 +12,7 @@ public sealed class StreamBitrateTests
     {
         var streams = new[] { S(MediaStreamType.Video, 1_800_000), S(MediaStreamType.Audio, 640_000), S(MediaStreamType.Audio, 192_000), S(MediaStreamType.Subtitle, 5_000) };
 
-        Assert.Equal(2_632_000, JellyfinLocalItemSource.SumOfStreamBitrates(streams));
+        JellyfinLocalItemSource.SumOfStreamBitrates(streams).ShouldBe(2_632_000);
     }
 
     [Theory]
@@ -24,24 +23,24 @@ public sealed class StreamBitrateTests
     {
         var streams = new[] { S(MediaStreamType.Video, 1_800_000), S(MediaStreamType.Audio, 200_000) };
 
-        Assert.Equal(2_000_000, JellyfinLocalItemSource.EffectiveBitrate(total, streams));
+        JellyfinLocalItemSource.EffectiveBitrate(total, streams).ShouldBe(2_000_000);
     }
 
     [Fact]
     public void Effective_ZeroTotal_NoStreamRates_IsUnknown()
     {
-        Assert.Null(JellyfinLocalItemSource.EffectiveBitrate(0, new[] { S(MediaStreamType.Video, 0) }));
+        JellyfinLocalItemSource.EffectiveBitrate(0, new[] { S(MediaStreamType.Video, 0) }).ShouldBeNull();
     }
 
     [Fact]
     public void Effective_PositiveTotal_Wins()
     {
-        Assert.Equal(5_000_000, JellyfinLocalItemSource.EffectiveBitrate(5_000_000, new[] { S(MediaStreamType.Video, 1) }));
+        JellyfinLocalItemSource.EffectiveBitrate(5_000_000, new[] { S(MediaStreamType.Video, 1) }).ShouldBe(5_000_000);
     }
 
     [Fact]
     public void Sum_NothingKnown_IsNull()
     {
-        Assert.Null(JellyfinLocalItemSource.SumOfStreamBitrates(new[] { S(MediaStreamType.Video, null), S(MediaStreamType.Audio, 0) }));
+        JellyfinLocalItemSource.SumOfStreamBitrates(new[] { S(MediaStreamType.Video, null), S(MediaStreamType.Audio, 0) }).ShouldBeNull();
     }
 }

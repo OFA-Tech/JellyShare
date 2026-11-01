@@ -8,6 +8,7 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
     <PackageReference Include="xunit" />
     <PackageReference Include="xunit.runner.visualstudio" />
     <!-- Runtime copies of the Jellyfin assemblies (the plugin project excludes them from output). -->
@@ -27,6 +28,11 @@
   <!-- The fakes for the Domain ports are shared with the unit tests (compiled into this assembly too). -->
   <ItemGroup>
     <Compile Include="..\UnitTests\Fakes\*.cs" Link="Fakes\Shared\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Shouldly" />
   </ItemGroup>
 
 </Project>

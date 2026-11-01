@@ -6,7 +6,6 @@ using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Requests.Federation;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Federation;
 
@@ -41,8 +40,8 @@ public sealed class FederationHandlerTests
     {
         var result = await new PingQueryHandler(new FakeIdentity()).Handle(new PingQuery(), CancellationToken.None);
 
-        Assert.Equal(ProtocolInfo.Version, result.Value.ProtocolVersion);
-        Assert.Equal("Alice", result.Value.ServerName);
+        result.Value.ProtocolVersion.ShouldBe(ProtocolInfo.Version);
+        result.Value.ServerName.ShouldBe("Alice");
     }
 
     [Theory]
@@ -53,8 +52,8 @@ public sealed class FederationHandlerTests
     {
         var result = await _handler.Handle(new GetCatalogQuery(token, []), CancellationToken.None);
 
-        Assert.Equal(ErrorType.Unauthorized, result.Error.Type);
-        Assert.Equal("unauthorized", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Unauthorized);
+        result.Error.Description.ShouldBe("unauthorized");
     }
 
     [Fact]
@@ -64,7 +63,7 @@ public sealed class FederationHandlerTests
 
         var result = await _handler.Handle(new GetCatalogQuery(_token, []), CancellationToken.None);
 
-        Assert.Equal(ErrorType.Unauthorized, result.Error.Type);
+        result.Error.Type.ShouldBe(ErrorType.Unauthorized);
     }
 
     [Fact]
@@ -72,10 +71,10 @@ public sealed class FederationHandlerTests
     {
         var result = await _handler.Handle(new GetCatalogQuery(_token, []), CancellationToken.None);
 
-        Assert.True(result.IsSuccess);
-        Assert.False(result.Value.NotModified);
-        Assert.Equal("\"" + result.Value.Catalog!.Etag + "\"", result.Value.Etag);
-        Assert.Single(result.Value.Catalog.Items);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.NotModified.ShouldBeFalse();
+        result.Value.Etag.ShouldBe("\"" + result.Value.Catalog!.Etag + "\"");
+        result.Value.Catalog.Items.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -86,10 +85,10 @@ public sealed class FederationHandlerTests
 
         var second = await _handler.Handle(new GetCatalogQuery(_token, ["\"other\", W/" + first.Value.Etag]), CancellationToken.None);
 
-        Assert.True(second.Value.NotModified);
-        Assert.Null(second.Value.Catalog);
-        Assert.Equal(first.Value.Etag, second.Value.Etag);
-        Assert.Equal(0, _built);
+        second.Value.NotModified.ShouldBeTrue();
+        second.Value.Catalog.ShouldBeNull();
+        second.Value.Etag.ShouldBe(first.Value.Etag);
+        _built.ShouldBe(0);
     }
 
     [Theory]
@@ -101,5 +100,5 @@ public sealed class FederationHandlerTests
     [InlineData("abc", false)]
     [InlineData(null, false)]
     public void IfNoneMatch_Rules(string? header, bool matches)
-        => Assert.Equal(matches, GetCatalogQueryHandler.IfNoneMatchContains([header], "\"abc\""));
+        => GetCatalogQueryHandler.IfNoneMatchContains([header], "\"abc\"").ShouldBe(matches);
 }

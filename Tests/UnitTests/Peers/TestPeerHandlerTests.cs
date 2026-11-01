@@ -4,7 +4,6 @@ using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Requests.Peers;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Peers;
 
@@ -24,10 +23,10 @@ public sealed class TestPeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new TestPeerQuery("nope", Token, null));
 
-        Assert.True(result.IsSuccess);
-        Assert.False(result.Value.Ok);
-        Assert.StartsWith("The URL is not valid.", result.Value.Error, StringComparison.Ordinal);
-        Assert.Empty(_h.Peers.PingedUrls);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.Ok.ShouldBeFalse();
+        result.Value.Error.ShouldStartWith("The URL is not valid.", Case.Sensitive);
+        _h.Peers.PingedUrls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -35,7 +34,7 @@ public sealed class TestPeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new TestPeerQuery("http://bob:8096", " ", null));
 
-        Assert.Equal("Enter the token from the invitation.", result.Value.Error);
+        result.Value.Error.ShouldBe("Enter the token from the invitation.");
     }
 
     [Fact]
@@ -43,7 +42,7 @@ public sealed class TestPeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new TestPeerQuery("http://bob:8096", "a\nb", null));
 
-        Assert.Equal("The token contains line breaks or other control characters. Paste only the token.", result.Value.Error);
+        result.Value.Error.ShouldBe("The token contains line breaks or other control characters. Paste only the token.");
     }
 
     [Fact]
@@ -54,9 +53,9 @@ public sealed class TestPeerHandlerTests : IDisposable
 
         var result = await _h.Send(new TestPeerQuery("http://evil:8096", null, saved.Id));
 
-        Assert.False(result.Value.Ok);
-        Assert.StartsWith("The address was changed.", result.Value.Error, StringComparison.Ordinal);
-        Assert.Empty(_h.Peers.PingedUrls);
+        result.Value.Ok.ShouldBeFalse();
+        result.Value.Error.ShouldStartWith("The address was changed.", Case.Sensitive);
+        _h.Peers.PingedUrls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -68,8 +67,8 @@ public sealed class TestPeerHandlerTests : IDisposable
 
         var result = await _h.Send(new TestPeerQuery("http://bob:8096/", null, saved.Id));
 
-        Assert.True(result.Value.Ok);
-        Assert.Equal(2, result.Value.Titles);
+        result.Value.Ok.ShouldBeTrue();
+        result.Value.Titles.ShouldBe(2);
     }
 
     [Fact]
@@ -79,8 +78,8 @@ public sealed class TestPeerHandlerTests : IDisposable
 
         var result = await _h.Send(new TestPeerQuery("http://bob:8096", Token, null));
 
-        Assert.False(result.Value.Ok);
-        Assert.Equal("Could not reach the server: refused ***", result.Value.Error);
+        result.Value.Ok.ShouldBeFalse();
+        result.Value.Error.ShouldBe("Could not reach the server: refused ***");
     }
 
     [Fact]
@@ -88,8 +87,8 @@ public sealed class TestPeerHandlerTests : IDisposable
     {
         var result = await _h.Send(new TestPeerQuery("http://bob:8096", Token, null));
 
-        Assert.False(result.Value.Ok);
-        Assert.Equal("The catalog request failed: HTTP 404", result.Value.Error);
+        result.Value.Ok.ShouldBeFalse();
+        result.Value.Error.ShouldBe("The catalog request failed: HTTP 404");
     }
 
     [Fact]
@@ -99,10 +98,10 @@ public sealed class TestPeerHandlerTests : IDisposable
 
         var result = await _h.Send(new TestPeerQuery("http://bob:8096", Token, null));
 
-        Assert.True(result.Value.Ok);
-        Assert.Equal("peer", result.Value.ServerName);
-        Assert.Equal(ProtocolInfo.Version, result.Value.ProtocolVersion);
-        Assert.Equal(3, result.Value.Titles);
-        Assert.Null(result.Value.Error);
+        result.Value.Ok.ShouldBeTrue();
+        result.Value.ServerName.ShouldBe("peer");
+        result.Value.ProtocolVersion.ShouldBe(ProtocolInfo.Version);
+        result.Value.Titles.ShouldBe(3);
+        result.Value.Error.ShouldBeNull();
     }
 }

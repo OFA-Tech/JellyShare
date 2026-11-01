@@ -10,7 +10,6 @@ using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Sync;
 
@@ -184,7 +183,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         AddLocalSintel();
         Offer(Bunny(), Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.False(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
         _scans.Reported.Clear();
         await _watcher.StartAsync(CancellationToken.None);
 
@@ -192,11 +191,11 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Equal(1, batch.Keys);
-        Assert.False(batch.FullSync);
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
-        Assert.Single(_client.Fetches);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        batch.Keys.ShouldBe(1);
+        batch.FullSync.ShouldBeFalse();
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -212,9 +211,9 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
         await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(SintelDir));
-        Assert.Empty(_scans.Reported);
-        Assert.Single(_client.Fetches);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
+        _scans.Reported.ShouldBeEmpty();
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -222,7 +221,7 @@ public sealed class LocalItemWatcherTests : IDisposable
     {
         Offer(Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
         _scans.Reported.Clear();
         await _watcher.StartAsync(CancellationToken.None);
 
@@ -230,9 +229,9 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(false, LocalMovie(SintelPath, "45745")));
         await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(SintelDir));
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
-        Assert.Single(_client.Fetches);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -240,7 +239,7 @@ public sealed class LocalItemWatcherTests : IDisposable
     {
         Offer(Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
         await _watcher.StartAsync(CancellationToken.None);
 
         // At event time the new item has no provider ids; the metadata refresh adds them before the window runs.
@@ -251,8 +250,8 @@ public sealed class LocalItemWatcherTests : IDisposable
         AddLocalSintel();
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.Equal(1, batch.Keys);
-        Assert.False(MoviePlaceholder(SintelDir));
+        batch.Keys.ShouldBe(1);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -272,11 +271,11 @@ public sealed class LocalItemWatcherTests : IDisposable
         for (var i = 0; i < 6; i++)
         {
             var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
-            Assert.Equal(0, batch.Keys);
+            batch.Keys.ShouldBe(0);
         }
 
-        Assert.Equal(3, calls);
-        Assert.True(MoviePlaceholder(SintelDir));
+        calls.ShouldBe(3);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
     }
 
     [Fact]
@@ -295,11 +294,11 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(true, new LocalMedia("Series", "/media/Shows/Pioneer", null, null, null, null)));
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.Equal(0, batch.Keys);
-        Assert.False(batch.FullSync);
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Empty(_scans.Reported);
-        Assert.Single(_client.Fetches);
+        batch.Keys.ShouldBe(0);
+        batch.FullSync.ShouldBeFalse();
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        _scans.Reported.ShouldBeEmpty();
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -316,13 +315,13 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.True(batch.FullSync);
-        Assert.Equal(2, _client.Fetches.Count);
+        batch.FullSync.ShouldBeTrue();
+        _client.Fetches.Count.ShouldBe(2);
 
         // The next window starts empty.
         var next = await _watcher.ProcessPendingAsync(CancellationToken.None);
-        Assert.False(next.FullSync);
-        Assert.Equal(2, _client.Fetches.Count);
+        next.FullSync.ShouldBeFalse();
+        _client.Fetches.Count.ShouldBe(2);
     }
 
     [Fact]
@@ -339,8 +338,8 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.False(batch.FullSync);
-        Assert.Single(_client.Fetches);
+        batch.FullSync.ShouldBeFalse();
+        _client.Fetches.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -348,15 +347,18 @@ public sealed class LocalItemWatcherTests : IDisposable
     {
         await _watcher.StartAsync(CancellationToken.None);
 
-        Assert.Equal(1, _events.Active);
-        Assert.Equal(2, _timers.Timers.Count);
-        Assert.Contains(_timers.Timers, t => t.Period == TimeSpan.FromSeconds(15));
-        Assert.Contains(_timers.Timers, t => t.Period == TimeSpan.FromSeconds(60));
+        _events.Active.ShouldBe(1);
+        _timers.Timers.Count.ShouldBe(2);
+        _timers.Timers.ShouldContain(t => t.Period == TimeSpan.FromSeconds(15));
+        _timers.Timers.ShouldContain(t => t.Period == TimeSpan.FromSeconds(60));
 
         await _watcher.StopAsync(CancellationToken.None);
 
-        Assert.Equal(0, _events.Active);
-        Assert.All(_timers.Timers, t => Assert.True(t.Disposed));
+        _events.Active.ShouldBe(0);
+        foreach (var t in _timers.Timers)
+        {
+            t.Disposed.ShouldBeTrue();
+        }
     }
 
     [Fact]
@@ -370,7 +372,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
         var batch = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.Equal(0, batch.Keys);
+        batch.Keys.ShouldBe(0);
     }
 
     [Fact]
@@ -387,13 +389,13 @@ public sealed class LocalItemWatcherTests : IDisposable
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
 
         var failed = await _watcher.ProcessPendingAsync(CancellationToken.None);
-        Assert.True(failed.Failed);
+        failed.Failed.ShouldBeTrue();
 
         File.Delete(blocker);
         var retried = await _watcher.ProcessPendingAsync(CancellationToken.None);
 
-        Assert.False(retried.Failed);
-        Assert.True(MoviePlaceholder(SintelDir));
+        retried.Failed.ShouldBeFalse();
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
     }
 
     [Fact]
@@ -407,15 +409,15 @@ public sealed class LocalItemWatcherTests : IDisposable
         _missing.Add(SintelPath);
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Equal(1, result.Changed);
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        result.Changed.ShouldBe(1);
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
 
         // Written once: a second pass with the same state changes nothing.
         _scans.Reported.Clear();
         var again = await _watcher.SweepAsync(CancellationToken.None);
-        Assert.Equal(0, again.Changed);
-        Assert.Empty(_scans.Reported);
+        again.Changed.ShouldBe(0);
+        _scans.Reported.ShouldBeEmpty();
     }
 
     [Fact]
@@ -425,16 +427,16 @@ public sealed class LocalItemWatcherTests : IDisposable
         _missing.Add(SintelPath);
         Offer(Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
         await _watcher.SweepAsync(CancellationToken.None);
         _scans.Reported.Clear();
 
         _missing.Clear();
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(SintelDir));
-        Assert.Equal(1, result.Changed);
-        Assert.Equal([Path.Combine(MoviesRoot, SintelDir)], _scans.Reported);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
+        result.Changed.ShouldBe(1);
+        _scans.Reported.ShouldBe([Path.Combine(MoviesRoot, SintelDir)]);
     }
 
     [Fact]
@@ -449,8 +451,8 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.Equal([SintelPath], _probed);
-        Assert.Equal(1, result.Candidates);
+        _probed.ShouldBe([SintelPath]);
+        result.Candidates.ShouldBe(1);
     }
 
     [Fact]
@@ -460,8 +462,8 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.Equal(0, result.Candidates);
-        Assert.Empty(_probed);
+        result.Candidates.ShouldBe(0);
+        _probed.ShouldBeEmpty();
     }
 
     [Fact]
@@ -476,7 +478,7 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         Offer(items.ToArray());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.Single(_client.Fetches);
+        _client.Fetches.ShouldHaveSingleItem();
 
         for (var i = 0; i < 501; i++)
         {
@@ -485,9 +487,9 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.True(result.FullSync);
-        Assert.Equal(2, _client.Fetches.Count);
-        Assert.True(MoviePlaceholder("Movie 7 (2000) [tmdbid-100007]"));
+        result.FullSync.ShouldBeTrue();
+        _client.Fetches.Count.ShouldBe(2);
+        MoviePlaceholder("Movie 7 (2000) [tmdbid-100007]").ShouldBeTrue();
     }
 
     private void OfferNumbered(params int[] tmdb)
@@ -517,10 +519,10 @@ public sealed class LocalItemWatcherTests : IDisposable
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var first = await watcher.SweepAsync(CancellationToken.None);
 
-            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(10));
-            Assert.Equal(0, first.Examined);
-            Assert.Equal(2, first.Candidates);
-            Assert.False(first.Skipped);
+            (sw.Elapsed < TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            first.Examined.ShouldBe(0);
+            first.Candidates.ShouldBe(2);
+            first.Skipped.ShouldBeFalse();
         }
         finally
         {
@@ -558,10 +560,10 @@ public sealed class LocalItemWatcherTests : IDisposable
             // The cursor moved past the stuck item and the stuck path is not probed again while its probe hangs.
             var second = await watcher.SweepAsync(CancellationToken.None);
 
-            Assert.False(second.Skipped);
-            Assert.Equal(1, second.Changed);
-            Assert.True(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
-            Assert.Equal(1, Volatile.Read(ref slowCalls));
+            second.Skipped.ShouldBeFalse();
+            second.Changed.ShouldBe(1);
+            MoviePlaceholder("T2 (2000) [tmdbid-2]").ShouldBeTrue();
+            Volatile.Read(ref slowCalls).ShouldBe(1);
         }
         finally
         {
@@ -602,12 +604,12 @@ public sealed class LocalItemWatcherTests : IDisposable
             _missing.Add(gone);
             for (var i = 0; i < 8; i++)
             {
-                Assert.False((await watcher.SweepAsync(CancellationToken.None)).Skipped);
+                ((await watcher.SweepAsync(CancellationToken.None)).Skipped).ShouldBeFalse();
             }
 
-            Assert.True(MoviePlaceholder("T9 (2000) [tmdbid-9]"));
-            Assert.Equal(1, Volatile.Read(ref deadProbes));
-            Assert.False(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
+            MoviePlaceholder("T9 (2000) [tmdbid-9]").ShouldBeTrue();
+            Volatile.Read(ref deadProbes).ShouldBe(1);
+            MoviePlaceholder("T2 (2000) [tmdbid-2]").ShouldBeFalse();
         }
         finally
         {
@@ -639,7 +641,7 @@ public sealed class LocalItemWatcherTests : IDisposable
         {
             await watcher.SweepAsync(CancellationToken.None);
             await watcher.SweepAsync(CancellationToken.None);
-            Assert.Equal(1, Volatile.Read(ref deadProbes));
+            Volatile.Read(ref deadProbes).ShouldBe(1);
 
             _missing.Add("/mnt/dead/Movies/D2/d.mkv");
             release.Set();
@@ -649,8 +651,8 @@ public sealed class LocalItemWatcherTests : IDisposable
                 await watcher.SweepAsync(CancellationToken.None);
             }
 
-            Assert.True(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
-            Assert.True(Volatile.Read(ref deadProbes) > 1);
+            MoviePlaceholder("T2 (2000) [tmdbid-2]").ShouldBeTrue();
+            (Volatile.Read(ref deadProbes) > 1).ShouldBeTrue();
         }
         finally
         {
@@ -668,14 +670,14 @@ public sealed class LocalItemWatcherTests : IDisposable
 
         await _watcher.SweepAsync(CancellationToken.None);
         await _watcher.SweepAsync(CancellationToken.None);
-        Assert.Equal(reads + 1, _library.Reads);
+        _library.Reads.ShouldBe(reads + 1);
 
         // A change found by the sweep is reconciled without reading the library again.
         _missing.Add(SintelPath);
         var result = await _watcher.SweepAsync(CancellationToken.None);
-        Assert.Equal(1, result.Changed);
-        Assert.True(MoviePlaceholder(SintelDir));
-        Assert.Equal(reads + 1, _library.Reads);
+        result.Changed.ShouldBe(1);
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
+        _library.Reads.ShouldBe(reads + 1);
     }
 
     [Fact]
@@ -684,14 +686,14 @@ public sealed class LocalItemWatcherTests : IDisposable
         AddLocalSintel();
         Offer(Bunny());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+        ((await _watcher.SweepAsync(CancellationToken.None)).Candidates).ShouldBe(0);
 
         Offer(Bunny(), Sintel());
         _clock.Now += TimeSpan.FromMinutes(1);
         await _sync.RunAsync(CancellationToken.None);
         File.SetLastWriteTimeUtc(Path.Combine(_tmp.Sub("data"), MergedIndexStore.FileName), DateTime.UtcNow.AddMinutes(5));
 
-        Assert.Equal(1, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+        ((await _watcher.SweepAsync(CancellationToken.None)).Candidates).ShouldBe(1);
     }
 
     [Fact]
@@ -699,16 +701,16 @@ public sealed class LocalItemWatcherTests : IDisposable
     {
         Offer(Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+        ((await _watcher.SweepAsync(CancellationToken.None)).Candidates).ShouldBe(0);
 
         // Added without a usable event: picked up by the periodic refresh.
         AddLocalSintel();
-        Assert.Equal(0, (await _watcher.SweepAsync(CancellationToken.None)).Candidates);
+        ((await _watcher.SweepAsync(CancellationToken.None)).Candidates).ShouldBe(0);
         _timers.Now += LocalItemWatcher.CandidateRefreshInterval + TimeSpan.FromSeconds(1);
         var result = await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.Equal(1, result.Candidates);
-        Assert.False(MoviePlaceholder(SintelDir));
+        result.Candidates.ShouldBe(1);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -718,14 +720,14 @@ public sealed class LocalItemWatcherTests : IDisposable
         _missing.Add(SintelPath);
         Offer(Sintel());
         await _sync.RunAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
 
         // A fresh watcher (plugin restart) that never saw the file missing.
         _missing.Clear();
         var result = await NewWatcher(null).SweepAsync(CancellationToken.None);
 
-        Assert.Equal(1, result.Changed);
-        Assert.False(MoviePlaceholder(SintelDir));
+        result.Changed.ShouldBe(1);
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -742,14 +744,14 @@ public sealed class LocalItemWatcherTests : IDisposable
         _missing.Add(SintelPath);
         _events.Raise(new LocalItemEvent(true, LocalMovie(SintelPath, "45745")));
         await _watcher.ProcessPendingAsync(CancellationToken.None);
-        Assert.True(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeTrue();
 
         // Back, but its ItemAdded event never had usable ids.
         _missing.Clear();
         AddLocalSintel();
         await _watcher.SweepAsync(CancellationToken.None);
 
-        Assert.False(MoviePlaceholder(SintelDir));
+        MoviePlaceholder(SintelDir).ShouldBeFalse();
     }
 
     [Fact]
@@ -783,15 +785,15 @@ public sealed class LocalItemWatcherTests : IDisposable
         {
             await watcher.StartAsync(CancellationToken.None);
             _timers.Timers.Last(t => t.Period == TimeSpan.FromSeconds(60)).Fire();
-            Assert.True(entered.Wait(TimeSpan.FromSeconds(10)));
-            Assert.Equal(1, watcher.RunningPasses);
+            entered.Wait(TimeSpan.FromSeconds(10)).ShouldBeTrue();
+            watcher.RunningPasses.ShouldBe(1);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             using var stopToken = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await watcher.StopAsync(stopToken.Token);
 
-            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5));
-            Assert.Equal(0, watcher.RunningPasses);
+            (sw.Elapsed < TimeSpan.FromSeconds(5)).ShouldBeTrue();
+            watcher.RunningPasses.ShouldBe(0);
         }
         finally
         {

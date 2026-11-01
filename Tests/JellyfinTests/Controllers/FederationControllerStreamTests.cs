@@ -12,7 +12,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Controllers;
 
@@ -136,7 +135,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         var result = Controller(null).Stream(MovieId.ToString("N"));
 
-        Assert.Equal(401, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(401);
     }
 
     [Fact]
@@ -144,10 +143,10 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         const string wrong = "js1_not-a-real-token-value";
 
-        var result = Assert.IsAssignableFrom<ObjectResult>(Controller(wrong).Stream(MovieId.ToString("N")));
+        var result = Controller(wrong).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>();
 
-        Assert.Equal(401, result.StatusCode);
-        Assert.DoesNotContain(wrong, System.Text.Json.JsonSerializer.Serialize(result.Value));
+        result.StatusCode.ShouldBe(401);
+        System.Text.Json.JsonSerializer.Serialize(result.Value).ShouldNotContain(wrong);
     }
 
     [Theory]
@@ -155,25 +154,25 @@ public sealed class FederationControllerStreamTests : IDisposable
     [InlineData("../../etc/passwd")]
     public void Stream_BadItemId_Returns404(string id)
     {
-        Assert.IsType<NotFoundResult>(Controller(_token).Stream(id));
+        Controller(_token).Stream(id).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
     public void Stream_UnknownItem_Returns404()
     {
-        Assert.IsType<NotFoundResult>(Controller(_token).Stream(Guid.NewGuid().ToString("N")));
+        Controller(_token).Stream(Guid.NewGuid().ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
     public void Stream_ItemOutsideShare_Returns404()
     {
-        Assert.IsType<NotFoundResult>(Controller(_token).Stream(OutsideId.ToString("N")));
+        Controller(_token).Stream(OutsideId.ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
     public void Stream_SeriesId_Returns404_EvenThoughImagesAreExposed()
     {
-        Assert.IsType<NotFoundResult>(Controller(_token).Stream(SeriesId.ToString("N")));
+        Controller(_token).Stream(SeriesId.ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]
@@ -181,16 +180,16 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         var result = Controller(_token).Stream(MovieId.ToString("N"));
 
-        var file = Assert.IsType<PhysicalFileResult>(result);
-        Assert.Equal(_movieFile, file.FileName);
-        Assert.Equal("video/x-matroska", file.ContentType);
-        Assert.True(file.EnableRangeProcessing);
+        var file = result.ShouldBeOfType<PhysicalFileResult>();
+        file.FileName.ShouldBe(_movieFile);
+        file.ContentType.ShouldBe("video/x-matroska");
+        file.EnableRangeProcessing.ShouldBeTrue();
     }
 
     [Fact]
     public void Stream_Episode_IsServed()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(EpisodeId.ToString("N")));
+        Controller(_token).Stream(EpisodeId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Theory]
@@ -207,7 +206,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream("00000009-0000-0000-0000-000000000001");
 
-        Assert.Equal(contentType, Assert.IsType<PhysicalFileResult>(result).ContentType);
+        result.ShouldBeOfType<PhysicalFileResult>().ContentType.ShouldBe(contentType);
     }
 
     [Fact]
@@ -217,7 +216,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream(MovieId.ToString("N"));
 
-        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
     }
 
     [Fact]
@@ -227,61 +226,61 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream(MovieId.ToString("N"));
 
-        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
     }
 
     [Fact]
     public void Stream_SecondItemOverLimit_Returns429WithRetryAfter()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         var controller = Controller(_token);
 
         var result = controller.Stream(Movie2Id.ToString("N"));
 
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        Assert.Equal("30", controller.Response.Headers.RetryAfter.ToString());
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        controller.Response.Headers.RetryAfter.ToString().ShouldBe("30");
     }
 
     [Fact]
     public void Stream_SameItemAgain_IsStillServed()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
-        Assert.IsType<PhysicalFileResult>(Controller(_token, "HEAD").Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token, "HEAD").Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Stream_AfterIdle30s_OtherItemIsServed()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         CompleteAllResponses();
         _clock.Advance(TimeSpan.FromSeconds(30));
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
     public void Session_HeldWhileBodyInFlight_DoesNotExpire()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
 
         _clock.Advance(TimeSpan.FromMinutes(5));
 
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
     }
 
     [Fact]
     public void Session_ReleasedAfterBody_ExpiresAfter30s()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         _clock.Advance(TimeSpan.FromMinutes(5));
         CompleteAllResponses();
 
         _clock.Advance(TimeSpan.FromSeconds(29));
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
         _clock.Advance(TimeSpan.FromSeconds(1));
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -289,10 +288,10 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         File.Delete(_movieFile);
 
-        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
 
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -302,20 +301,20 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream("00000009-0000-0000-0000-000000000002");
 
-        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
     }
 
     [Fact]
     public void ExistingSession_503_KeepsSlot()
     {
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
         CompleteAllResponses();
         File.Delete(_movieFile);
 
-        Assert.Equal(503, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(503);
 
-        Assert.Equal(1, _limiter.Active(_config.Current.Shares[0].Id));
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(1);
     }
 
     [Fact]
@@ -323,7 +322,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         _config.Settings.Shares[0].MaxStreams = 0;
 
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
     }
 
     [Fact]
@@ -335,15 +334,15 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(200, http.Response.StatusCode);
-        Assert.Equal("video/mp2t", http.Response.ContentType);
-        Assert.Equal("none", http.Response.Headers.AcceptRanges.ToString());
-        Assert.False(http.Response.Headers.ContainsKey("Content-Range"));
-        Assert.Null(http.Response.ContentLength);
-        Assert.Equal(FakeFfmpegRunner.Payload, Body(http));
-        var call = Assert.Single(_runner.Calls);
-        Assert.Equal("/usr/lib/jellyfin-ffmpeg/ffmpeg", call.Exe);
-        Assert.Equal(CappedStreamArgs.Build(_movieFile, 2_000_000, null, HardwareEncoder.None, null), call.Args);
+        http.Response.StatusCode.ShouldBe(200);
+        http.Response.ContentType.ShouldBe("video/mp2t");
+        http.Response.Headers.AcceptRanges.ToString().ShouldBe("none");
+        http.Response.Headers.ContainsKey("Content-Range").ShouldBeFalse();
+        http.Response.ContentLength.ShouldBeNull();
+        Body(http).ShouldBe(FakeFfmpegRunner.Payload);
+        var call = _runner.Calls.ShouldHaveSingleItem();
+        call.Exe.ShouldBe("/usr/lib/jellyfin-ffmpeg/ffmpeg");
+        call.Args.ShouldBe(CappedStreamArgs.Build(_movieFile, 2_000_000, null, HardwareEncoder.None, null));
     }
 
     [Fact]
@@ -354,9 +353,9 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         await Execute(controller, controller.Stream(MovieId.ToString("N"), "600.5"));
 
-        var args = Assert.Single(_runner.Calls).Args.ToList();
-        Assert.Equal("600.5", args[args.IndexOf("-ss") + 1]);
-        Assert.True(args.IndexOf("-ss") < args.IndexOf("-i"));
+        var args = _runner.Calls.ShouldHaveSingleItem().Args.ToList();
+        args[args.IndexOf("-ss") + 1].ShouldBe("600.5");
+        (args.IndexOf("-ss") < args.IndexOf("-i")).ShouldBeTrue();
     }
 
     [Fact]
@@ -367,8 +366,8 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         await Execute(controller, controller.Stream(MovieId.ToString("N"), "999999"));
 
-        var args = Assert.Single(_runner.Calls).Args.ToList();
-        Assert.Equal("5400", args[args.IndexOf("-ss") + 1]);
+        var args = _runner.Calls.ShouldHaveSingleItem().Args.ToList();
+        args[args.IndexOf("-ss") + 1].ShouldBe("5400");
     }
 
     [Theory]
@@ -381,9 +380,9 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream(MovieId.ToString("N"), start);
 
-        Assert.Equal(400, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
-        Assert.Empty(_runner.Calls);
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(400);
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
+        _runner.Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -394,10 +393,10 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(200, http.Response.StatusCode);
-        Assert.Equal("video/mp2t", http.Response.ContentType);
-        Assert.Empty(Body(http));
-        Assert.Empty(_runner.Calls);
+        http.Response.StatusCode.ShouldBe(200);
+        http.Response.ContentType.ShouldBe("video/mp2t");
+        Body(http).ShouldBeEmpty();
+        _runner.Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -411,14 +410,14 @@ public sealed class FederationControllerStreamTests : IDisposable
         var running = Execute(controller, controller.Stream(MovieId.ToString("N")));
         await _runner.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
         _clock.Advance(TimeSpan.FromMinutes(5));
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(Movie2Id.ToString("N"))).StatusCode);
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
 
         disconnect.Cancel();
         await running.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.True(_runner.SawCancellation);
+        _runner.SawCancellation.ShouldBeTrue();
         _clock.Advance(TimeSpan.FromSeconds(30));
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -430,7 +429,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         await Execute(controller, controller.Stream(MovieId.ToString("N")));
         _clock.Advance(TimeSpan.FromSeconds(30));
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -443,10 +442,10 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(2, _runner.Calls.Count);
-        Assert.Contains("h264_nvenc", _runner.Calls[0].Args);
-        Assert.Contains("libx264", _runner.Calls[1].Args);
-        Assert.Equal(FakeFfmpegRunner.Payload, Body(http));
+        _runner.Calls.Count.ShouldBe(2);
+        _runner.Calls[0].Args.ShouldContain("h264_nvenc");
+        _runner.Calls[1].Args.ShouldContain("libx264");
+        Body(http).ShouldBe(FakeFfmpegRunner.Payload);
     }
 
     [Fact]
@@ -457,9 +456,9 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = Controller(_token).Stream(MovieId.ToString("N"));
 
-        Assert.Equal(409, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(Movie2Id.ToString("N")));
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(409);
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
+        Controller(_token).Stream(Movie2Id.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -467,8 +466,8 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         CapMovie(cap: 200_000);
 
-        Assert.Equal(409, Assert.IsAssignableFrom<ObjectResult>(Controller(_token).Stream(MovieId.ToString("N"))).StatusCode);
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(409);
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
     }
 
     [Fact]
@@ -477,8 +476,8 @@ public sealed class FederationControllerStreamTests : IDisposable
         _config.Settings.Shares[0].MaxBitrate = 10_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = 1_000_000 };
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N"), "60"));
-        Assert.Empty(_runner.Calls);
+        Controller(_token).Stream(MovieId.ToString("N"), "60").ShouldBeOfType<PhysicalFileResult>();
+        _runner.Calls.ShouldBeEmpty();
     }
 
     [Fact]
@@ -490,10 +489,10 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = controller.Stream(MovieId.ToString("N"));
 
-        Assert.IsNotType<PhysicalFileResult>(result);
+        result.ShouldNotBeOfType<PhysicalFileResult>();
         var http = await Execute(controller, result);
-        Assert.Equal("video/mp2t", http.Response.ContentType);
-        Assert.Single(_runner.Calls);
+        http.Response.ContentType.ShouldBe("video/mp2t");
+        _runner.Calls.ShouldHaveSingleItem();
     }
 
     [Theory]
@@ -507,9 +506,9 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = controller.Stream(MovieId.ToString("N"));
 
-        Assert.IsNotType<PhysicalFileResult>(result);
+        result.ShouldNotBeOfType<PhysicalFileResult>();
         await Execute(controller, result);
-        Assert.Single(_runner.Calls);
+        _runner.Calls.ShouldHaveSingleItem();
     }
 
     [Fact]
@@ -517,7 +516,7 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = null };
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -533,15 +532,15 @@ public sealed class FederationControllerStreamTests : IDisposable
         var secondRun = Execute(second, second.Stream(MovieId.ToString("N"), "300"));
         await _runner.WaitForStartsAsync(1);
 
-        Assert.Equal(0, _runner.Cancellations);
-        Assert.Equal(2, _capped!.RunningTranscodes);
-        Assert.False(firstRun.IsCompleted);
-        Assert.False(secondRun.IsCompleted);
-        Assert.Equal(1, _limiter.Active(_config.Current.Shares[0].Id));
+        _runner.Cancellations.ShouldBe(0);
+        _capped!.RunningTranscodes.ShouldBe(2);
+        firstRun.IsCompleted.ShouldBeFalse();
+        secondRun.IsCompleted.ShouldBeFalse();
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(1);
 
         _abort.Cancel();
         await Task.WhenAll(firstRun, secondRun).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, _capped.RunningTranscodes);
+        _capped.RunningTranscodes.ShouldBe(0);
     }
 
     [Fact]
@@ -559,17 +558,17 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         await runs[0].WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(1, _runner.Cancellations);
-        Assert.Equal(2, _capped!.RunningTranscodes);
-        Assert.True(_lifetimes[0].Aborted, "superseded response must be aborted, not ended as if complete");
-        Assert.False(_lifetimes[1].Aborted);
-        Assert.False(_lifetimes[2].Aborted);
-        Assert.False(runs[1].IsCompleted);
-        Assert.False(runs[2].IsCompleted);
+        _runner.Cancellations.ShouldBe(1);
+        _capped!.RunningTranscodes.ShouldBe(2);
+        _lifetimes[0].Aborted.ShouldBeTrue("superseded response must be aborted, not ended as if complete");
+        _lifetimes[1].Aborted.ShouldBeFalse();
+        _lifetimes[2].Aborted.ShouldBeFalse();
+        runs[1].IsCompleted.ShouldBeFalse();
+        runs[2].IsCompleted.ShouldBeFalse();
 
         _abort.Cancel();
         await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, _capped.RunningTranscodes);
+        _capped.RunningTranscodes.ShouldBe(0);
     }
 
     [Fact]
@@ -583,14 +582,14 @@ public sealed class FederationControllerStreamTests : IDisposable
             var controller = Controller(_token);
             runs.Add(Execute(controller, controller.Stream(MovieId.ToString("N"))));
             await _runner.WaitForStartsAsync(1);
-            Assert.True(_capped!.RunningTranscodes <= 2);
+            (_capped!.RunningTranscodes <= 2).ShouldBeTrue();
         }
 
         await Task.WhenAll(runs.Take(8)).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(2, _capped!.RunningTranscodes);
-        Assert.Equal(8, _runner.Cancellations);
-        Assert.False(runs[8].IsCompleted);
-        Assert.False(runs[9].IsCompleted);
+        _capped!.RunningTranscodes.ShouldBe(2);
+        _runner.Cancellations.ShouldBe(8);
+        runs[8].IsCompleted.ShouldBeFalse();
+        runs[9].IsCompleted.ShouldBeFalse();
 
         _abort.Cancel();
         await Task.WhenAll(runs).WaitAsync(TimeSpan.FromSeconds(5));
@@ -607,8 +606,8 @@ public sealed class FederationControllerStreamTests : IDisposable
         await _runner.WaitForStartsAsync(1);
 
         var second = Controller(_token);
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(second.Stream(MovieId.ToString("N"))).StatusCode);
-        Assert.Equal(0, _runner.Cancellations);
+        second.Stream(MovieId.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        _runner.Cancellations.ShouldBe(0);
 
         _abort.Cancel();
         await run.WaitAsync(TimeSpan.FromSeconds(5));
@@ -635,13 +634,13 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var result = c.Stream(EpisodeId.ToString("N"));
 
-        Assert.Equal(429, Assert.IsAssignableFrom<ObjectResult>(result).StatusCode);
-        Assert.Equal("30", c.Response.Headers.RetryAfter.ToString());
-        Assert.Equal(2, _limiter.Active(_config.Current.Shares[0].Id));
+        result.ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        c.Response.Headers.RetryAfter.ToString().ShouldBe("30");
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(2);
 
         _abort.Cancel();
         await Task.WhenAll(runA, runB).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(0, _capped!.RunningTranscodes);
+        _capped!.RunningTranscodes.ShouldBe(0);
     }
 
     [Fact]
@@ -656,7 +655,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         var head = Controller(_token, "HEAD");
         await Execute(head, head.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(0, _runner.Cancellations);
+        _runner.Cancellations.ShouldBe(0);
         _abort.Cancel();
         await run.WaitAsync(TimeSpan.FromSeconds(5));
     }
@@ -670,11 +669,11 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(503, http.Response.StatusCode);
-        Assert.Null(http.Response.ContentType);
-        Assert.False(http.Response.Headers.ContainsKey("Accept-Ranges"));
-        Assert.Empty(Body(http));
-        Assert.Equal(0, _limiter.Active(_config.Current.Shares[0].Id));
+        http.Response.StatusCode.ShouldBe(503);
+        http.Response.ContentType.ShouldBeNull();
+        http.Response.Headers.ContainsKey("Accept-Ranges").ShouldBeFalse();
+        Body(http).ShouldBeEmpty();
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(0);
     }
 
     [Fact]
@@ -686,9 +685,9 @@ public sealed class FederationControllerStreamTests : IDisposable
 
         var http = await Execute(controller, controller.Stream(MovieId.ToString("N")));
 
-        Assert.Equal(503, http.Response.StatusCode);
-        Assert.Null(http.Response.ContentType);
-        Assert.Equal(0, _capped!.RunningTranscodes);
+        http.Response.StatusCode.ShouldBe(503);
+        http.Response.ContentType.ShouldBeNull();
+        _capped!.RunningTranscodes.ShouldBe(0);
     }
 
     [Fact]
@@ -704,15 +703,18 @@ public sealed class FederationControllerStreamTests : IDisposable
             await Execute(controller, controller.Stream(MovieId.ToString("N")));
         }
 
-        Assert.Equal(4, _runner.Calls.Count);
-        Assert.Contains("h264_nvenc", _runner.Calls[0].Args);
-        Assert.All(_runner.Calls.Skip(1), c => Assert.Contains("libx264", c.Args));
-        Assert.Single(_cappedLogger.Entries, e => e.Level == LogLevel.Warning);
+        _runner.Calls.Count.ShouldBe(4);
+        _runner.Calls[0].Args.ShouldContain("h264_nvenc");
+        foreach (var c in _runner.Calls.Skip(1))
+        {
+            c.Args.ShouldContain("libx264");
+        }
+        _cappedLogger.Entries.Where(e => e.Level == LogLevel.Warning).ShouldHaveSingleItem();
 
         _clock.Advance(TimeSpan.FromMinutes(10));
         var later = Controller(_token);
         await Execute(later, later.Stream(MovieId.ToString("N")));
-        Assert.Contains("h264_nvenc", _runner.Calls[4].Args);
+        _runner.Calls[4].Args.ShouldContain("h264_nvenc");
     }
 
     [Theory]
@@ -723,7 +725,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         _config.Settings.Shares[0].MaxBitrate = 1_000_000;
         _source.Streams[MovieId] = _source.Streams[MovieId] with { Bitrate = bitrate };
 
-        Assert.IsType<PhysicalFileResult>(Controller(_token).Stream(MovieId.ToString("N")));
+        Controller(_token).Stream(MovieId.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
     }
 
     [Fact]
@@ -733,10 +735,10 @@ public sealed class FederationControllerStreamTests : IDisposable
         Controller(_token).Stream(MovieId.ToString("N"));
         Controller(_token).Stream(MovieId.ToString("N"));
 
-        var line = Assert.Single(_logger.Lines);
-        Assert.Contains("bob", line);
-        Assert.Contains("Name of 00000001", line);
-        Assert.DoesNotContain(_token, line);
+        var line = _logger.Lines.ShouldHaveSingleItem();
+        line.ShouldContain("bob", Case.Sensitive);
+        line.ShouldContain("Name of 00000001", Case.Sensitive);
+        line.ShouldNotContain(_token);
     }
 
     [Fact]
@@ -744,9 +746,9 @@ public sealed class FederationControllerStreamTests : IDisposable
     {
         var stream = typeof(FederationController).GetMethod(nameof(FederationController.Stream))!;
 
-        Assert.NotNull(stream.GetCustomAttribute<AllowAnonymousAttribute>());
-        Assert.Equal("stream/{itemId}", stream.GetCustomAttribute<HttpGetAttribute>()!.Template);
-        Assert.Equal("stream/{itemId}", stream.GetCustomAttribute<HttpHeadAttribute>()!.Template);
+        stream.GetCustomAttribute<AllowAnonymousAttribute>().ShouldNotBeNull();
+        stream.GetCustomAttribute<HttpGetAttribute>()!.Template.ShouldBe("stream/{itemId}");
+        stream.GetCustomAttribute<HttpHeadAttribute>()!.Template.ShouldBe("stream/{itemId}");
     }
 
     private sealed class ListLogger : ILogger<FederationController>

@@ -1,5 +1,4 @@
 using JellyShare.Application.Features.Streaming;
-using Xunit;
 
 namespace JellyShare.UnitTests.Streaming;
 
@@ -15,5 +14,5 @@ public sealed class CappedStreamArgsOverCapTests
     [InlineData(2_000_000, 0L, true)]
     [InlineData(2_000_000, -5L, true)]
     public void IsOverCap_UnknownBitrateCountsAsOver(int? cap, long? bitrate, bool expected)
-        => Assert.Equal(expected, CappedStreamArgs.IsOverCap(cap, bitrate));
+        => CappedStreamArgs.IsOverCap(cap, bitrate).ShouldBe(expected);
 }

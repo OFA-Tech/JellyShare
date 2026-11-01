@@ -2,7 +2,6 @@ using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Requests.Shares;
 using JellyShare.UnitTests.Fakes;
-using Xunit;
 
 namespace JellyShare.UnitTests.Shares;
 
@@ -26,16 +25,16 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new CreateShareCommand("  bob  ", [FakeLibraries.MoviesId, FakeLibraries.MoviesId], 3, 8_000_000));
 
-        Assert.True(result.IsSuccess);
-        var saved = Assert.Single(_h.Saver.Saved!.Shares);
-        Assert.Equal(result.Value.Id, saved.Id);
-        Assert.Equal("bob", saved.Name);
-        Assert.Equal([FakeLibraries.MoviesId], saved.LibraryIds);
-        Assert.Equal(3, saved.MaxStreams);
-        Assert.Equal(8_000_000, saved.MaxBitrate);
-        Assert.True(saved.Enabled);
-        Assert.NotEqual(result.Value.Token, saved.TokenHash);
-        Assert.Same(saved, _h.Tokens.Verify(result.Value.Token, _h.Config.Current.Shares));
+        result.IsSuccess.ShouldBeTrue();
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.Id.ShouldBe(result.Value.Id);
+        saved.Name.ShouldBe("bob");
+        saved.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+        saved.MaxStreams.ShouldBe(3);
+        saved.MaxBitrate.ShouldBe(8_000_000);
+        saved.Enabled.ShouldBeTrue();
+        saved.TokenHash.ShouldNotBe(result.Value.Token);
+        _h.Tokens.Verify(result.Value.Token, _h.Config.Current.Shares).ShouldBeSameAs(saved);
     }
 
     [Theory]
@@ -47,9 +46,9 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new CreateShareCommand(name, [FakeLibraries.MoviesId], streams, bitrate));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal(message, result.Error.Description);
-        Assert.Equal(0, _h.Saver.Saves);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe(message);
+        _h.Saver.Saves.ShouldBe(0);
     }
 
     [Fact]
@@ -57,7 +56,7 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new CreateShareCommand("bob", [], 2, null));
 
-        Assert.Equal("Pick at least one library to share.", result.Error.Description);
+        result.Error.Description.ShouldBe("Pick at least one library to share.");
     }
 
     [Fact]
@@ -65,8 +64,8 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new CreateShareCommand("bob", [Guid.NewGuid()], 2, null));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal("One of the selected libraries does not exist.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe("One of the selected libraries does not exist.");
     }
 
     // ---- update ----
@@ -78,13 +77,13 @@ public sealed class ShareHandlerTests : IDisposable
 
         var result = await _h.Send(new UpdateShareCommand(share.Id, "carol", [FakeLibraries.ShowsId], 5, null, false));
 
-        Assert.True(result.IsSuccess);
-        Assert.Equal("carol", result.Value.Name);
-        Assert.False(result.Value.Enabled);
-        var saved = Assert.Single(_h.Saver.Saved!.Shares);
-        Assert.Equal("hash", saved.TokenHash);
-        Assert.Equal([FakeLibraries.ShowsId], saved.LibraryIds);
-        Assert.NotSame(share, saved);
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.Name.ShouldBe("carol");
+        result.Value.Enabled.ShouldBeFalse();
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.TokenHash.ShouldBe("hash");
+        saved.LibraryIds.ShouldBe([FakeLibraries.ShowsId]);
+        saved.ShouldNotBeSameAs(share);
     }
 
     [Fact]
@@ -92,8 +91,8 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new UpdateShareCommand(Guid.NewGuid(), " ", null, null, null, null));
 
-        Assert.Equal(ErrorType.NotFound, result.Error.Type);
-        Assert.Equal("Share not found.", result.Error.Description);
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Description.ShouldBe("Share not found.");
     }
 
     [Fact]
@@ -103,9 +102,9 @@ public sealed class ShareHandlerTests : IDisposable
 
         var result = await _h.Send(new UpdateShareCommand(share.Id, "bob", [FakeLibraries.MoviesId], 0, null, null));
 
-        Assert.Equal(ErrorType.Validation, result.Error.Type);
-        Assert.Equal("Max streams must be a number between 1 and 100.", result.Error.Description);
-        Assert.Equal(0, _h.Saver.Saves);
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        result.Error.Description.ShouldBe("Max streams must be a number between 1 and 100.");
+        _h.Saver.Saves.ShouldBe(0);
     }
 
     // ---- delete ----
@@ -117,8 +116,8 @@ public sealed class ShareHandlerTests : IDisposable
 
         var result = await _h.Send(new DeleteShareCommand(share.Id));
 
-        Assert.True(result.IsSuccess);
-        Assert.Empty(_h.Saver.Saved!.Shares);
+        result.IsSuccess.ShouldBeTrue();
+        _h.Saver.Saved!.Shares.ShouldBeEmpty();
     }
 
     [Fact]
@@ -126,8 +125,8 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var result = await _h.Send(new DeleteShareCommand(Guid.NewGuid()));
 
-        Assert.Equal(ErrorType.NotFound, result.Error.Type);
-        Assert.Equal("Share not found.", result.Error.Description);
-        Assert.Equal(0, _h.Saver.Saves);
+        result.Error.Type.ShouldBe(ErrorType.NotFound);
+        result.Error.Description.ShouldBe("Share not found.");
+        _h.Saver.Saves.ShouldBe(0);
     }
 }

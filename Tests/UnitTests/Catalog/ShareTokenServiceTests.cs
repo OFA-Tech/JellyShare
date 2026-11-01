@@ -3,11 +3,10 @@ using System.Text;
 using System.Xml.Serialization;
 using JellyShare.Application.Features.Catalog;
 using JellyShare.Domain.Models.Configuration;
-using Xunit;
 
 namespace JellyShare.UnitTests.Catalog;
 
-public class ShareTokenServiceTests
+public sealed class ShareTokenServiceTests
 {
     private readonly ShareTokenService _service = new();
 
@@ -16,18 +15,18 @@ public class ShareTokenServiceTests
     {
         var (token, hash) = _service.Create();
 
-        Assert.StartsWith("js1_", token, StringComparison.Ordinal);
+        token.ShouldStartWith("js1_", Case.Sensitive);
         var body = token.Substring(4);
-        Assert.Equal(43, body.Length);
-        Assert.DoesNotContain('=', body);
-        Assert.DoesNotContain('+', body);
-        Assert.DoesNotContain('/', body);
+        body.Length.ShouldBe(43);
+        body.ShouldNotContain('=');
+        body.ShouldNotContain('+');
+        body.ShouldNotContain('/');
 
         var expected = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
-        Assert.Equal(expected, hash);
-        Assert.Equal(64, hash.Length);
+        hash.ShouldBe(expected);
+        hash.Length.ShouldBe(64);
 
-        Assert.NotEqual(token, _service.Create().Token);
+        _service.Create().Token.ShouldNotBe(token);
     }
 
     [Fact]
@@ -38,7 +37,7 @@ public class ShareTokenServiceTests
         var mine = new PeerShare { Id = Guid.NewGuid(), Name = "mine", TokenHash = hash };
         var theirs = new PeerShare { Id = Guid.NewGuid(), Name = "theirs", TokenHash = other.Hash };
 
-        Assert.Same(mine, _service.Verify(token, new[] { theirs, mine }));
+        _service.Verify(token, new[] { theirs, mine }).ShouldBeSameAs(mine);
     }
 
     [Fact]
@@ -47,7 +46,7 @@ public class ShareTokenServiceTests
         var (_, hash) = _service.Create();
         var share = new PeerShare { TokenHash = hash };
 
-        Assert.Null(_service.Verify(_service.Create().Token, new[] { share }));
+        _service.Verify(_service.Create().Token, new[] { share }).ShouldBeNull();
     }
 
     [Fact]
@@ -56,7 +55,7 @@ public class ShareTokenServiceTests
         var (token, hash) = _service.Create();
         var share = new PeerShare { TokenHash = hash, Enabled = false };
 
-        Assert.Null(_service.Verify(token, new[] { share }));
+        _service.Verify(token, new[] { share }).ShouldBeNull();
     }
 
     [Theory]
@@ -68,7 +67,7 @@ public class ShareTokenServiceTests
         var (_, hash) = _service.Create();
         var share = new PeerShare { TokenHash = hash };
 
-        Assert.Null(_service.Verify(presented, new[] { share }));
+        _service.Verify(presented, new[] { share }).ShouldBeNull();
     }
 
     [Fact]
@@ -83,7 +82,7 @@ public class ShareTokenServiceTests
             new PeerShare { TokenHash = hash },
         };
 
-        Assert.Same(shares[3], _service.Verify(token, shares));
+        _service.Verify(token, shares).ShouldBeSameAs(shares[3]);
     }
 }
 

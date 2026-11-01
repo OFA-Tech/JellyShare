@@ -8,7 +8,6 @@ using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.Logging.Abstractions;
-using Xunit;
 
 namespace JellyShare.UnitTests.Storage;
 
@@ -36,32 +35,32 @@ public sealed class SyncReportStoreTests : IDisposable
         SyncReportStore.Save(_tmp.Sub("data"), report);
         var loaded = SyncReportStore.Load(_tmp.Sub("data"));
 
-        Assert.NotNull(loaded);
-        Assert.Equal(report.Offered, loaded!.Offered);
-        Assert.Equal(report.Unmatched, loaded.Unmatched);
-        Assert.Equal(report.SkippedLocal, loaded.SkippedLocal);
-        Assert.Equal(report.Written, loaded.Written);
-        Assert.Equal(report.Deleted, loaded.Deleted);
-        Assert.Equal(report.PeerErrors, loaded.PeerErrors);
-        Assert.Equal(report.Skipped, loaded.Skipped);
-        Assert.Equal(report.Conflicts, loaded.Conflicts);
-        Assert.Equal(report.Scanned, loaded.Scanned);
-        Assert.Equal(report.PendingScans, loaded.PendingScans);
-        Assert.Equal(report.ImagesWritten, loaded.ImagesWritten);
-        Assert.Equal(report.UncheckedLocalFiles, loaded.UncheckedLocalFiles);
-        Assert.Equal(report.MissingLocalFiles, loaded.MissingLocalFiles);
-        Assert.Equal(report.FinishedUtc, loaded.FinishedUtc);
+        loaded.ShouldNotBeNull();
+        loaded!.Offered.ShouldBe(report.Offered);
+        loaded.Unmatched.ShouldBe(report.Unmatched);
+        loaded.SkippedLocal.ShouldBe(report.SkippedLocal);
+        loaded.Written.ShouldBe(report.Written);
+        loaded.Deleted.ShouldBe(report.Deleted);
+        loaded.PeerErrors.ShouldBe(report.PeerErrors);
+        loaded.Skipped.ShouldBe(report.Skipped);
+        loaded.Conflicts.ShouldBe(report.Conflicts);
+        loaded.Scanned.ShouldBe(report.Scanned);
+        loaded.PendingScans.ShouldBe(report.PendingScans);
+        loaded.ImagesWritten.ShouldBe(report.ImagesWritten);
+        loaded.UncheckedLocalFiles.ShouldBe(report.UncheckedLocalFiles);
+        loaded.MissingLocalFiles.ShouldBe(report.MissingLocalFiles);
+        loaded.FinishedUtc.ShouldBe(report.FinishedUtc);
     }
 
     [Fact]
     public void Load_MissingOrCorruptFile_IsNull()
     {
-        Assert.Null(SyncReportStore.Load(_tmp.Sub("data")));
+        SyncReportStore.Load(_tmp.Sub("data")).ShouldBeNull();
 
         Directory.CreateDirectory(_tmp.Sub("data"));
         File.WriteAllText(Path.Combine(_tmp.Sub("data"), SyncReportStore.FileName), "{ not json");
 
-        Assert.Null(SyncReportStore.Load(_tmp.Sub("data")));
+        SyncReportStore.Load(_tmp.Sub("data")).ShouldBeNull();
     }
 
     [Fact]
@@ -81,13 +80,13 @@ public sealed class SyncReportStoreTests : IDisposable
             NullLogger<SyncService>.Instance);
 
         var first = Create();
-        Assert.Null(first.LastReport);
+        first.LastReport.ShouldBeNull();
         var report = await first.RunAsync(CancellationToken.None);
 
         var restarted = Create();
 
-        Assert.NotNull(restarted.LastReport);
-        Assert.Equal(report.Offered, restarted.LastReport!.Offered);
-        Assert.Equal(report.FinishedUtc, restarted.LastReport.FinishedUtc);
+        restarted.LastReport.ShouldNotBeNull();
+        restarted.LastReport!.Offered.ShouldBe(report.Offered);
+        restarted.LastReport.FinishedUtc.ShouldBe(report.FinishedUtc);
     }
 }

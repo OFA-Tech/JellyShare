@@ -14,7 +14,6 @@ using JellyShare.UnitTests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Modules;
 
@@ -24,14 +23,14 @@ public sealed class InfrastructureModuleLoaderTests
 
     [Fact]
     public void DefaultLoader_ListsPeersFilesAndMedia_InThatOrder()
-        => Assert.Equal(["Peers", "Files", "Media"], new InfrastructureModuleLoader().Modules.Select(m => m.Name));
+        => (new InfrastructureModuleLoader().Modules.Select(m => m.Name)).ShouldBe(["Peers", "Files", "Media"]);
 
     [Fact]
     public void DuplicateNames_AreRejected()
     {
-        var ex = Assert.Throws<InvalidOperationException>(() => new InfrastructureModuleLoader([new PeersModule(), new FakeModule("Peers", true)]));
+        var ex = Should.Throw<InvalidOperationException>(() => new InfrastructureModuleLoader([new PeersModule(), new FakeModule("Peers", true)]));
 
-        Assert.Contains("Peers", ex.Message, StringComparison.Ordinal);
+        ex.Message.ShouldContain("Peers", Case.Sensitive);
     }
 
     [Fact]
@@ -44,11 +43,11 @@ public sealed class InfrastructureModuleLoaderTests
 
         var loaded = loader.Load(services, Context);
 
-        Assert.Equal(["On"], loaded);
-        Assert.Equal(loaded, loader.Loaded);
-        Assert.True(on.Registered);
-        Assert.False(off.Registered);
-        Assert.Contains(services, d => d.ServiceType == typeof(InfrastructureModuleLoader) && d.ImplementationInstance == loader);
+        loaded.ShouldBe(["On"]);
+        loader.Loaded.ShouldBe(loaded);
+        on.Registered.ShouldBeTrue();
+        off.Registered.ShouldBeFalse();
+        services.ShouldContain(d => d.ServiceType == typeof(InfrastructureModuleLoader) && d.ImplementationInstance == loader);
     }
 
     [Fact]
@@ -58,7 +57,7 @@ public sealed class InfrastructureModuleLoaderTests
 
         new InfrastructureModuleLoader().Load(services, Context);
 
-        Assert.NotEmpty(services);
+        services.ShouldNotBeEmpty();
     }
 
     [Fact]
@@ -70,9 +69,9 @@ public sealed class InfrastructureModuleLoaderTests
 
         loader.LogLoaded(logger);
 
-        var entry = Assert.Single(logger.Entries);
-        Assert.Equal(LogLevel.Information, entry.Level);
-        Assert.Equal("JellyShare infrastructure modules enabled: A, B.", entry.Message);
+        var entry = logger.Entries.ShouldHaveSingleItem();
+        entry.Level.ShouldBe(LogLevel.Information);
+        entry.Message.ShouldBe("JellyShare infrastructure modules enabled: A, B.");
     }
 
     [Theory]
@@ -84,13 +83,13 @@ public sealed class InfrastructureModuleLoaderTests
         var module = (IInfrastructureModule)Activator.CreateInstance(moduleType)!;
         var services = new ServiceCollection();
 
-        Assert.True(module.IsEnabled(Context));
+        module.IsEnabled(Context).ShouldBeTrue();
         module.Register(services, Context);
 
         foreach (var port in ports)
         {
-            var descriptor = Assert.Single(services, d => d.ServiceType == port);
-            Assert.Equal(ServiceLifetime.Singleton, descriptor.Lifetime);
+            var descriptor = services.Where(d => d.ServiceType == port).ShouldHaveSingleItem();
+            descriptor.Lifetime.ShouldBe(ServiceLifetime.Singleton);
         }
     }
 
@@ -101,9 +100,9 @@ public sealed class InfrastructureModuleLoaderTests
 
         services.AddModulesSetup(new JellyShareSettings(), () => "/data");
 
-        Assert.Contains(services, d => d.ServiceType == typeof(IPeerClient));
-        Assert.Contains(services, d => d.ServiceType == typeof(IFfmpegRunner));
-        Assert.Contains(services, d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(InfrastructureModuleLog));
+        services.ShouldContain(d => d.ServiceType == typeof(IPeerClient));
+        services.ShouldContain(d => d.ServiceType == typeof(IFfmpegRunner));
+        services.ShouldContain(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(InfrastructureModuleLog));
     }
 
     private sealed class FakeModule(string name, bool enabled) : IInfrastructureModule

@@ -18,7 +18,6 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Xunit;
 
 namespace JellyShare.JellyfinTests.Filters;
 
@@ -90,12 +89,12 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var info = await Post(Placeholder, Body());
 
-        var source = Assert.Single(info.MediaSources);
-        Assert.Equal(string.Empty, source.Path);
-        Assert.False(source.SupportsDirectPlay);
-        Assert.True(source.SupportsDirectStream);
-        Assert.True(source.SupportsTranscoding);
-        Assert.Null(source.TranscodingUrl);
+        var source = info.MediaSources.ShouldHaveSingleItem();
+        source.Path.ShouldBe(string.Empty);
+        source.SupportsDirectPlay.ShouldBeFalse();
+        source.SupportsDirectStream.ShouldBeTrue();
+        source.SupportsTranscoding.ShouldBeTrue();
+        source.TranscodingUrl.ShouldBeNull();
     }
 
     [Fact]
@@ -103,11 +102,11 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 1_000_000));
 
-        var source = Assert.Single(info.MediaSources);
-        Assert.False(source.SupportsDirectPlay);
-        Assert.False(source.SupportsDirectStream);
-        Assert.Equal("/transcode?bitrate=1000000", source.TranscodingUrl);
-        Assert.Equal(string.Empty, source.Path);
+        var source = info.MediaSources.ShouldHaveSingleItem();
+        source.SupportsDirectPlay.ShouldBeFalse();
+        source.SupportsDirectStream.ShouldBeFalse();
+        source.TranscodingUrl.ShouldBe("/transcode?bitrate=1000000");
+        source.Path.ShouldBe(string.Empty);
     }
 
     [Fact]
@@ -115,7 +114,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 50_000_000), "?maxStreamingBitrate=1000000");
 
-        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeFalse();
     }
 
     [Fact]
@@ -123,7 +122,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var info = await Post(Placeholder, Body(profileMax: 800_000));
 
-        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeFalse();
     }
 
     [Fact]
@@ -133,7 +132,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 120_000_000));
 
-        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeFalse();
     }
 
     [Fact]
@@ -141,9 +140,9 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         await Post(Placeholder, Body(maxStreamingBitrate: 120_000_000));
 
-        var caller = Assert.Single(_placeholders.Callers);
-        Assert.Equal("device-1", caller.DeviceId);
-        Assert.NotNull(caller.RemoteAddress);
+        var caller = _placeholders.Callers.ShouldHaveSingleItem();
+        caller.DeviceId.ShouldBe("device-1");
+        caller.RemoteAddress.ShouldNotBeNull();
     }
 
     [Fact]
@@ -154,8 +153,8 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 120_000_000));
 
-        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
-        Assert.Empty(_placeholders.Callers);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeTrue();
+        _placeholders.Callers.ShouldBeEmpty();
     }
 
     [Fact]
@@ -165,7 +164,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, new { MaxStreamingBitrate = (int?)null });
 
-        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeFalse();
     }
 
     [Fact]
@@ -175,7 +174,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, null);
 
-        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeFalse();
     }
 
     [Fact]
@@ -185,7 +184,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, Body(profileMax: 120_000_000));
 
-        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeTrue();
     }
 
     [Fact]
@@ -195,7 +194,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, new { MaxStreamingBitrate = 120_000_000 });
 
-        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeTrue();
     }
 
     [Fact]
@@ -205,9 +204,9 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var list = await Get<BaseItemDto[]>("/Users/" + Guid.NewGuid() + "/Items/" + Placeholder + "/SpecialFeatures");
 
-        Assert.Equal(new[] { string.Empty, LocalPath, OtherHttp }, list.Select(i => i.MediaSources.Single().Path));
-        Assert.False(list[0].MediaSources.Single().SupportsDirectPlay);
-        Assert.Equal(1, FakeMediaInfoController.LazyEnumerations);
+        list.Select(i => i.MediaSources.Single().Path).ShouldBe(new[] { string.Empty, LocalPath, OtherHttp });
+        list[0].MediaSources.Single().SupportsDirectPlay.ShouldBeFalse();
+        FakeMediaInfoController.LazyEnumerations.ShouldBe(1);
     }
 
     [Fact]
@@ -215,10 +214,10 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 120_000_000));
 
-        var source = Assert.Single(info.MediaSources);
-        Assert.False(source.SupportsDirectPlay);
-        Assert.True(source.SupportsDirectStream);
-        Assert.Null(source.TranscodingUrl);
+        var source = info.MediaSources.ShouldHaveSingleItem();
+        source.SupportsDirectPlay.ShouldBeFalse();
+        source.SupportsDirectStream.ShouldBeTrue();
+        source.TranscodingUrl.ShouldBeNull();
     }
 
     [Fact]
@@ -228,33 +227,33 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 1_000_000));
 
-        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
+        info.MediaSources.ShouldHaveSingleItem().SupportsDirectStream.ShouldBeTrue();
     }
 
     [Fact]
     public async Task Filter_IgnoresNonPlaceholderItems()
     {
-        var local = Assert.Single((await Post(Local, Body(maxStreamingBitrate: 1_000))).MediaSources);
-        var other = Assert.Single((await Post(OtherStrm, Body(maxStreamingBitrate: 1_000))).MediaSources);
+        var local = ((await Post(Local, Body(maxStreamingBitrate: 1_000))).MediaSources).ShouldHaveSingleItem();
+        var other = ((await Post(OtherStrm, Body(maxStreamingBitrate: 1_000))).MediaSources).ShouldHaveSingleItem();
 
-        Assert.Equal(LocalPath, local.Path);
-        Assert.True(local.SupportsDirectPlay);
-        Assert.True(local.SupportsDirectStream);
-        Assert.Equal(OtherHttp, other.Path);
-        Assert.True(other.SupportsDirectPlay);
-        Assert.True(other.SupportsDirectStream);
+        local.Path.ShouldBe(LocalPath);
+        local.SupportsDirectPlay.ShouldBeTrue();
+        local.SupportsDirectStream.ShouldBeTrue();
+        other.Path.ShouldBe(OtherHttp);
+        other.SupportsDirectPlay.ShouldBeTrue();
+        other.SupportsDirectStream.ShouldBeTrue();
     }
 
     [Fact]
     public async Task Filter_RunsOnGetAndPostPlaybackInfo()
     {
-        var get = Assert.Single((await Get<PlaybackInfoResponse>("/Items/" + Placeholder + "/PlaybackInfo")).MediaSources);
-        var post = Assert.Single((await Post(Placeholder, null)).MediaSources);
+        var get = ((await Get<PlaybackInfoResponse>("/Items/" + Placeholder + "/PlaybackInfo")).MediaSources).ShouldHaveSingleItem();
+        var post = ((await Post(Placeholder, null)).MediaSources).ShouldHaveSingleItem();
 
-        Assert.Equal(string.Empty, get.Path);
-        Assert.False(get.SupportsDirectPlay);
-        Assert.Equal(string.Empty, post.Path);
-        Assert.False(post.SupportsDirectPlay);
+        get.Path.ShouldBe(string.Empty);
+        get.SupportsDirectPlay.ShouldBeFalse();
+        post.Path.ShouldBe(string.Empty);
+        post.SupportsDirectPlay.ShouldBeFalse();
     }
 
     [Fact]
@@ -262,9 +261,9 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     {
         var dto = await Get<BaseItemDto>("/Users/" + Guid.NewGuid() + "/Items/" + Placeholder);
 
-        var source = Assert.Single(dto.MediaSources);
-        Assert.Equal(string.Empty, source.Path);
-        Assert.False(source.SupportsDirectPlay);
+        var source = dto.MediaSources.ShouldHaveSingleItem();
+        source.Path.ShouldBe(string.Empty);
+        source.SupportsDirectPlay.ShouldBeFalse();
     }
 
     [Fact]
@@ -273,8 +272,8 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
         var result = await Get<QueryResult<BaseItemDto>>("/Items?Fields=MediaSources");
         var list = await Get<BaseItemDto[]>("/Items/Latest");
 
-        Assert.Equal(new[] { string.Empty, LocalPath, OtherHttp }, result.Items.Select(i => i.MediaSources.Single().Path));
-        Assert.Equal(new[] { string.Empty, LocalPath, OtherHttp }, list.Select(i => i.MediaSources.Single().Path));
+        result.Items.Select(i => i.MediaSources.Single().Path).ShouldBe(new[] { string.Empty, LocalPath, OtherHttp });
+        list.Select(i => i.MediaSources.Single().Path).ShouldBe(new[] { string.Empty, LocalPath, OtherHttp });
     }
 
     private sealed class FakePlaceholders : IPlaceholderLookup
