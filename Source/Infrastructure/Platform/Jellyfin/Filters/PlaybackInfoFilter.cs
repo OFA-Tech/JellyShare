@@ -1,6 +1,5 @@
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Relay;
-using JellyShare.Domain.Models.Relay;
 using JellyShare.Jellyfin.Adapters;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Dto;
@@ -26,7 +25,7 @@ namespace JellyShare.Jellyfin.Filters;
 /// URLs.</item>
 /// </list>
 /// </summary>
-public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
+internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
 {
     /// <summary>The route template of Jellyfin's GET and POST PlaybackInfo actions.</summary>
     public const string PlaybackInfoTemplate = "Items/{itemId}/PlaybackInfo";
@@ -242,7 +241,7 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
             ? new CallerLimits(null, null)
             : await _lookup.GetCallerLimitsAsync(caller).ConfigureAwait(false);
         var requested = RequestedBitrate(context, body, limits.StoredProfileBitrate);
-        if (PlaybackBitrateRule.ForcedTranscodeLimit(sourceBitrate, requested, limits.RemoteLimit) is not { } limit)
+        if (PlaybackBitrateRule.ForcedTranscodeLimit(sourceBitrate, JellyfinBitrateRules.EffectiveMaxBitrate(requested, limits.RemoteLimit)) is not { } limit)
         {
             return;
         }

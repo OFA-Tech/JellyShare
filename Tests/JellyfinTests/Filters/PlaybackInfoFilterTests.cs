@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Relay;
-using JellyShare.Domain.Models.Relay;
+using JellyShare.Jellyfin.Adapters;
 using JellyShare.Jellyfin.Filters;
 using JellyShare.UnitTests.Fakes;
 using MediaBrowser.Controller.Net;

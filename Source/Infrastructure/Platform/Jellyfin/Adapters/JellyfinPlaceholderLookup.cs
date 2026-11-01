@@ -2,7 +2,6 @@ using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Sync;
-using JellyShare.Domain.Models.Relay;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Devices;
@@ -12,7 +11,7 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.Jellyfin.Adapters;
 
 /// <summary><see cref="IPlaceholderLookup"/> backed by the Jellyfin library, devices and network settings.</summary>
-public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
+internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
 {
     private readonly ILibraryManager _library;
     private readonly IDeviceManager _devices;
@@ -93,7 +92,7 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     {
         try
         {
-            return PlaybackBitrateRule.RemoteLimit(
+            return JellyfinBitrateRules.RemoteLimit(
                 caller.UserRemoteBitrateLimit,
                 _serverConfig.Configuration.RemoteClientBitrateLimit,
                 caller.RemoteAddress,

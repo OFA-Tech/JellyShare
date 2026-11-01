@@ -1,4 +1,3 @@
-using System.Net;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Sync;
@@ -7,73 +6,23 @@ namespace JellyShare.Application.Features.Relay;
 
 /// <summary>
 /// Decides when a relay placeholder must be transcoded: Jellyfin never applies bitrate limits to remote sources
-/// itself, so direct play and direct stream are turned off when the caller's effective max bitrate is below the
-/// source bitrate.
+/// itself, so direct play and direct stream are turned off when the caller's max bitrate is below the source bitrate.
+/// How the max bitrate is derived is Jellyfin's rule and lives in the Jellyfin project.
 /// </summary>
 public static class PlaybackBitrateRule
 {
-    /// <summary>
-    /// Computes the max bitrate Jellyfin will apply: the requested one (query, then body, then device profile),
-    /// capped by the remote-client limit when one applies (Jellyfin's <c>MediaInfoHelper.GetMaxBitrate</c>).
-    /// </summary>
-    /// <param name="requested">The bitrate the client asked for.</param>
-    /// <param name="remoteLimit">The remote-client limit, if it applies.</param>
-    /// <returns>The effective limit, or <c>null</c> when none.</returns>
-    public static int? EffectiveMaxBitrate(int? requested, int? remoteLimit)
-    {
-        if (remoteLimit is > 0)
-        {
-            return Math.Min(requested ?? remoteLimit.Value, remoteLimit.Value);
-        }
-
-        return requested;
-    }
-
     /// <summary>Gets the limit that forces a transcode of a placeholder, if any.</summary>
     /// <param name="sourceBitrate">The source bitrate in bit/s, if known.</param>
-    /// <param name="requested">The bitrate the client asked for (query, body, or device profile).</param>
-    /// <param name="remoteLimit">The remote-client limit, if it applies.</param>
-    /// <returns>The effective limit when it is positive and below the source bitrate; otherwise <c>null</c>.</returns>
-    public static int? ForcedTranscodeLimit(int? sourceBitrate, int? requested, int? remoteLimit)
+    /// <param name="maxBitrate">The max bitrate Jellyfin will apply to the caller, if any.</param>
+    /// <returns>The max bitrate when it is positive and below the source bitrate; otherwise <c>null</c>.</returns>
+    public static int? ForcedTranscodeLimit(int? sourceBitrate, int? maxBitrate)
     {
         if (sourceBitrate is not { } source || source <= 0)
         {
             return null;
         }
 
-        var max = EffectiveMaxBitrate(requested, remoteLimit);
-        return max is { } limit && limit > 0 && limit < source ? limit : null;
-    }
-
-    /// <summary>
-    /// Decides the remote-client bitrate limit that applies to a caller (Jellyfin's <c>MediaInfoHelper.GetMaxBitrate</c>):
-    /// the user's own limit, else the server's, and only when the caller is not in the local network.
-    /// </summary>
-    /// <param name="userLimit">The calling user's remote-client limit, or <c>null</c>/0 when none.</param>
-    /// <param name="serverLimit">The server-wide remote-client limit (0 or less means none).</param>
-    /// <param name="remoteAddress">The caller's address, if known.</param>
-    /// <param name="isInLocalNetwork">Tells whether an address is in the local network.</param>
-    /// <returns>The limit, or <c>null</c> when none applies.</returns>
-    public static int? RemoteLimit(int? userLimit, int serverLimit, IPAddress? remoteAddress, Func<IPAddress, bool> isInLocalNetwork)
-    {
-        ArgumentNullException.ThrowIfNull(isInLocalNetwork);
-        var limit = userLimit ?? 0;
-        if (limit <= 0)
-        {
-            limit = serverLimit;
-        }
-
-        if (limit <= 0 || remoteAddress is null)
-        {
-            return null;
-        }
-
-        if (remoteAddress.IsIPv4MappedToIPv6)
-        {
-            remoteAddress = remoteAddress.MapToIPv4();
-        }
-
-        return isInLocalNetwork(remoteAddress) ? null : limit;
+        return maxBitrate is { } limit && limit > 0 && limit < source ? limit : null;
     }
 
     /// <summary>

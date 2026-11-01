@@ -1,4 +1,3 @@
-using JellyShare.Domain.Models.Relay;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -6,7 +5,7 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.Jellyfin.Adapters;
 
 /// <summary>Turns a Jellyfin request into the plain <see cref="CallerContext"/> the bitrate limits depend on.</summary>
-public sealed class JellyfinCallerResolver
+internal sealed class JellyfinCallerResolver
 {
     private readonly IAuthorizationContext _auth;
     private readonly ILogger<JellyfinCallerResolver> _logger;

@@ -1,11 +1,11 @@
 using System.Net;
 
-namespace JellyShare.Domain.Models.Relay;
+namespace JellyShare.Jellyfin.Adapters;
 
 /// <summary>A library item that is a JellyShare relay placeholder.</summary>
 /// <param name="CanonicalKey">The merged-index key from its <c>.strm</c> URL.</param>
 /// <param name="SourceBitrate">The source bitrate in bit/s (stored media info, else the peer's catalog), if known.</param>
-public sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate);
+internal sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate);
 
 /// <summary>Bitrate limits of a caller that Jellyfin applies besides the request values.</summary>
 /// <param name="RemoteLimit">
@@ -16,10 +16,10 @@ public sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate);
 /// <c>MaxStreamingBitrate</c> of the device profile Jellyfin stored for the caller's device, which it uses when the
 /// request carries no profile (<c>IDeviceManager.GetCapabilities</c>).
 /// </param>
-public sealed record CallerLimits(int? RemoteLimit, int? StoredProfileBitrate);
+internal sealed record CallerLimits(int? RemoteLimit, int? StoredProfileBitrate);
 
 /// <summary>The caller of a request, as far as the bitrate limits depend on it.</summary>
 /// <param name="UserRemoteBitrateLimit">The calling user's remote-client bitrate limit, or <c>null</c>/0 when none.</param>
 /// <param name="DeviceId">The calling device id, if known.</param>
 /// <param name="RemoteAddress">The caller's IP address, if known.</param>
-public sealed record CallerContext(int? UserRemoteBitrateLimit, string? DeviceId, IPAddress? RemoteAddress);
+internal sealed record CallerContext(int? UserRemoteBitrateLimit, string? DeviceId, IPAddress? RemoteAddress);

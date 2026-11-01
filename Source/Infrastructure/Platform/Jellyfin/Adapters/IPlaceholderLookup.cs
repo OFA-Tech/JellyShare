@@ -1,9 +1,7 @@
-using JellyShare.Domain.Models.Relay;
-
-namespace JellyShare.Domain.Interfaces.Relay;
+namespace JellyShare.Jellyfin.Adapters;
 
 /// <summary>What the PlaybackInfo filter needs to know about items and callers.</summary>
-public interface IPlaceholderLookup
+internal interface IPlaceholderLookup
 {
     /// <summary>Finds a relay placeholder item.</summary>
     /// <param name="itemId">The library item id.</param>
