@@ -373,6 +373,35 @@ public sealed class SyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Sync_PeerFetchThrowsIOException_RecordsPeerErrorAndOthersStillSync()
+    {
+        var bob = new RemotePeer { Id = Guid.NewGuid(), Name = "bob", BaseUrl = "http://bob", Token = "t2", Priority = 1 };
+        _config.Current.Peers.Add(bob);
+        _client.Catalogs[_alice.Id] = _ => throw new IOException("response ended prematurely");
+        _client.Catalogs[bob.Id] = _ => FakePeerClient.Ok(Bunny());
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.True(MoviePlaceholder(BunnyDir));
+        Assert.Single(report.PeerErrors);
+        Assert.StartsWith("alice: connection failed", report.PeerErrors[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Sync_PeerFetchThrows_KeepsItsLastGoodCatalog()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        _client.Catalogs[_alice.Id] = _ => throw new HttpRequestException("reset");
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.True(MoviePlaceholder(BunnyDir));
+        Assert.Single(report.PeerErrors);
+        Assert.Equal(0, report.Deleted);
+    }
+
+    [Fact]
     public async Task Sync_OverlappingRuns_AreSerialized()
     {
         Offer(Bunny());

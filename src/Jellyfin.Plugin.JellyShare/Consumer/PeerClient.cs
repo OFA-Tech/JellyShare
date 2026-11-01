@@ -209,6 +209,11 @@ public sealed class PeerClient : IPeerClient
         {
             return PingFail(PingFailure.Unreachable, ex.Message);
         }
+        catch (IOException ex)
+        {
+            // HttpIOException and other mid-body connection drops.
+            return PingFail(PingFailure.Unreachable, ex.Message);
+        }
     }
 
     private static bool TryGetString(JsonElement obj, string name, out string value)
@@ -293,6 +298,11 @@ public sealed class PeerClient : IPeerClient
         }
         catch (HttpRequestException ex)
         {
+            return Fail("connection failed: " + Redact(ex.Message, peer.Token));
+        }
+        catch (IOException ex)
+        {
+            // HttpIOException (an IOException, not an HttpRequestException) when the connection drops mid-body.
             return Fail("connection failed: " + Redact(ex.Message, peer.Token));
         }
     }

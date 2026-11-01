@@ -161,6 +161,79 @@ public class PeerClientTests
         Assert.StartsWith("connection failed", result.Error, StringComparison.Ordinal);
     }
 
+    private sealed class DroppingStream : Stream
+    {
+        private readonly byte[] _head;
+        private int _pos;
+
+        public DroppingStream(string head, string token)
+        {
+            _head = Encoding.UTF8.GetBytes(head);
+            Token = token;
+        }
+
+        public string Token { get; }
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => _pos; set => throw new NotSupportedException(); }
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            if (_pos >= _head.Length)
+            {
+                throw new HttpIOException(HttpRequestError.ResponseEnded, "The response ended prematurely " + Token);
+            }
+
+            var n = Math.Min(count, _head.Length - _pos);
+            Array.Copy(_head, _pos, buffer, offset, n);
+            _pos += n;
+            return n;
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private static HttpResponseMessage Dropping(string head)
+        => new(HttpStatusCode.OK) { Content = new StreamContent(new DroppingStream(head, Token)) };
+
+    [Fact]
+    public async Task PeerClient_MidBodyDrop_IsConnectionError_WithoutToken()
+    {
+        var (client, _) = Create(new FakeHandler(_ => Dropping("{\"protocolVersion\":\"1.0\",\"items\":[{\"id\":\"m1\",")));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.StartsWith("connection failed", result.Error, StringComparison.Ordinal);
+        Assert.DoesNotContain(Token, result.Error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PeerClient_Ping_MidBodyDrop_IsUnreachable()
+    {
+        var (client, _) = Create(new FakeHandler(_ => Dropping("{\"protocolVersion\":")));
+
+        var result = await client.PingAsync("https://h/jellyfin", CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.Equal(PingFailure.Unreachable, result.Failure);
+    }
+
     [Fact]
     public async Task PeerClient_InvalidJson_IsError()
     {

@@ -379,7 +379,17 @@ public sealed class SyncService : ISyncRunner
         CancellationToken ct)
     {
         var etag = state.LastGoodCatalog is null ? null : state.Etag;
-        var result = await _client.FetchCatalogAsync(peer, etag, ct).ConfigureAwait(false);
+        PeerFetchResult result;
+        try
+        {
+            result = await _client.FetchCatalogAsync(peer, etag, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            // One flaky peer must never fail the whole sync: record it like any other fetch failure.
+            result = new PeerFetchResult(false, false, null, "connection failed: " + ex.GetType().Name);
+        }
+
 
         if (result.Ok && result.Catalog is not null)
         {
