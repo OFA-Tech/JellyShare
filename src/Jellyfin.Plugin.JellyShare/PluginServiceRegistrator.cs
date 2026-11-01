@@ -33,7 +33,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             sp.GetRequiredService<IConfigProvider>()));
 
         serviceCollection.AddSingleton<IRelayBase, JellyfinRelayBase>();
-        serviceCollection.AddHttpClient(PeerClient.HttpClientName)
+        serviceCollection.AddHttpClient(PeerClient.HttpClientName, c => c.Timeout = PeerClient.HttpClientTimeout)
             .ConfigurePrimaryHttpMessageHandler(PeerClient.CreatePrimaryHandler);
         serviceCollection.AddSingleton<IPeerClient>(sp =>
         {

@@ -84,8 +84,18 @@ public interface IPeerClient
 /// <summary>HTTP client for the <c>/JellyShare/v1</c> provider API. The token is only ever sent as a header.</summary>
 public sealed class PeerClient : IPeerClient
 {
-    /// <summary>Timeout for catalog and image requests.</summary>
+    /// <summary>Timeout for image requests (and the cap for pings).</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
+
+    /// <summary>Timeout for catalog requests: a large catalog takes a while to build and transfer.</summary>
+    public static readonly TimeSpan CatalogTimeout = TimeSpan.FromSeconds(120);
+
+    /// <summary>The <see cref="HttpClient.Timeout"/> for peer clients; above every per-request timeout used here.</summary>
+    public static readonly TimeSpan HttpClientTimeout = TimeSpan.FromSeconds(150);
+
+    private static readonly ProductInfoHeaderValue UserAgent = new(
+        "JellyShare",
+        typeof(PeerClient).Assembly.GetName().Version?.ToString() ?? "0");
 
     private const long MaxImageBytes = 32L * 1024 * 1024;
     private const long MaxPingBytes = 64 * 1024;
@@ -103,14 +113,19 @@ public sealed class PeerClient : IPeerClient
 
     private readonly Func<HttpClient> _client;
     private readonly TimeSpan _timeout;
+    private readonly TimeSpan _catalogTimeout;
 
     /// <summary>Initializes a new instance of the <see cref="PeerClient"/> class.</summary>
     /// <param name="client">Returns the HTTP client to use (for example from <c>IHttpClientFactory</c>).</param>
-    /// <param name="timeout">Timeout for catalog and image requests; defaults to <see cref="DefaultTimeout"/>.</param>
-    public PeerClient(Func<HttpClient> client, TimeSpan? timeout = null)
+    /// <param name="timeout">Timeout for image requests and pings; defaults to <see cref="DefaultTimeout"/>.</param>
+    /// <param name="catalogTimeout">
+    /// Timeout for catalog requests; defaults to <see cref="CatalogTimeout"/>, or to <paramref name="timeout"/> when only that is given.
+    /// </param>
+    public PeerClient(Func<HttpClient> client, TimeSpan? timeout = null, TimeSpan? catalogTimeout = null)
     {
         _client = client;
         _timeout = timeout ?? DefaultTimeout;
+        _catalogTimeout = catalogTimeout ?? timeout ?? CatalogTimeout;
     }
 
     /// <summary>Name of the HTTP client registered for peer requests (see <see cref="CreatePrimaryHandler"/>).</summary>
@@ -158,6 +173,7 @@ public sealed class PeerClient : IPeerClient
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
+            request.Headers.UserAgent.Add(UserAgent);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             using var response = await _client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
             var code = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
@@ -244,7 +260,7 @@ public sealed class PeerClient : IPeerClient
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(_timeout);
+        cts.CancelAfter(_catalogTimeout);
         try
         {
             using var request = CreateRequest(peer, uri);
@@ -368,7 +384,9 @@ public sealed class PeerClient : IPeerClient
         ArgumentNullException.ThrowIfNull(peer);
         var uri = BuildUri(peer.BaseUrl, "JellyShare/v1/stream/" + Uri.EscapeDataString(itemId))
             ?? throw new InvalidOperationException("invalid base url");
-        var request = CreateRequest(peer, uri);
+        // A GET has no content, so the request message can be disposed as soon as the headers arrived; the
+        // response (and its body stream) stays valid until the caller disposes it.
+        using var request = CreateRequest(peer, uri);
         if (!string.IsNullOrWhiteSpace(range))
         {
             request.Headers.TryAddWithoutValidation("Range", range);
@@ -380,7 +398,6 @@ public sealed class PeerClient : IPeerClient
         }
         catch (HttpRequestException ex)
         {
-            request.Dispose();
             throw new HttpRequestException("connection failed: " + Redact(ex.Message, peer.Token), null, ex.StatusCode);
         }
     }
@@ -388,6 +405,7 @@ public sealed class PeerClient : IPeerClient
     private static HttpRequestMessage CreateRequest(RemotePeer peer, Uri uri)
     {
         var request = new HttpRequestMessage(HttpMethod.Get, uri);
+        request.Headers.UserAgent.Add(UserAgent);
         request.Headers.TryAddWithoutValidation(Provider.FederationController.TokenHeader, peer.Token ?? string.Empty);
         return request;
     }

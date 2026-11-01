@@ -152,6 +152,51 @@ public class PeerClientTests
     }
 
     [Fact]
+    public async Task PeerClient_CatalogHasLongerTimeoutThanImages()
+    {
+        var handler = new FakeHandler(async (r, ct) =>
+        {
+            await Task.Delay(300, ct);
+            return r.RequestUri!.AbsolutePath.EndsWith("/catalog", StringComparison.Ordinal)
+                ? Json(MinimalCatalog)
+                : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(new byte[] { 1 }) };
+        });
+        var client = new PeerClient(() => new HttpClient(handler, false), TimeSpan.FromMilliseconds(100), TimeSpan.FromSeconds(5));
+
+        var catalog = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+        var image = await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
+
+        Assert.True(catalog.Ok, catalog.Error);
+        Assert.Null(image);
+        Assert.Equal(TimeSpan.FromSeconds(120), PeerClient.CatalogTimeout);
+        Assert.True(PeerClient.HttpClientTimeout > PeerClient.CatalogTimeout);
+    }
+
+    [Fact]
+    public async Task PeerClient_SendsJellyShareUserAgent()
+    {
+        var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
+        await client.PingAsync("https://h/jellyfin", CancellationToken.None);
+        await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+        await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
+        using var _ = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
+
+        var version = typeof(PeerClient).Assembly.GetName().Version!.ToString();
+        Assert.Equal(4, handler.Requests.Count);
+        Assert.All(handler.Requests, r => Assert.Equal("JellyShare/" + version, r.Headers.UserAgent.ToString()));
+    }
+
+    [Fact]
+    public async Task PeerClient_OpenStream_DisposesRequestMessage()
+    {
+        var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
+        using var response = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
+
+        // A disposed request message refuses new content.
+        Assert.Throws<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
+    }
+
+    [Fact]
     public async Task PeerClient_ConnectionError_DoesNotLeakToken()
     {
         var (client, _) = Create(new FakeHandler(_ => throw new HttpRequestException("refused with " + Token)));
