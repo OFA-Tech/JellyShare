@@ -41,7 +41,8 @@ SECRETS = HERE / ".secrets"
 MEDIA = HERE / "media"
 BASE_MKV = MEDIA / ".base.mkv"
 DLL = HERE.parent / "src" / "Jellyfin.Plugin.JellyShare" / "bin" / "Release" / "net10.0" / "Jellyfin.Plugin.JellyShare.dll"
-PLUGIN_DLL_IN_CONTAINER = "/config/plugins/JellyShare_0.0.0.1/Jellyfin.Plugin.JellyShare.dll"
+PLUGIN_DLL_NAME = "Jellyfin.Plugin.JellyShare.dll"
+PLUGIN_DLL_FALLBACK = "/config/plugins/JellyShare_0.0.0.1/" + PLUGIN_DLL_NAME
 FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
 CLIENT = 'MediaBrowser Client="jellyshare-harness", Device="e2e", DeviceId="jellyshare-harness-e2e", Version="1.0"'
 
@@ -55,6 +56,7 @@ BBB, SINTEL, TEARS = "10378", "45745", "133701"
 EXPECTED_TMDB = {BBB, SINTEL, TEARS}
 # Which titles each server owns as a real file (the rest are peer placeholders); see harness/make-media.sh.
 LOCAL_MOVIES = {"alice": {BBB, SINTEL}, "bob": {SINTEL, TEARS}}
+EXPECTED_PLACEHOLDERS = {"alice": 3, "bob": 1}  # Tears of Steel + S01E02 + S02E01 on alice; Big Buck Bunny on bob
 ALL_EPISODES = {(1, 1), (1, 2), (2, 1)}
 LOCAL_EPISODES = {"alice": {(1, 1)}, "bob": {(1, 1), (1, 2), (2, 1)}}
 MEDIA_FILES = [
@@ -116,9 +118,12 @@ def http(method, url, body=None, headers=None, timeout=60, raw=False):
             if err.code == 503 and time.time() < deadline:
                 time.sleep(2)
                 continue
-            raise ApiError(f"{method} {url.split('?')[0]} -> HTTP {err.code}: {content.decode(errors='replace')[:200]}") from None
+            # Status and reason only: some of these requests carry or return tokens, so no response body in the message.
+            raise ApiError(f"{method} {url.split('?')[0]} -> HTTP {err.code} {err.reason}") from None
         except (urllib.error.URLError, ConnectionError, TimeoutError) as err:
-            if time.time() < deadline and not raw:
+            # A POST that timed out may have been processed: retry it only when the connection was refused (never sent).
+            refused = isinstance(getattr(err, "reason", err), ConnectionRefusedError) or isinstance(err, ConnectionRefusedError)
+            if time.time() < deadline and not raw and (method != "POST" or refused):
                 time.sleep(2)
                 continue
             raise ApiError(f"{method} {url.split('?')[0]} -> {type(err).__name__}") from None
@@ -291,8 +296,15 @@ def file_hash(path):
     return h.hexdigest()
 
 
+def plugin_dll_path(server):
+    """Where the plugin DLL lives in the container (the plugin folder name carries the version), else the harness default."""
+    res = sh("docker", "exec", server.container, "find", "/config/plugins", "-name", PLUGIN_DLL_NAME)
+    found = sorted(line.strip() for line in res.stdout.decode().splitlines() if line.strip())
+    return found[0] if found else PLUGIN_DLL_FALLBACK
+
+
 def container_hash(server):
-    res = sh("docker", "exec", server.container, "sha256sum", PLUGIN_DLL_IN_CONTAINER)
+    res = sh("docker", "exec", server.container, "sha256sum", plugin_dll_path(server))
     return res.stdout.decode().split()[0] if res.returncode == 0 and res.stdout else None
 
 
@@ -304,7 +316,8 @@ def deploy_and_check(deploy):
     want = file_hash(DLL)
     if deploy:
         for s in S.values():
-            sh("docker", "cp", str(DLL), f"{s.container}:{PLUGIN_DLL_IN_CONTAINER}")
+            cp = sh("docker", "cp", str(DLL), f"{s.container}:{plugin_dll_path(s)}")
+            check(f"{s.name}: DLL copied into the container", cp.returncode == 0)
             sh("docker", "restart", s.container)
         for s in S.values():
             wait_until(lambda s=s: _safe_ping(s), 180, 3)
@@ -462,14 +475,34 @@ def check_library_content():
     bob_paths = [i.get("Path") or "" for i in BOB.items("Movie,Video,Episode,Folder")]
     st = BOB.status()
     roots = [st["Movies"]["Path"], st["Shows"]["Path"]]
-    found = sh("docker", "exec", BOB.container, "find", *roots, "-ipath", "*home*", "-o", "-name", "clip*").stdout.decode().strip()
+    find = sh("docker", "exec", BOB.container, "find", *roots, "-ipath", "*home*", "-o", "-name", "clip*")
+    found = find.stdout.decode().strip()
     check("Home Video is not on bob (no item, no placeholder file)",
-          not hits and not any("clip.mkv" in p or "Home Video" in p for p in bob_paths) and not found,
-          f"{len(hits)} search hits, placeholder search '{found}'")
+          find.returncode == 0 and bool(bob_paths) and not hits and not any("clip.mkv" in p or "Home Video" in p for p in bob_paths) and not found,
+          f"{len(hits)} search hits, {len(bob_paths)} bob items searched, find exit {find.returncode} '{found}'")
     unmatched = (st.get("LastSync") or {}).get("Unmatched")
     check("bob's sync counted the ID-less title as unmatched, not placeholdered", unmatched == 1, f"Unmatched={unmatched}")
     check("Home Video is still a normal local movie on alice",
           any(m["Name"] == "Home Video" and not is_strm(m) for m in ALICE.movies()))
+
+
+def catalog_keys(cat):
+    """Titles in a catalog as comparable keys: ('movie', tmdb), ('movie-no-id', name), ('episode', season, episode)."""
+    keys = set()
+    for i in cat["items"]:
+        if i["type"] == "Movie":
+            keys.add(("movie", i["providerIds"]["Tmdb"]) if i["providerIds"].get("Tmdb") else ("movie-no-id", i["name"]))
+        else:
+            keys.add(("episode", i["seasonNumber"], i["episodeNumber"]))
+    return keys
+
+
+def expected_catalog_keys(provider):
+    """A provider shares only what it owns as files; its peer placeholders must never be offered back (loop guard)."""
+    keys = {("movie", t) for t in LOCAL_MOVIES[provider]} | {("episode", s, e) for s, e in LOCAL_EPISODES[provider]}
+    if provider == "alice":
+        keys.add(("movie-no-id", "Home Video"))
+    return keys
 
 
 def check_loop_guard():
@@ -483,15 +516,20 @@ def check_loop_guard():
         status, cat = catalog(provider, consumer)
         if not check(f"{provider}'s catalog for {consumer} is readable", status == 200, f"HTTP {status}"):
             continue
+        got = catalog_keys(cat)
+        want = expected_catalog_keys(provider)
+        check(f"{provider}'s catalog is exactly {provider}'s own files ({len(want)} titles)", got == want,
+              "" if got == want else f"missing {sorted(want - got, key=str)}, unexpected {sorted(got - want, key=str)}")
         ids = [i["id"] for i in cat["items"]]
-        resolved = P.api("GET", "/Items?" + urllib.parse.urlencode({"Ids": ",".join(ids), "Fields": "Path,ProviderIds", "userId": P.user}))["Items"]
+        resolved = P.api("GET", "/Items?" + urllib.parse.urlencode({"Ids": ",".join(ids), "Fields": "Path,ProviderIds", "userId": P.user}))["Items"] if ids else []
         bad = [i["Path"] for i in resolved if under(i.get("Path"), roots) or is_strm(i)]
         check(f"{provider}'s catalog: every item is a real file outside both servers' placeholder folders",
-              len(resolved) == len(ids) and not bad, f"{len(ids)} items, {len(bad)} under placeholder folders")
+              bool(ids) and len(resolved) == len(ids) and not bad, f"{len(ids)} items resolved to {len(resolved)}, {len(bad)} under placeholder folders")
         placeholders = P.items("Movie,Episode")
         placeholder_ids = {i["Id"] for i in placeholders if under(i.get("Path"), roots) or is_strm(i)}
         check(f"{provider}'s catalog: contains none of {provider}'s own placeholder items",
-              not placeholder_ids & set(ids), f"{len(placeholder_ids)} placeholders on {provider}")
+              len(placeholder_ids) >= EXPECTED_PLACEHOLDERS[provider] and not placeholder_ids & set(ids),
+              f"{len(placeholder_ids)} placeholders on {provider} (expected at least {EXPECTED_PLACEHOLDERS[provider]})")
         movie_keys = {i["providerIds"].get("Tmdb") for i in cat["items"] if i["type"] == "Movie" and i["providerIds"].get("Tmdb")}
         episode_keys = {(i["seasonNumber"], i["episodeNumber"]) for i in cat["items"] if i["type"] == "Episode"}
         leaked = [tmdb(i) for i in placeholders if i["Type"] == "Movie" and is_strm(i) and tmdb(i) in movie_keys]
@@ -622,16 +660,17 @@ def check_limit_429():
     t = threading.Thread(target=hold_first)
     t.start()
     try:
-        time.sleep(3)
-        code, _, hdrs = curl_in(BOB.container, base + alice_sintel, token, args=["-r", "0-1023"])
-        check("MaxStreams=1: second title while the first plays -> 429 with Retry-After: 30",
-              code == 429 and hdrs.get("retry-after") == "30", f"HTTP {code}, Retry-After {hdrs.get('retry-after')}")
-        relay = BOB.internal.replace("bob:8096", "127.0.0.1:8096") + "/JellyShare/v1/play/movie%3Atmdb%3A" + SINTEL
-        code, _, _ = curl_in(BOB.container, relay, args=["-r", "0-1023"])
-        check("MaxStreams=1: the same second title through bob's relay -> 503 (no peer has a free slot)", code == 503, f"HTTP {code}")
-        code, size, _ = curl_in(BOB.container, base + alice_bbb, token, args=["-r", "5000000-5001023"])
-        check("MaxStreams=1: another Range of the playing title is still allowed (one slot per playback)",
-              (code, size) == (206, 1024), f"HTTP {code}, {size} bytes")
+        held = wait_until(lambda: ALICE.active_streams("bob") == 1, 20, 0.5)
+        if check("MaxStreams=1: the first title holds its slot (alice reports 1 active stream)", bool(held)):
+            code, _, hdrs = curl_in(BOB.container, base + alice_sintel, token, args=["-r", "0-1023"])
+            check("MaxStreams=1: second title while the first plays -> 429 with Retry-After: 30",
+                  code == 429 and hdrs.get("retry-after") == "30", f"HTTP {code}, Retry-After {hdrs.get('retry-after')}")
+            relay = BOB.internal.replace("bob:8096", "127.0.0.1:8096") + "/JellyShare/v1/play/movie%3Atmdb%3A" + SINTEL
+            code, _, _ = curl_in(BOB.container, relay, args=["-r", "0-1023"])
+            check("MaxStreams=1: the same second title through bob's relay -> 503 (no peer has a free slot)", code == 503, f"HTTP {code}")
+            code, size, _ = curl_in(BOB.container, base + alice_bbb, token, args=["-r", "5000000-5001023"])
+            check("MaxStreams=1: another Range of the playing title is still allowed (one slot per playback)",
+                  (code, size) == (206, 1024), f"HTTP {code}, {size} bytes")
     finally:
         t.join()
         set_share(ALICE, "bob", MaxStreams=2, MaxBitrate=None)
@@ -646,7 +685,7 @@ def check_limit_429():
 def check_capped_stream():
     print("== provider bitrate cap")
     cap = 500_000
-    wait_no_streams(ALICE, "bob", 90)
+    check("alice has no active stream before the cap test", wait_no_streams(ALICE, "bob", 90))
     set_share(ALICE, "bob", MaxStreams=2, MaxBitrate=cap)
     try:
         token = (SECRETS / "alice-share-bob.token").read_text().strip()
@@ -704,19 +743,23 @@ def check_fallback():
         shutil.copyfile(BASE_MKV, host)
         deleted = False
         BOB.refresh()
-
-        def one_copy():
-            sintel = [m for m in BOB.movies() if tmdb(m) == SINTEL]
-            return len(sintel) == 1 and not is_strm(sintel[0])
-        ok = wait_until(one_copy, 120, 3, tick=BOB.refresh, tick_every=40)
+        ok = wait_until(single_local_sintel, 120, 3, tick=BOB.refresh, tick_every=40)
         sintel = [m for m in BOB.movies() if tmdb(m) == SINTEL]
         check("local file restored + refresh -> placeholder gone, exactly one Sintel (the local file)", bool(ok),
               ", ".join(("placeholder" if is_strm(m) else "local") for m in sintel))
     finally:
         if deleted or not host.exists():
             shutil.copyfile(BASE_MKV, host)
-            BOB.refresh()
             note("restored bob's Sintel file after a failure")
+        if not single_local_sintel():
+            BOB.refresh()
+            check("cleanup: bob's library is back to exactly one local Sintel",
+                  bool(wait_until(single_local_sintel, 120, 3, tick=BOB.refresh, tick_every=40)))
+
+
+def single_local_sintel():
+    sintel = [m for m in BOB.movies() if tmdb(m) == SINTEL]
+    return len(sintel) == 1 and not is_strm(sintel[0])
 
 
 def run():
@@ -747,11 +790,15 @@ def run():
                 note(f"{server.name}: share limits reset to the defaults (2 streams, no cap); original values are restored at the end")
 
         print("== sync")
-        check("both libraries reach the merged state after sync + refresh", settle(),
+        settled = settle()
+        check("both libraries reach the merged state after sync + refresh", settled,
               "; ".join(f"{s.name}: {p}" for s in (ALICE, BOB) for p in state_problems(s)))
 
         sections = (check_library_content, check_loop_guard, check_relay_and_playbackinfo, check_playback,
                     check_limit_429, check_capped_stream, check_fallback)
+        if not settled:
+            note("libraries did not reach the merged state: the content checks would only repeat that failure, skipping them")
+            sections = ()
         for section in sections:
             try:
                 section()
