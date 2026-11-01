@@ -81,6 +81,12 @@ public sealed class SyncService : ISyncRunner
     private readonly object _lastLock = new();
     private SyncReport? _last;
     private bool _lastLoaded;
+    private readonly object _backgroundLock = new();
+    private readonly Dictionary<string, int> _retryCursor = new(StringComparer.Ordinal);
+    private int _active;
+    private bool _queued;
+    private Task? _background;
+    private string? _lastError;
     private List<MergedEntry>? _merged;
     private (DateTime WriteUtc, long Length) _mergedStamp;
     private PlaceholderLedger? _ledger;
@@ -150,6 +156,60 @@ public sealed class SyncService : ISyncRunner
         }
     }
 
+    /// <summary>Maximum folders per full sync whose missing images are fetched again.</summary>
+    public const int MaxImageRetriesPerRun = 50;
+
+    /// <summary>Folders whose images are downloaded at the same time.</summary>
+    public const int ImageParallelism = 4;
+
+    /// <summary>Gets a value indicating whether a sync is running or waiting for the lock.</summary>
+    public bool IsRunning => Volatile.Read(ref _active) > 0 || _background is { IsCompleted: false };
+
+    /// <summary>Gets the error of the last sync when it failed (cleared by a successful sync).</summary>
+    public string? LastError
+    {
+        get
+        {
+            lock (_lastLock)
+            {
+                return _lastError;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts a sync in the background unless one is already running. With <paramref name="queueIfRunning"/>, a running
+    /// sync is followed by one more (for changes made while it runs, such as a removed peer).
+    /// </summary>
+    /// <param name="queueIfRunning">Run once more after the current sync when one is running.</param>
+    /// <returns><c>true</c> when a sync was started; <c>false</c> when one was already running.</returns>
+    public bool TryStartBackground(bool queueIfRunning = false)
+    {
+        lock (_backgroundLock)
+        {
+            if (IsRunning)
+            {
+                _queued |= queueIfRunning;
+                return false;
+            }
+
+            _background = Task.Run(BackgroundRunAsync);
+            return true;
+        }
+    }
+
+    private async Task BackgroundRunAsync()
+    {
+        try
+        {
+            await RunAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("JellyShare sync failed: {Error}", ex.Message);
+        }
+    }
+
     /// <summary>Gets the path of the persisted merged index.</summary>
     public string MergedIndexPath => Path.Combine(_dataDir(), MergedIndexStore.FileName);
 
@@ -158,11 +218,32 @@ public sealed class SyncService : ISyncRunner
     /// <returns>The report.</returns>
     public async Task<SyncReport> RunAsync(CancellationToken ct)
     {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        Interlocked.Increment(ref _active);
         try
         {
-            var report = await RunCoreAsync(ct).ConfigureAwait(false);
+            SyncReport report;
+            IReadOnlyList<ImageJob> jobs;
+            await _gate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                (report, jobs) = await RunCoreAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            // Placeholders are written and scanned; images follow without holding the lock.
+            var (images, scanned, pending) = await FetchImagesAsync(jobs, ct).ConfigureAwait(false);
+            report = report with
+            {
+                ImagesWritten = images,
+                Scanned = report.Scanned + scanned,
+                PendingScans = pending ?? report.PendingScans,
+                FinishedUtc = _clock.GetUtcNow(),
+            };
             LastReport = report;
+            SetError(null);
             try
             {
                 SyncReportStore.Save(_dataDir(), report);
@@ -187,6 +268,58 @@ public sealed class SyncService : ISyncRunner
                 report.PendingScans,
                 report.PeerErrors.Count);
             return report;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            SetError(ex.Message);
+            throw;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _active);
+            lock (_backgroundLock)
+            {
+                if (_queued && Volatile.Read(ref _active) == 0)
+                {
+                    _queued = false;
+                    _background = Task.Run(BackgroundRunAsync);
+                }
+            }
+        }
+    }
+
+    private void SetError(string? error)
+    {
+        lock (_lastLock)
+        {
+            _lastError = error;
+        }
+    }
+
+    private async Task<(int Images, int Scanned, int? Pending)> FetchImagesAsync(IReadOnlyList<ImageJob> jobs, CancellationToken ct)
+    {
+        var images = 0;
+        var dirs = new List<string>();
+        foreach (var job in jobs)
+        {
+            var (count, changed) = await _writer.DownloadImagesAsync(job.Root, job.Tops, job.Fetch, ImageParallelism, ct).ConfigureAwait(false);
+            images += count;
+            dirs.AddRange(changed);
+        }
+
+        if (dirs.Count == 0)
+        {
+            return (images, 0, null);
+        }
+
+        // Folders that got an image are scanned again so Jellyfin picks the artwork up now, not at the next sync.
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var dataDir = _dataDir();
+            EnqueueScans(dataDir, dirs);
+            var (scanned, pending) = ReportScans(dataDir);
+            return (images, scanned, pending);
         }
         finally
         {
@@ -217,18 +350,23 @@ public sealed class SyncService : ISyncRunner
     public async Task<ReconcileReport> ReconcileAsync(IReadOnlyCollection<string> keys, LocalIndexResult? local, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(keys);
+        ReconcileReport report;
+        IReadOnlyList<ImageJob> jobs;
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return await ReconcileCoreAsync(keys, local, ct).ConfigureAwait(false);
+            (report, jobs) = await ReconcileCoreAsync(keys, local, ct).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+
+        var (_, scanned, _) = await FetchImagesAsync(jobs, ct).ConfigureAwait(false);
+        return report with { Scanned = report.Scanned + scanned };
     }
 
-    private async Task<ReconcileReport> ReconcileCoreAsync(IReadOnlyCollection<string> keys, LocalIndexResult? known, CancellationToken ct)
+    private async Task<(ReconcileReport Report, IReadOnlyList<ImageJob> Images)> ReconcileCoreAsync(IReadOnlyCollection<string> keys, LocalIndexResult? known, CancellationToken ct)
     {
         var cfg = _config.Current;
         EnsureRootsSeparate(cfg);
@@ -237,14 +375,14 @@ public sealed class SyncService : ISyncRunner
         var merged = MergedEntries(dataDir);
         if (merged is null || keys.Count == 0)
         {
-            return new ReconcileReport(0, 0, 0, 0, 0);
+            return (new ReconcileReport(0, 0, 0, 0, 0), []);
         }
 
         var wanted = new HashSet<string>(keys, StringComparer.Ordinal);
         var affected = merged.Where(e => e.Keys.Any(wanted.Contains)).ToList();
         if (affected.Count == 0)
         {
-            return new ReconcileReport(0, 0, 0, 0, 0);
+            return (new ReconcileReport(0, 0, 0, 0, 0), []);
         }
 
         var entryKeys = new HashSet<string>(affected.SelectMany(e => e.Keys), StringComparer.Ordinal);
@@ -273,8 +411,10 @@ public sealed class SyncService : ISyncRunner
             report.Written,
             report.Deleted,
             report.Scanned);
-        return report;
+        return (report, Jobs(movieResult.Images, showResult.Images));
     }
+
+    private static List<ImageJob> Jobs(params ImageJob?[] jobs) => jobs.OfType<ImageJob>().ToList();
 
     private void EnsureRootsSeparate(PluginConfiguration cfg)
     {
@@ -324,7 +464,7 @@ public sealed class SyncService : ISyncRunner
         }
     }
 
-    private async Task<SyncReport> RunCoreAsync(CancellationToken ct)
+    private async Task<(SyncReport Report, IReadOnlyList<ImageJob> Images)> RunCoreAsync(CancellationToken ct)
     {
         var cfg = _config.Current;
         EnsureRootsSeparate(cfg);
@@ -398,7 +538,7 @@ public sealed class SyncService : ISyncRunner
 
         var (scanned, pending) = ReportScans(dataDir);
 
-        return new SyncReport(
+        var report = new SyncReport(
             index.Entries.Count,
             index.UnmatchedCount,
             skippedLocal,
@@ -410,12 +550,14 @@ public sealed class SyncService : ISyncRunner
             Conflicts = index.ConflictCount,
             Scanned = scanned,
             PendingScans = pending,
-            ImagesWritten = movieResult.Write.ImagesWritten + showResult.Write.ImagesWritten,
             UncheckedLocalFiles = local.UncheckedFiles,
             MissingLocalFiles = local.MissingFiles,
             FinishedUtc = _clock.GetUtcNow(),
         };
+        return (report, Jobs(movieResult.Images, showResult.Images));
     }
+
+    private sealed record ImageJob(string Root, IReadOnlyList<string> Tops, PlaceholderImageFetcher Fetch);
 
     private async Task<CatalogResponse?> FetchAsync(
         RemotePeer peer,
@@ -508,7 +650,7 @@ public sealed class SyncService : ISyncRunner
         state.LastError = null;
     }
 
-    private async Task<(PlaceholderWriteResult Write, int Skipped)> ApplyAsync(
+    private async Task<(PlaceholderWriteResult Write, int Skipped, ImageJob? Images)> ApplyAsync(
         IReadOnlyList<MergedEntry> entries,
         ISet<string> localKeys,
         IReadOnlyDictionary<string, LocalSeries>? localSeries,
@@ -522,12 +664,12 @@ public sealed class SyncService : ISyncRunner
         if (string.IsNullOrWhiteSpace(root))
         {
             _logger.LogWarning("JellyShare sync: a placeholder root is not configured");
-            return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0);
+            return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0, null);
         }
 
         if (entries.Count == 0 && targeted)
         {
-            return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0);
+            return (new PlaceholderWriteResult(0, 0, 0, 0, []), 0, null);
         }
 
         var rootFull = Path.GetFullPath(root);
@@ -640,7 +782,8 @@ public sealed class SyncService : ISyncRunner
         PlaceholderWriteResult result;
         try
         {
-            result = await _writer.ApplyAsync(diff, root, Fetch, ct).ConfigureAwait(false);
+            // Images are fetched later, without the sync lock (see FetchImagesAsync).
+            result = await _writer.ApplyAsync(diff, root, null, ct).ConfigureAwait(false);
         }
         catch (PlaceholderWriteException ex)
         {
@@ -652,7 +795,26 @@ public sealed class SyncService : ISyncRunner
 
         Record(result);
         EnqueueScans(dataDir, result.ChangedDirs);
-        return (result, diff.Skipped);
+        var tops = new List<string>(result.NewStrmTops);
+        if (!targeted)
+        {
+            // Folders still missing an image (peer had none, or a download failed) get a bounded retry each full sync,
+            // rotating through them so one stubborn folder never starves the rest.
+            var missing = imageSources.Keys
+                .Where(t => !result.NewStrmTops.Contains(t) && PlaceholderWriter.MissesImages(rootFull, t))
+                .Order(StringComparer.Ordinal)
+                .ToList();
+            if (missing.Count > 0)
+            {
+                _retryCursor.TryGetValue(rootFull, out var start);
+                start %= missing.Count;
+                var take = Math.Min(MaxImageRetriesPerRun, missing.Count);
+                tops.AddRange(Enumerable.Range(0, take).Select(i => missing[(start + i) % missing.Count]));
+                _retryCursor[rootFull] = start + take;
+            }
+        }
+
+        return (result, diff.Skipped, tops.Count == 0 ? null : new ImageJob(rootFull, tops, Fetch));
     }
 
     private static Dictionary<string, List<(Guid PeerId, string ItemId, string[]? Types)>> ImageSources(

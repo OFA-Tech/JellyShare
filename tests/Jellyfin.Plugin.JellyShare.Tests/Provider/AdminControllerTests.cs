@@ -64,11 +64,32 @@ internal sealed class FakeSync : ISyncRunner
 
     public Func<SyncReport> Report { get; set; } = () => new SyncReport(3, 1, 1, 2, 0, []);
 
+    public bool IsRunning { get; set; }
+
+    public string? LastError { get; set; }
+
+    public int BackgroundStarts { get; private set; }
+
+    public bool? LastQueueIfRunning { get; private set; }
+
     public Task<SyncReport> RunAsync(CancellationToken ct)
     {
         Runs++;
         LastReport = Report();
         return Task.FromResult(LastReport);
+    }
+
+    public bool TryStartBackground(bool queueIfRunning = false)
+    {
+        LastQueueIfRunning = queueIfRunning;
+        if (IsRunning)
+        {
+            return false;
+        }
+
+        BackgroundStarts++;
+        IsRunning = true;
+        return true;
     }
 }
 
@@ -635,25 +656,47 @@ public sealed class AdminControllerTests : IDisposable
     // ---- sync ----
 
     [Fact]
-    public async Task Sync_RunsAndReturnsReport()
+    public void Sync_StartsInBackground_Returns202_AndStatusShowsRunning()
     {
-        var report = Value<SyncReport>(await _c.Sync());
+        var result = Assert.IsAssignableFrom<ObjectResult>(_c.Sync());
 
-        Assert.Equal(1, _sync.Runs);
-        Assert.Equal(3, report.Offered);
-        Assert.Same(report, Status().LastSync);
+        Assert.Equal(202, result.StatusCode);
+        Assert.Equal(new SyncStartResponse(true, false), result.Value);
+        Assert.Equal(1, _sync.BackgroundStarts);
+        Assert.Equal(0, _sync.Runs);
+        Assert.True(Status().SyncRunning);
     }
 
     [Fact]
-    public async Task Sync_Failure_IsReadableError_NotTheStackTrace()
+    public void Sync_WhileRunning_Returns202AlreadyRunning_AndStartsNothing()
     {
-        _sync.Report = () => throw new InvalidOperationException("JellyShare: the movie and show placeholder folders must be separate");
+        _sync.IsRunning = true;
 
-        var result = await _c.Sync();
+        var result = Assert.IsAssignableFrom<ObjectResult>(_c.Sync());
 
-        var obj = Assert.IsAssignableFrom<ObjectResult>(result);
-        Assert.Equal(500, obj.StatusCode);
-        Assert.Contains("separate", Assert.IsType<ErrorResponse>(obj.Value).Error, StringComparison.Ordinal);
+        Assert.Equal(202, result.StatusCode);
+        Assert.Equal(new SyncStartResponse(false, true), result.Value);
+        Assert.Equal(0, _sync.BackgroundStarts);
+    }
+
+    [Fact]
+    public void Status_ShowsLastSyncError_AsReadableText()
+    {
+        _sync.LastError = "JellyShare: the movie and show placeholder folders must be separate";
+
+        Assert.Contains("separate", Status().SyncError, StringComparison.Ordinal);
+        Assert.False(Status().SyncRunning);
+    }
+
+    [Fact]
+    public void DeletePeer_StartsOrQueuesASyncToRemoveItsPlaceholders()
+    {
+        var peer = SeedPeer();
+        _sync.IsRunning = true;
+
+        Assert.IsType<NoContentResult>(_c.DeletePeer(peer.Id));
+
+        Assert.True(_sync.LastQueueIfRunning);
     }
 
     // ---- status ----

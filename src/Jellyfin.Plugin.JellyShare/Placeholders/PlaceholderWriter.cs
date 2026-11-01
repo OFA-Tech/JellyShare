@@ -355,6 +355,102 @@ public sealed class PlaceholderWriter
         }
     }
 
+    /// <summary>Checks whether a movie/series folder holds a placeholder and lacks <c>poster.jpg</c> or <c>fanart.jpg</c>.</summary>
+    /// <param name="root">The placeholder root.</param>
+    /// <param name="top">The folder (relative, first segment).</param>
+    /// <returns><c>true</c> when an image is missing.</returns>
+    public static bool MissesImages(string root, string top)
+    {
+        var rootFull = Path.GetFullPath(root);
+        var topFull = Path.GetFullPath(Path.Combine(rootFull, top));
+        return IsStrictlyInside(rootFull, topFull)
+            && Directory.Exists(topFull)
+            && Images.Any(i => !File.Exists(Path.Combine(topFull, i.FileName)));
+    }
+
+    /// <summary>
+    /// Downloads missing <c>poster.jpg</c>/<c>fanart.jpg</c> into movie/series folders, a few at a time. Runs without the
+    /// sync lock, so a folder is only filled while it still holds a <c>.strm</c>; an image that lands in a folder
+    /// removed meanwhile is taken out again.
+    /// </summary>
+    /// <param name="root">The placeholder root.</param>
+    /// <param name="tops">The folders (relative, first segment).</param>
+    /// <param name="fetcher">Fetches the images; failures are logged and ignored.</param>
+    /// <param name="parallelism">How many folders are fetched at once.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>The images written and the full paths of the folders that got one.</returns>
+    public async Task<(int Images, IReadOnlyList<string> ChangedDirs)> DownloadImagesAsync(
+        string root,
+        IReadOnlyCollection<string> tops,
+        PlaceholderImageFetcher fetcher,
+        int parallelism,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tops);
+        ArgumentNullException.ThrowIfNull(fetcher);
+        var rootFull = Path.GetFullPath(root);
+        var images = 0;
+        var changed = new SortedSet<string>(StringComparer.Ordinal);
+        var options = new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, parallelism), CancellationToken = ct };
+        await Parallel.ForEachAsync(tops.Distinct(StringComparer.Ordinal), options, async (top, token) =>
+        {
+            var topFull = Path.GetFullPath(Path.Combine(rootFull, top));
+            if (!IsStrictlyInside(rootFull, topFull) || HasReparsePoint(rootFull, topFull) || !HoldsStrm(topFull))
+            {
+                return;
+            }
+
+            foreach (var (type, fileName) in Images)
+            {
+                var target = Path.Combine(topFull, fileName);
+                if (File.Exists(target) || !await TryDownloadAsync(fetcher, top, type, target, token).ConfigureAwait(false))
+                {
+                    continue;
+                }
+
+                if (!HoldsStrm(topFull))
+                {
+                    // Removed by a reconcile while downloading: don't leave an image-only folder behind.
+                    TryDelete(target);
+                    RemoveEmptyUpwards(rootFull, topFull);
+                    return;
+                }
+
+                Interlocked.Increment(ref images);
+                lock (changed)
+                {
+                    changed.Add(topFull);
+                }
+            }
+        }).ConfigureAwait(false);
+
+        return (images, changed.ToList());
+    }
+
+    private static bool HoldsStrm(string topFull)
+    {
+        try
+        {
+            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            return Directory.Exists(topFull) && Directory.EnumerateFiles(topFull, "*.strm", options).Any();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     private async Task<bool> TryDownloadAsync(PlaceholderImageFetcher fetcher, string top, string type, string target, CancellationToken ct)
     {
         try

@@ -120,7 +120,14 @@ public sealed record StatusResponse(
     PlaceholderRootView Movies,
     PlaceholderRootView Shows,
     IReadOnlyList<LibraryInfo> Libraries,
-    int SyncIntervalHours);
+    int SyncIntervalHours)
+{
+    /// <summary>Gets a value indicating whether a sync is running now.</summary>
+    public bool SyncRunning { get; init; }
+
+    /// <summary>Gets the error of the last sync when it failed (for example an unusable placeholder folder).</summary>
+    public string? SyncError { get; init; }
+}
 
 /// <summary>A Jellyfin library, reduced to what the admin page needs.</summary>
 /// <param name="Id">The library id.</param>
@@ -165,8 +172,24 @@ public interface ISyncRunner
     /// <summary>Gets the report of the last finished run, if any.</summary>
     SyncReport? LastReport { get; }
 
+    /// <summary>Gets a value indicating whether a sync is running.</summary>
+    bool IsRunning { get; }
+
+    /// <summary>Gets the error of the last sync when it failed.</summary>
+    string? LastError { get; }
+
     /// <summary>Runs one sync; concurrent calls wait for the one in progress.</summary>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The report.</returns>
     Task<SyncReport> RunAsync(CancellationToken ct);
+
+    /// <summary>Starts a sync in the background unless one is running.</summary>
+    /// <param name="queueIfRunning">Run once more after the current sync when one is running.</param>
+    /// <returns><c>true</c> when started; <c>false</c> when one was already running.</returns>
+    bool TryStartBackground(bool queueIfRunning = false);
 }
+
+/// <summary>Response of <c>POST admin/sync</c> (202): the sync runs in the background; poll <c>admin/status</c>.</summary>
+/// <param name="Started">A new sync was started.</param>
+/// <param name="AlreadyRunning">A sync was already running (no second one was started).</param>
+public sealed record SyncStartResponse(bool Started, bool AlreadyRunning);

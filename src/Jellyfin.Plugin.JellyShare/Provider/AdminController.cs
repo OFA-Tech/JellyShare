@@ -100,7 +100,11 @@ public class AdminController : ControllerBase
             RootView(cfg.MoviesPlaceholderPath, libraries),
             RootView(cfg.ShowsPlaceholderPath, libraries),
             libraries,
-            cfg.SyncIntervalHours));
+            cfg.SyncIntervalHours)
+        {
+            SyncRunning = _sync.IsRunning,
+            SyncError = _sync.LastError,
+        });
     }
 
     /// <summary>Creates a share and returns its token once.</summary>
@@ -341,6 +345,9 @@ public class AdminController : ControllerBase
         }
 
         _logger.LogInformation("JellyShare admin: removed peer {PeerId}", id);
+
+        // Its placeholders go with the next sync: start one now (or right after the one running).
+        _sync.TryStartBackground(queueIfRunning: true);
         return NoContent();
     }
 
@@ -464,22 +471,17 @@ public class AdminController : ControllerBase
             null));
     }
 
-    /// <summary>Runs a sync now (waits for one already running).</summary>
-    /// <returns>The sync report.</returns>
+    /// <summary>
+    /// Starts a sync in the background (not tied to the request: a first sync with many images can take minutes) and
+    /// returns at once. The page polls <c>admin/status</c> (<c>syncRunning</c>, <c>lastSync</c>, <c>syncError</c>).
+    /// </summary>
+    /// <returns>202 with whether a sync was started or one was already running.</returns>
     [HttpPost("sync")]
-    public async Task<IActionResult> Sync()
+    public IActionResult Sync()
     {
-        try
-        {
-            // Not tied to the HTTP request: a browser giving up must not cancel a sync half-way through writing placeholders.
-            var report = await _sync.RunAsync(CancellationToken.None).ConfigureAwait(false);
-            return Ok(report);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex, "JellyShare admin: sync failed");
-            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse(ex.Message));
-        }
+        var started = _sync.TryStartBackground();
+        _logger.LogInformation("JellyShare admin: sync requested ({State})", started ? "started" : "already running");
+        return StatusCode(StatusCodes.Status202Accepted, new SyncStartResponse(started, !started));
     }
 
     /// <summary>Adds one of the plugin's own placeholder roots to a library and refreshes it.</summary>

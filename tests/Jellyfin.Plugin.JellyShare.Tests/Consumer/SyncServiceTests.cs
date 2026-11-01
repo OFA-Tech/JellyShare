@@ -594,6 +594,142 @@ public sealed class SyncServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Sync_ImagesAreFetchedAfterTheLock_PlaceholdersAndReconcileDoNotWait()
+    {
+        _client.Images[(_alice.Id, "bunny", "Primary")] = [1, 2, 3];
+        var imageStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseImages = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _client.BeforeImage = async () =>
+        {
+            imageStarted.TrySetResult();
+            await releaseImages.Task;
+        };
+        Offer(Bunny() with { ImageTypes = ["Primary"] }, Sintel());
+
+        var run = _sync.RunAsync(CancellationToken.None);
+        await imageStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // Placeholders are on disk and scanned before any image arrives, and the lock is free for a reconcile.
+        Assert.True(File.Exists(BunnyStrm));
+        Assert.Contains(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)), _scans.Reported);
+        var reconcile = _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
+        Assert.Same(reconcile, await Task.WhenAny(reconcile, Task.Delay(TimeSpan.FromSeconds(10))));
+        Assert.False(run.IsCompleted);
+
+        releaseImages.SetResult();
+        var report = await run;
+        Assert.Equal(1, report.ImagesWritten);
+        Assert.True(File.Exists(Path.Combine(MoviesRoot, BunnyDir, "poster.jpg")));
+    }
+
+    [Fact]
+    public async Task Sync_ImageDownloads_RunInParallel_AtMostFour()
+    {
+        var items = Enumerable.Range(1, 12).Select(i => TestItems.Movie("M" + i, tmdb: (1000 + i).ToString(System.Globalization.CultureInfo.InvariantCulture), id: "m" + i) with { Year = 2000, ImageTypes = ["Primary", "Backdrop"] }).ToArray();
+        _client.BeforeImage = () => Task.Delay(30);
+        Offer(items);
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        Assert.InRange(_client.MaxConcurrentImages, 2, 4);
+    }
+
+    [Fact]
+    public async Task Sync_MissingImage_IsRetriedOnALaterSync()
+    {
+        Offer(Bunny() with { ImageTypes = ["Primary"] });
+        await _sync.RunAsync(CancellationToken.None);
+        var poster = Path.Combine(MoviesRoot, BunnyDir, "poster.jpg");
+        Assert.False(File.Exists(poster));
+
+        _client.Images[(_alice.Id, "bunny", "Primary")] = [9];
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Equal(0, report.Written);
+        Assert.Equal(1, report.ImagesWritten);
+        Assert.True(File.Exists(poster));
+    }
+
+    [Fact]
+    public async Task Sync_ImageRetries_AreBoundedPerRun()
+    {
+        var items = Enumerable.Range(1, SyncService.MaxImageRetriesPerRun + 10)
+            .Select(i => TestItems.Movie("M" + i, tmdb: (1000 + i).ToString(System.Globalization.CultureInfo.InvariantCulture), id: "m" + i) with { Year = 2000, ImageTypes = ["Primary", "Backdrop"] })
+            .ToArray();
+        Offer(items);
+        await _sync.RunAsync(CancellationToken.None);
+        lock (_client.ImageRequests)
+        {
+            _client.ImageRequests.Clear();
+        }
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        var folders = _client.ImageRequests.Select(r => r.Item).Distinct().Count();
+        Assert.Equal(SyncService.MaxImageRetriesPerRun, folders);
+    }
+
+    [Fact]
+    public async Task Sync_TryStartBackground_StartsOnce_ReportsRunning_ThenLastReport()
+    {
+        Offer(Bunny());
+        var release = new TaskCompletionSource();
+        _client.BeforeFetch = () => release.Task;
+
+        Assert.True(_sync.TryStartBackground());
+        await WaitUntil(() => _sync.IsRunning);
+        Assert.False(_sync.TryStartBackground());
+
+        release.SetResult();
+        await WaitUntil(() => !_sync.IsRunning);
+        Assert.NotNull(_sync.LastReport);
+        Assert.Null(_sync.LastError);
+        Assert.True(MoviePlaceholder(BunnyDir));
+    }
+
+    [Fact]
+    public async Task Sync_BackgroundFailure_IsRecordedAsLastError_AndClearedBySuccess()
+    {
+        _config.Current.RelayBaseOverride = "http://10.0.0.2:8096";
+        Offer(Bunny());
+
+        Assert.True(_sync.TryStartBackground());
+        await WaitUntil(() => !_sync.IsRunning && _sync.LastError is not null);
+        Assert.Contains("RelayBaseOverride", _sync.LastError, StringComparison.Ordinal);
+
+        _config.Current.RelayBaseOverride = null;
+        await _sync.RunAsync(CancellationToken.None);
+        Assert.Null(_sync.LastError);
+    }
+
+    [Fact]
+    public async Task Sync_QueuedBackgroundRun_RunsAgainAfterTheCurrentOne()
+    {
+        Offer(Bunny());
+        var release = new TaskCompletionSource();
+        _client.BeforeFetch = () => release.Task;
+        var first = _sync.RunAsync(CancellationToken.None);
+        await WaitUntil(() => _sync.IsRunning);
+
+        Assert.False(_sync.TryStartBackground(queueIfRunning: true));
+        release.SetResult();
+        await first;
+
+        await WaitUntil(() => _client.Fetches.Count >= 2 && !_sync.IsRunning);
+        Assert.Equal(2, _client.Fetches.Count);
+    }
+
+    private static async Task WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!condition())
+        {
+            Assert.True(DateTime.UtcNow < deadline, "condition not reached in time");
+            await Task.Delay(10);
+        }
+    }
+
+    [Fact]
     public async Task Sync_OverlappingRuns_AreSerialized()
     {
         Offer(Bunny());

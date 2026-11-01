@@ -11,6 +11,7 @@
     var status = null;
     var refreshing = false;
     var pollTimer = null;
+    var syncTimer = null;
     var messageTimer = null;
 
     function $(id) {
@@ -386,6 +387,9 @@
         var holder = $('js-report');
         clear(holder);
         var r = status && status.lastSync;
+        if (status && status.syncError) {
+            holder.appendChild(el('div', { class: 'js-msg error', text: 'The last sync failed: ' + status.syncError }));
+        }
         if (!r) {
             holder.appendChild(el('p', { class: 'js-muted', text: 'No sync has run yet.' }));
             return;
@@ -473,11 +477,11 @@
                 }).catch(fail);
             });
             var remove = btn('Remove', 'danger', function () {
-                if (!window.confirm('Remove "' + p.name + '"? Its placeholders are deleted at the next sync.')) {
+                if (!window.confirm('Remove "' + p.name + '"? Its placeholders are deleted by the sync that starts now.')) {
                     return;
                 }
                 busy(remove, api('DELETE', 'peers/' + encodeURIComponent(p.id))).then(function () {
-                    showMessage('ok', 'Removed "' + p.name + '". Run a sync to clean up its placeholders.');
+                    showMessage('ok', 'Removed "' + p.name + '". A sync was started to remove its placeholders.');
                     return refresh();
                 }).catch(fail);
             });
@@ -496,8 +500,9 @@
                     field('Name', name, 'grow'),
                     field('Server address', url, 'grow'),
                     field('New token (optional)', token, 'grow'),
-                    el('label', { class: 'js-check' }, [enabled, 'Enabled'])
+                    el('label', { class: 'js-check', title: 'Turning a peer off removes its placeholders at the next sync.' }, [enabled, 'Enabled'])
                 ]),
+                el('div', { class: 'js-muted', text: 'Disabling a peer removes its placeholders at the next sync (they come back when you enable it again).' }),
                 el('div', { class: st.cls, text: st.text }),
                 el('p', {}, [up, ' ', down, ' ', test, ' ', save, ' ', remove, ' ', result])
             ]));
@@ -535,22 +540,49 @@
         });
     }
 
-    function syncNow() {
+    // The sync runs in the background on the server; the page polls the status until it is done.
+    function watchSync(announce) {
         var button = $('js-sync');
         var state = $('js-sync-state');
-        state.textContent = 'Syncing... this can take a while for large libraries.';
-        busy(button, api('POST', 'sync')).then(function (report) {
-            state.textContent = '';
-            if (status) {
-                status.lastSync = report;
+        if (syncTimer) {
+            return;
+        }
+        button.disabled = true;
+        state.textContent = 'Syncing... this can take a while for large libraries. You can leave this page.';
+        syncTimer = setInterval(function () {
+            if (!document.body.contains(page)) {
+                clearInterval(syncTimer);
+                syncTimer = null;
+                return;
             }
-            renderReport();
-            showMessage('ok', 'Sync finished.');
-            return refresh();
-        }).catch(function (e) {
-            state.textContent = '';
-            fail(e);
-        });
+            api('GET', 'status').then(function (s) {
+                if (s.syncRunning) {
+                    return;
+                }
+                clearInterval(syncTimer);
+                syncTimer = null;
+                button.disabled = false;
+                state.textContent = '';
+                status = s;
+                render();
+                if (announce) {
+                    if (s.syncError) {
+                        showMessage('error', 'Sync failed: ' + s.syncError);
+                    } else {
+                        showMessage('ok', 'Sync finished.');
+                    }
+                }
+            }).catch(function () { /* the next tick tries again */ });
+        }, 2000);
+    }
+
+    function syncNow() {
+        busy($('js-sync'), api('POST', 'sync')).then(function (r) {
+            if (r && r.alreadyRunning) {
+                showMessage('ok', 'A sync is already running; showing it.');
+            }
+            watchSync(true);
+        }).catch(fail);
     }
 
     // ---- refresh ----
@@ -573,6 +605,9 @@
             status = s;
             refreshing = false;
             render();
+            if (s.syncRunning) {
+                watchSync(false);
+            }
         }, function (e) {
             refreshing = false;
             fail(e);

@@ -264,8 +264,22 @@ class Server:
     def refresh(self):
         self.api("POST", "/Library/Refresh", raw=True)
 
-    def sync(self):
-        return self.api("POST", "/JellyShare/v1/admin/sync", timeout=300)
+    def sync(self, timeout=300):
+        """Starts a sync (POST answers 202 at once) and waits until the status no longer shows it running."""
+        before = (self.status().get("LastSync") or {}).get("FinishedUtc")
+        started = self.api("POST", "/JellyShare/v1/admin/sync")
+        if not (started or {}).get("Started") and not (started or {}).get("AlreadyRunning"):
+            raise RuntimeError(f"sync not started: {started}")
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            st = self.status()
+            last = st.get("LastSync") or {}
+            if not st.get("SyncRunning") and (last.get("FinishedUtc") != before or st.get("SyncError")):
+                if st.get("SyncError"):
+                    raise RuntimeError("sync failed: " + st["SyncError"])
+                return last
+            time.sleep(1)
+        raise TimeoutError("sync did not finish in time")
 
     def active_streams(self, share_name):
         return next((s["ActiveStreams"] for s in self.status()["Shares"] if s["Name"] == share_name), 0)

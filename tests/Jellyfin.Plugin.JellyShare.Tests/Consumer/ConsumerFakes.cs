@@ -87,10 +87,39 @@ internal sealed class FakePeerClient : IPeerClient
             : new PeerFetchResult(false, false, null, "HTTP 404");
     }
 
-    public Task<Stream?> GetImageAsync(RemotePeer peer, string itemId, string type, CancellationToken ct)
+    public Func<Task>? BeforeImage { get; set; }
+
+    public int MaxConcurrentImages => Volatile.Read(ref _maxImages);
+
+    private int _images;
+    private int _maxImages;
+
+    public async Task<Stream?> GetImageAsync(RemotePeer peer, string itemId, string type, CancellationToken ct)
     {
-        ImageRequests.Add((peer.Id, itemId, type));
-        return Task.FromResult<Stream?>(Images.TryGetValue((peer.Id, itemId, type), out var b) ? new MemoryStream(b) : null);
+        lock (ImageRequests)
+        {
+            ImageRequests.Add((peer.Id, itemId, type));
+        }
+
+        var now = Interlocked.Increment(ref _images);
+        int seen;
+        while ((seen = Volatile.Read(ref _maxImages)) < now && Interlocked.CompareExchange(ref _maxImages, now, seen) != seen)
+        {
+        }
+
+        try
+        {
+            if (BeforeImage is not null)
+            {
+                await BeforeImage();
+            }
+
+            return Images.TryGetValue((peer.Id, itemId, type), out var b) ? new MemoryStream(b) : null;
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _images);
+        }
     }
 
     public Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, string itemId, string? range, CancellationToken ct)
