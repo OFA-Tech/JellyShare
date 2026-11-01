@@ -1,7 +1,8 @@
-"""Zip the plugin DLL(s) from a `dotnet publish` folder into jellyshare_<version>.zip (stdlib only).
+"""Zip the plugin DLLs from a `dotnet publish` folder into jellyshare_<version>.zip (stdlib only).
 
-Only the files listed under `artifacts:` in build.yaml go into the zip: Jellyfin already ships
-Jellyfin.Controller, Jellyfin.Model and the rest, and meta.json is written by Jellyfin on install.
+Only the files listed under `artifacts:` in build.yaml go into the zip, and they must be JellyShare.*.dll:
+Jellyfin already ships Jellyfin.Controller, Jellyfin.Model, Microsoft.Extensions.* and the rest, and meta.json is
+written by Jellyfin on install. A publish folder holding such host assemblies is refused.
 
     py build/package.py --publish-dir <dir> --version 0.1.0.0 --out dist
 """
@@ -34,8 +35,30 @@ def read_artifacts(build_yaml):
     return artifacts
 
 
+ARTIFACT_RE = re.compile(r"^JellyShare\.[A-Za-z0-9.]+\.dll$")
+# Provided by the Jellyfin host; a copy in the publish output means a reference leaks its runtime assets.
+HOST_DLL_PREFIXES = ("Microsoft.Extensions.", "Microsoft.AspNetCore.", "Jellyfin.", "MediaBrowser.")
+
+
+def check_artifacts(artifacts):
+    """Only JellyShare.*.dll may ship: Jellyfin loads every DLL in the plugin folder."""
+    bad = [a for a in artifacts if not ARTIFACT_RE.match(a)]
+    if bad:
+        raise ValueError("artifacts must be JellyShare.*.dll: " + ", ".join(bad))
+    return artifacts
+
+
+def check_publish_dir(publish_dir):
+    """Fail when the publish output carries host assemblies (they would conflict with Jellyfin's own)."""
+    leaked = sorted(n for n in os.listdir(publish_dir)
+                    if n.lower().endswith(".dll") and n.startswith(HOST_DLL_PREFIXES))
+    if leaked:
+        raise ValueError("publish output contains host assemblies: " + ", ".join(leaked))
+
+
 def make_zip(publish_dir, artifacts, out_path):
     """Write a flat zip with fixed timestamps so the same DLL always gives the same checksum."""
+    check_artifacts(artifacts)
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
         for name in artifacts:
@@ -60,6 +83,7 @@ def main(argv=None):
     if not VERSION_RE.match(a.version):
         p.error("version must look like 0.1.0.0")
     out = os.path.join(a.out, "jellyshare_%s.zip" % a.version)
+    check_publish_dir(a.publish_dir)
     make_zip(a.publish_dir, read_artifacts(a.build_yaml), out)
     print(out)
     return 0

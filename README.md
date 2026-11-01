@@ -161,8 +161,11 @@ dotnet test JellyShare.slnx
 py -m unittest discover -s build -p "test_*.py"
 ```
 
-Layout: the plugin is `Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj` (entry DLL
-`JellyShare.Jellyfin.dll`), its tests are `Tests/JellyfinTests`. Shared build settings and package versions live in
+Layout: `Source/Domain` (`JellyShare.Domain`: settings, protocol and admin models, ports, keys), `Source/Application`
+(`JellyShare.Application`: sync, catalog, streaming, relay and placeholder logic) and the plugin itself,
+`Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj` (entry DLL `JellyShare.Jellyfin.dll`: controllers,
+filter, task, Jellyfin adapters, composition root). Tests: `Tests/UnitTests` (Domain/Application, no Jellyfin),
+`Tests/JellyfinTests` (Jellyfin/ASP.NET-dependent) and `Tests/ArchitectureTests` (layer rules). Shared build settings and package versions live in
 `Directory.Build.props` and `Directory.Packages.props` at the root.
 
 ## Releasing
@@ -179,7 +182,7 @@ The workflow (the tagged commit must be on `main`):
 
 1. runs `dotnet test` and the `build/` script tests;
 2. runs `dotnet publish -c Release` with the version from the tag;
-3. zips only `JellyShare.Jellyfin.dll` (the artifacts listed in `build.yaml`; Jellyfin already ships the rest, and
+3. zips only `JellyShare.Jellyfin.dll`, `JellyShare.Application.dll` and `JellyShare.Domain.dll` (the artifacts listed in `build.yaml`; Jellyfin already ships the rest, and
    writes `meta.json` itself on install) as `jellyshare_<version>.zip`;
 4. creates the GitHub Release `v<version>` with the zip (a re-run replaces the asset);
 5. adds the version to `manifest.json` on `main` with `build/update_manifest.py`: version, changelog (commit subjects

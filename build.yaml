@@ -11,5 +11,7 @@ category: "General"
 owner: "OFA-TECH"
 artifacts:
   - "JellyShare.Jellyfin.dll"
+  - "JellyShare.Application.dll"
+  - "JellyShare.Domain.dll"
 changelog: >
   First release.

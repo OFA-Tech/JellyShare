@@ -154,22 +154,57 @@ class PackageTests(unittest.TestCase):
     def test_missing_artifact_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(FileNotFoundError):
-                package.make_zip(tmp, ["nope.dll"], os.path.join(tmp, "x.zip"))
+                package.make_zip(tmp, ["JellyShare.Nope.dll"], os.path.join(tmp, "x.zip"))
 
     def test_zip_is_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with open(os.path.join(tmp, "a.dll"), "wb") as f:
+            with open(os.path.join(tmp, "JellyShare.A.dll"), "wb") as f:
                 f.write(b"a")
             a, b = os.path.join(tmp, "1.zip"), os.path.join(tmp, "2.zip")
-            package.make_zip(tmp, ["a.dll"], a)
-            os.utime(os.path.join(tmp, "a.dll"), (1, 1))
-            package.make_zip(tmp, ["a.dll"], b)
+            package.make_zip(tmp, ["JellyShare.A.dll"], a)
+            os.utime(os.path.join(tmp, "JellyShare.A.dll"), (1, 1))
+            package.make_zip(tmp, ["JellyShare.A.dll"], b)
             self.assertEqual(um.md5_file(a), um.md5_file(b))
 
     def test_artifacts_read_from_build_yaml(self):
         root = os.path.dirname(HERE)
         arts = package.read_artifacts(os.path.join(root, "build.yaml"))
-        self.assertEqual(arts, ["JellyShare.Jellyfin.dll"])
+        self.assertEqual(arts, ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll"])
+
+    def test_zips_every_jellyshare_assembly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            names = ["JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll"]
+            for name in names + ["JellyShare.Domain.pdb", "JellyShare.Jellyfin.deps.json"]:
+                with open(os.path.join(tmp, name), "wb") as f:
+                    f.write(name.encode())
+            out = os.path.join(tmp, "dist", "z.zip")
+            package.make_zip(tmp, names, out)
+            with zipfile.ZipFile(out) as z:
+                self.assertEqual(z.namelist(), names)
+
+    def test_only_jellyshare_dlls_may_be_artifacts(self):
+        for bad in ("Jellyfin.Controller.dll", "Microsoft.Extensions.Logging.Abstractions.dll", "JellyShare.Jellyfin.pdb", "x.dll"):
+            with self.assertRaises(ValueError, msg=bad):
+                package.check_artifacts(["JellyShare.Jellyfin.dll", bad])
+
+    def test_publish_dir_with_host_assemblies_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("JellyShare.Jellyfin.dll", "JellyShare.Domain.dll"):
+                open(os.path.join(tmp, name), "wb").close()
+            package.check_publish_dir(tmp)
+            open(os.path.join(tmp, "Microsoft.Extensions.Logging.Abstractions.dll"), "wb").close()
+            with self.assertRaises(ValueError):
+                package.check_publish_dir(tmp)
+
+    def test_cli_publish_dir_with_host_assembly_fails(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in ("JellyShare.Jellyfin.dll", "JellyShare.Application.dll", "JellyShare.Domain.dll",
+                         "Microsoft.Extensions.Hosting.Abstractions.dll"):
+                open(os.path.join(tmp, name), "wb").close()
+            res = subprocess.run([sys.executable, os.path.join(HERE, "package.py"), "--publish-dir", tmp,
+                                  "--version", "0.1.0.0", "--out", os.path.join(tmp, "dist")], capture_output=True)
+            self.assertNotEqual(res.returncode, 0)
+            self.assertFalse(os.path.exists(os.path.join(tmp, "dist", "jellyshare_0.1.0.0.zip")))
 
 
 if __name__ == "__main__":

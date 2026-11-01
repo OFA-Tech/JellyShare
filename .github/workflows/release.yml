@@ -53,7 +53,7 @@ jobs:
           dotnet publish Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj -c Release -o publish
           -p:Version="$VERSION" -p:AssemblyVersion="$VERSION" -p:FileVersion="$VERSION"
 
-      - name: Zip the plugin DLL
+      - name: Zip the plugin DLLs (JellyShare.*.dll only)
         run: python3 build/package.py --publish-dir publish --version "$VERSION" --out dist
 
       - name: Changelog from commit subjects since the previous release

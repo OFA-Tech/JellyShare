@@ -2,7 +2,7 @@
 """End-to-end suite for JellyShare against the running two-server harness (alice, bob). Standard library only.
 
     py harness/e2e.py             # run against the already running harness, prints one line per check
-    py harness/e2e.py --deploy    # first docker cp the Release DLL into both containers and restart them
+    py harness/e2e.py --deploy    # first docker cp the Release JellyShare.*.dll into both containers and restart them
 
 Needs the harness from the README (docker compose up, setup.py run, media generated) and a Release build.
 Prints one PASS/FAIL line per check and `ALL PASS` at the end; exit code 1 when any check failed.
@@ -40,8 +40,10 @@ HERE = pathlib.Path(__file__).resolve().parent
 SECRETS = HERE / ".secrets"
 MEDIA = HERE / "media"
 BASE_MKV = MEDIA / ".base.mkv"
-DLL = HERE.parent / "Source" / "Infrastructure" / "Platform" / "Jellyfin" / "bin" / "Release" / "net10.0" / "JellyShare.Jellyfin.dll"
+RELEASE_DIR = HERE.parent / "Source" / "Infrastructure" / "Platform" / "Jellyfin" / "bin" / "Release" / "net10.0"
 PLUGIN_DLL_NAME = "JellyShare.Jellyfin.dll"
+# Every assembly the plugin ships (build.yaml artifacts): the entry DLL plus the Domain and Application layers.
+PLUGIN_DLLS = (PLUGIN_DLL_NAME, "JellyShare.Application.dll", "JellyShare.Domain.dll")
 PLUGIN_DLL_FALLBACK = "/config/plugins/JellyShare_0.0.0.1/" + PLUGIN_DLL_NAME
 FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
 CLIENT = 'MediaBrowser Client="jellyshare-harness", Device="e2e", DeviceId="jellyshare-harness-e2e", Version="1.0"'
@@ -317,29 +319,37 @@ def plugin_dll_path(server):
     return found[0] if found else PLUGIN_DLL_FALLBACK
 
 
-def container_hash(server):
-    res = sh("docker", "exec", server.container, "sha256sum", plugin_dll_path(server))
+def plugin_dir(server):
+    """The container's plugin folder (holds every JellyShare.*.dll)."""
+    return plugin_dll_path(server).rsplit("/", 1)[0]
+
+
+def container_hash(server, name=PLUGIN_DLL_NAME):
+    res = sh("docker", "exec", server.container, "sha256sum", plugin_dir(server) + "/" + name)
     return res.stdout.decode().split()[0] if res.returncode == 0 and res.stdout else None
 
 
 def deploy_and_check(deploy):
     print("== build")
-    if not DLL.exists():
-        check("Release DLL exists (run: dotnet build -c Release)", False, str(DLL))
+    missing = [n for n in PLUGIN_DLLS if not (RELEASE_DIR / n).exists()]
+    if missing:
+        check("Release DLLs exist (run: dotnet build -c Release)", False, ", ".join(missing))
         return False
-    want = file_hash(DLL)
+    want = {n: file_hash(RELEASE_DIR / n) for n in PLUGIN_DLLS}
     if deploy:
         for s in S.values():
-            cp = sh("docker", "cp", str(DLL), f"{s.container}:{plugin_dll_path(s)}")
-            check(f"{s.name}: DLL copied into the container", cp.returncode == 0)
+            target = plugin_dir(s)
+            copied = all(sh("docker", "cp", str(RELEASE_DIR / n), f"{s.container}:{target}/{n}").returncode == 0
+                         for n in PLUGIN_DLLS)
+            check(f"{s.name}: JellyShare DLLs copied into the container", copied)
             sh("docker", "restart", s.container)
         for s in S.values():
             wait_until(lambda s=s: _safe_ping(s), 180, 3)
     ok = True
     for s in S.values():
-        got = container_hash(s)
-        ok &= check(f"{s.name} runs the current Release build", got == want,
-                    "" if got == want else "DLL in container differs: run with --deploy (docker cp + restart)")
+        stale = [n for n in PLUGIN_DLLS if container_hash(s, n) != want[n]]
+        ok &= check(f"{s.name} runs the current Release build", not stale,
+                    "" if not stale else "differs: " + ", ".join(stale) + " (run with --deploy: docker cp + restart)")
         ok &= check(f"{s.name} ping", _safe_ping(s))
     return ok
 
@@ -778,7 +788,7 @@ def single_local_sintel():
 
 def run():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--deploy", action="store_true", help="docker cp the Release DLL into both containers and restart them first")
+    ap.add_argument("--deploy", action="store_true", help="docker cp the Release JellyShare.*.dll into both containers and restart them first")
     args = ap.parse_args()
     started = time.time()
 
