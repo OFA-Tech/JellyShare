@@ -19,13 +19,18 @@ public class RelayController : ControllerBase
     /// <summary>Default time a peer gets to answer with headers before the next peer is tried.</summary>
     public static readonly TimeSpan DefaultHeaderTimeout = TimeSpan.FromSeconds(15);
 
+    /// <summary>Default time a committed peer may send no bytes before the response is aborted.</summary>
+    public static readonly TimeSpan DefaultIdleTimeout = TimeSpan.FromSeconds(60);
+
     private const int MaxRangeLength = 256;
 
     // A request that passed through a reverse proxy on this host would otherwise look like loopback.
     // X-Original-* are what ASP.NET's forwarded-headers middleware leaves after consuming X-Forwarded-*.
+    // A proxy that sends none of these cannot be told apart (README, "Security notes").
     private static readonly string[] ForwardingHeaders =
     {
-        "X-Forwarded-For", "X-Forwarded-Host", "X-Real-IP", "Forwarded", "X-Original-For", "X-Original-Host",
+        "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "X-Forwarded-Port", "X-Real-IP", "Forwarded",
+        "Via", "X-Original-For", "X-Original-Host", "X-Original-Proto", "CF-Connecting-IP", "True-Client-IP",
     };
 
     private readonly IConfigProvider _config;
@@ -34,6 +39,7 @@ public class RelayController : ControllerBase
     private readonly RelaySessions _sessions;
     private readonly ILogger<RelayController> _logger;
     private readonly TimeSpan _headerTimeout;
+    private readonly TimeSpan _idleTimeout;
 
     /// <summary>Initializes a new instance of the <see cref="RelayController"/> class.</summary>
     /// <param name="config">The plugin configuration (peers).</param>
@@ -42,7 +48,7 @@ public class RelayController : ControllerBase
     /// <param name="sessions">The active playbacks.</param>
     /// <param name="logger">The logger.</param>
     public RelayController(IConfigProvider config, IConsumerIndex index, IPeerClient client, RelaySessions sessions, ILogger<RelayController> logger)
-        : this(config, index, client, sessions, logger, DefaultHeaderTimeout)
+        : this(config, index, client, sessions, logger, DefaultHeaderTimeout, DefaultIdleTimeout)
     {
     }
 
@@ -52,8 +58,10 @@ public class RelayController : ControllerBase
         IPeerClient client,
         RelaySessions sessions,
         ILogger<RelayController> logger,
-        TimeSpan headerTimeout)
+        TimeSpan headerTimeout,
+        TimeSpan idleTimeout)
     {
+        _idleTimeout = idleTimeout;
         _config = config;
         _index = index;
         _client = client;
@@ -236,17 +244,41 @@ public class RelayController : ControllerBase
 
     private async Task CopyBodyAsync(HttpResponseMessage response, RelaySource source, string key, CancellationToken ct)
     {
+        var aborted = HttpContext.RequestAborted;
+        using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
         try
         {
             var body = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             await using (body.ConfigureAwait(false))
             {
-                await body.CopyToAsync(Response.Body, 81920, ct).ConfigureAwait(false);
+                var buffer = new byte[81920];
+                while (true)
+                {
+                    // A peer that stops sending must not hold the request (and Jellyfin's ffmpeg) forever.
+                    idle.CancelAfter(_idleTimeout);
+                    var read = await body.ReadAsync(buffer, idle.Token).ConfigureAwait(false);
+                    idle.CancelAfter(Timeout.InfiniteTimeSpan);
+                    if (read == 0)
+                    {
+                        break;
+                    }
+
+                    await Response.Body.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                }
             }
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested && idle.IsCancellationRequested)
+        {
+            _logger.LogDebug("JellyShare relay: peer {Peer} stalled for {Key}, aborting", source.Peer.Name, key);
+            HttpContext.Abort();
         }
         catch (OperationCanceledException)
         {
             // The client went away; the linked token already cancelled the upstream read.
+        }
+        catch (Exception) when (aborted.IsCancellationRequested)
+        {
+            // The client went away while we wrote: not a peer failure.
         }
         catch (Exception ex) when (ex is IOException or HttpRequestException)
         {

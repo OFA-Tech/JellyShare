@@ -6,6 +6,7 @@ using Jellyfin.Plugin.JellyShare.Keys;
 using Jellyfin.Plugin.JellyShare.Protocol;
 using Jellyfin.Plugin.JellyShare.Tests.Keys;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.Extensions.Logging;
@@ -62,7 +63,7 @@ public class RelayControllerTests
     private void Host(string host, Func<HttpRequestMessage, HttpResponseMessage> respond)
         => _hosts[host] = (r, _) => Task.FromResult(respond(r));
 
-    private RelayController CreateController(DefaultHttpContext context, TimeSpan? headerTimeout = null)
+    private RelayController CreateController(DefaultHttpContext context, TimeSpan? headerTimeout = null, TimeSpan? idleTimeout = null)
     {
         var handler = new FakeHandler((request, ct) =>
         {
@@ -76,7 +77,7 @@ public class RelayControllerTests
                 : throw new HttpRequestException("connection refused");
         });
         var client = new PeerClient(() => new HttpClient(handler, false));
-        return new RelayController(_config, _index, client, _sessions, _logger, headerTimeout ?? TimeSpan.FromSeconds(5))
+        return new RelayController(_config, _index, client, _sessions, _logger, headerTimeout ?? TimeSpan.FromSeconds(5), idleTimeout ?? TimeSpan.FromSeconds(5))
         {
             ControllerContext = new ControllerContext { HttpContext = context },
         };
@@ -127,6 +128,14 @@ public class RelayControllerTests
     [InlineData("X-Real-IP", "203.0.113.9")]
     [InlineData("Forwarded", "for=203.0.113.9")]
     [InlineData("X-Original-For", "203.0.113.9:1234")]
+    [InlineData("X-Original-Host", "example.org")]
+    [InlineData("X-Original-Proto", "https")]
+    [InlineData("X-Forwarded-Proto", "https")]
+    [InlineData("X-Forwarded-Port", "443")]
+    [InlineData("Via", "1.1 proxy")]
+    [InlineData("CF-Connecting-IP", "203.0.113.9")]
+    [InlineData("True-Client-IP", "203.0.113.9")]
+    [InlineData("x-forwarded-for", "203.0.113.9")]
     public async Task Relay_LoopbackWithForwardedHeader_Returns403(string header, string value)
     {
         Host("bob", _ => Video(new byte[] { 1 }));
@@ -372,6 +381,39 @@ public class RelayControllerTests
     }
 
     [Fact]
+    public async Task Relay_StalledPeerAfterCommit_AbortsResponse()
+    {
+        var upstreamBody = new BlockingStream(new byte[] { 4, 5, 6 });
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(upstreamBody) });
+        Host("bob", _ => Video(new byte[] { 9 }));
+        var context = Context();
+        var lifetime = new RecordingLifetime();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+
+        await CreateController(context, idleTimeout: TimeSpan.FromMilliseconds(300)).Play(Key).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(new byte[] { 4, 5, 6 }, Body(context));
+        Assert.True(lifetime.Aborted);
+        Assert.True(upstreamBody.ReadCancelled);
+        Assert.Equal("alice", Assert.Single(_upstream).RequestUri!.Host);
+        Assert.Contains(_logger.Lines, l => l.Contains("stalled", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Relay_ClientGoneDuringWrite_IsNotLoggedAsPeerFailure()
+    {
+        Host("alice", _ => Video(new byte[100]));
+        using var abort = new CancellationTokenSource();
+        var context = Context();
+        context.RequestAborted = abort.Token;
+        context.Response.Body = new DisconnectingStream(abort);
+
+        await CreateController(context).Play(Key).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.DoesNotContain(_logger.Lines, l => l.Contains("broke", StringComparison.Ordinal) || l.Contains("stalled", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Relay_SamePlayback_StaysOnServingPeer()
     {
         var aliceCalls = 0;
@@ -464,8 +506,64 @@ public class RelayControllerTests
         public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
+    private sealed class RecordingLifetime : IHttpRequestLifetimeFeature
+    {
+        public CancellationToken RequestAborted { get; set; }
+
+        public bool Aborted { get; private set; }
+
+        public void Abort() => Aborted = true;
+    }
+
+    private sealed class DisconnectingStream : Stream
+    {
+        private readonly CancellationTokenSource _abort;
+
+        public DisconnectingStream(CancellationTokenSource abort) => _abort = abort;
+
+        public override bool CanRead => false;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => true;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            // Kestrel: the client went away; RequestAborted fires and the write fails with an IOException.
+            _abort.Cancel();
+            throw new IOException("client disconnected");
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            Write(Array.Empty<byte>(), 0, 0);
+            return ValueTask.CompletedTask;
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush()
+        {
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
     private sealed class BlockingStream : Stream
     {
+        private byte[]? _prefix;
+
+        public BlockingStream(byte[]? prefix = null) => _prefix = prefix;
+
         public TaskCompletionSource ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public bool ReadCancelled { get; private set; }
@@ -482,6 +580,13 @@ public class RelayControllerTests
 
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
+            if (_prefix is { } prefix)
+            {
+                _prefix = null;
+                prefix.CopyTo(buffer);
+                return prefix.Length;
+            }
+
             ReadStarted.TrySetResult();
             try
             {

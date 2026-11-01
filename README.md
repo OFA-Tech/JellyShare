@@ -7,6 +7,21 @@ Verified API names and plan corrections: [`docs/spike-results.md`](docs/spike-re
 
 Status: skeleton. The plugin currently exposes the anonymous `GET /JellyShare/v1/ping` endpoint only.
 
+## Security notes
+
+- Placeholder `.strm` files contain only a loopback relay URL (`http://127.0.0.1:{port}{BaseUrl}/JellyShare/v1/play/{key}`),
+  never a token. Peer tokens are sent only in the `X-JellyShare-Token` header and are never logged.
+- The relay answers only requests from loopback that carry **no** proxy header (`X-Forwarded-For`, `X-Forwarded-Host`,
+  `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Real-IP`, `Forwarded`, `Via`, `X-Original-*`, `CF-Connecting-IP`,
+  `True-Client-IP`); everything else gets 403. Jellyfin also hides the relay URL from clients.
+- **Reverse proxy on the same host as Jellyfin:** it must add `X-Forwarded-For` to the requests it forwards, otherwise
+  it looks like a local caller and the relay could be reached from outside through it. Most proxies do this by
+  default (Nginx Proxy Manager, Caddy, Traefik). Plain nginx needs:
+
+  ```nginx
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  ```
+
 ## Build and test
 
 Requires the .NET 10 SDK.

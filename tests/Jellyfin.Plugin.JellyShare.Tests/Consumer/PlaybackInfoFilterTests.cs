@@ -130,6 +130,58 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Filter_NoBodyProfile_UsesStoredDeviceProfileBitrate()
+    {
+        _placeholders.StoredProfileBitrate = 800_000;
+
+        var info = await Post(Placeholder, new { MaxStreamingBitrate = (int?)null });
+
+        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+    }
+
+    [Fact]
+    public async Task Filter_NoBody_UsesStoredDeviceProfileBitrate()
+    {
+        _placeholders.StoredProfileBitrate = 800_000;
+
+        var info = await Post(Placeholder, null);
+
+        Assert.False(Assert.Single(info.MediaSources).SupportsDirectStream);
+    }
+
+    [Fact]
+    public async Task Filter_BodyProfile_WinsOverStoredProfile()
+    {
+        _placeholders.StoredProfileBitrate = 800_000;
+
+        var info = await Post(Placeholder, Body(profileMax: 120_000_000));
+
+        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
+    }
+
+    [Fact]
+    public async Task Filter_RequestedBitrate_WinsOverStoredProfile()
+    {
+        _placeholders.StoredProfileBitrate = 800_000;
+
+        var info = await Post(Placeholder, new { MaxStreamingBitrate = 120_000_000 });
+
+        Assert.True(Assert.Single(info.MediaSources).SupportsDirectStream);
+    }
+
+    [Fact]
+    public async Task Filter_LazyItemEnumerable_HidesRelayPathAndEnumeratesOnce()
+    {
+        FakeMediaInfoController.LazyEnumerations = 0;
+
+        var list = await Get<BaseItemDto[]>("/Users/" + Guid.NewGuid() + "/Items/" + Placeholder + "/SpecialFeatures");
+
+        Assert.Equal(new[] { string.Empty, LocalPath, OtherHttp }, list.Select(i => i.MediaSources.Single().Path));
+        Assert.False(list[0].MediaSources.Single().SupportsDirectPlay);
+        Assert.Equal(1, FakeMediaInfoController.LazyEnumerations);
+    }
+
+    [Fact]
     public async Task Filter_HighMaxBitrate_KeepsDirectStream()
     {
         var info = await Post(Placeholder, Body(maxStreamingBitrate: 120_000_000));
@@ -202,9 +254,12 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         public int? RemoteLimit { get; set; }
 
+        public int? StoredProfileBitrate { get; set; }
+
         public PlaceholderMedia? Find(Guid itemId) => Items.GetValueOrDefault(itemId);
 
-        public Task<int?> GetRemoteBitrateLimitAsync(HttpContext context) => Task.FromResult(RemoteLimit);
+        public Task<CallerLimits> GetCallerLimitsAsync(HttpContext context)
+            => Task.FromResult(new CallerLimits(RemoteLimit, StoredProfileBitrate));
     }
 }
 
@@ -264,9 +319,25 @@ public sealed class FakeMediaInfoController : ControllerBase
     public ActionResult<QueryResult<BaseItemDto>> GetItems()
         => new QueryResult<BaseItemDto>(Paths.Keys.Order().Select(Dto).ToList());
 
+    public static int LazyEnumerations { get; set; }
+
+    // Like Jellyfin 12.4 UserLibraryController.GetSpecialFeatures / GetLocalTrailers: a lazy Select.
+    [HttpGet("Users/{userId}/Items/{itemId}/SpecialFeatures")]
+    public ActionResult<IEnumerable<BaseItemDto>> GetSpecialFeatures([FromRoute] Guid userId, [FromRoute] Guid itemId)
+        => Ok(Lazy());
+
     [HttpGet("Items/Latest")]
     public ActionResult<IEnumerable<BaseItemDto>> GetLatest()
         => Paths.Keys.Order().Select(Dto).ToList();
+
+    private static IEnumerable<BaseItemDto> Lazy()
+    {
+        LazyEnumerations++;
+        foreach (var id in Paths.Keys.Order())
+        {
+            yield return Dto(id);
+        }
+    }
 
     private static BaseItemDto Dto(Guid itemId)
         => new() { Id = itemId, MediaSources = new[] { Source(itemId, true, true, null) } };

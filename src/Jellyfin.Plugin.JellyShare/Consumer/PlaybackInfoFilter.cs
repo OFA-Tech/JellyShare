@@ -24,14 +24,22 @@ public interface IPlaceholderLookup
     /// <returns>The placeholder, or <c>null</c> when the item is not a relay placeholder.</returns>
     PlaceholderMedia? Find(Guid itemId);
 
-    /// <summary>
-    /// Gets the remote-client bitrate limit that applies to the caller (user policy, else server setting), or
-    /// <c>null</c> when the caller is in the local network or no limit is set. Mirrors Jellyfin's own rule.
-    /// </summary>
+    /// <summary>Gets the bitrate limits of the caller that do not come from the request itself.</summary>
     /// <param name="context">The request.</param>
-    /// <returns>The limit in bit/s, or <c>null</c>.</returns>
-    Task<int?> GetRemoteBitrateLimitAsync(HttpContext context);
+    /// <returns>The limits.</returns>
+    Task<CallerLimits> GetCallerLimitsAsync(HttpContext context);
 }
+
+/// <summary>Bitrate limits of a caller that Jellyfin applies besides the request values.</summary>
+/// <param name="RemoteLimit">
+/// The remote-client limit (user policy, else server setting), or <c>null</c> when the caller is in the local network
+/// or no limit is set (Jellyfin's <c>MediaInfoHelper.GetMaxBitrate</c>).
+/// </param>
+/// <param name="StoredProfileBitrate">
+/// <c>MaxStreamingBitrate</c> of the device profile Jellyfin stored for the caller's device, which it uses when the
+/// request carries no profile (<c>IDeviceManager.GetCapabilities</c>).
+/// </param>
+public sealed record CallerLimits(int? RemoteLimit, int? StoredProfileBitrate);
 
 /// <summary>
 /// Keeps clients away from relay URLs. Jellyfin hands a <c>.strm</c> URL to clients as <c>MediaSources[].Path</c>
@@ -95,8 +103,13 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
-        if (context.Result is ObjectResult { Value: { } value })
+        if (context.Result is ObjectResult { Value: { } value } result)
         {
+            if (Materialize(value) is { } materialized)
+            {
+                result.Value = value = materialized;
+            }
+
             HideRelaySources(value, _relayBase.Current);
         }
 
@@ -176,25 +189,39 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
     private static object? Body(ActionExecutingContext context)
         => context.ActionArguments.Values.FirstOrDefault(v => v is not null && v.GetType().GetProperty("DeviceProfile") is not null);
 
-    private static int? RequestedBitrate(ActionExecutingContext context, object? body)
+    // Jellyfin: maxStreamingBitrate (query) ?? body.MaxStreamingBitrate ?? profile.MaxStreamingBitrate, where
+    // profile = body.DeviceProfile ?? the profile stored for the caller's device.
+    private static int? RequestedBitrate(ActionExecutingContext context, object? body, int? storedProfileBitrate)
     {
         if (context.ActionArguments.TryGetValue("maxStreamingBitrate", out var query) && query is int fromQuery)
         {
             return fromQuery;
         }
 
-        if (body is null)
-        {
-            return null;
-        }
-
-        if (body.GetType().GetProperty("MaxStreamingBitrate")?.GetValue(body) is int fromBody)
+        if (body?.GetType().GetProperty("MaxStreamingBitrate")?.GetValue(body) is int fromBody)
         {
             return fromBody;
         }
 
-        return (body.GetType().GetProperty("DeviceProfile")?.GetValue(body) as DeviceProfile)?.MaxStreamingBitrate;
+        if (body?.GetType().GetProperty("DeviceProfile")?.GetValue(body) is DeviceProfile profile)
+        {
+            return profile.MaxStreamingBitrate;
+        }
+
+        return storedProfileBitrate;
     }
+
+    private static object? Materialize(object value)
+        => value switch
+        {
+            // Lazy sequences (e.g. Jellyfin's SpecialFeatures/LocalTrailers return a Select) would produce fresh DTOs
+            // when the serializer enumerates them again, so the changes must be made on a materialized copy.
+            IEnumerable<BaseItemDto> dtos when value is not ICollection<BaseItemDto> and not IReadOnlyCollection<BaseItemDto>
+                => dtos.ToArray(),
+            IEnumerable<MediaSourceInfo> sources when value is not ICollection<MediaSourceInfo> and not IReadOnlyCollection<MediaSourceInfo>
+                => sources.ToArray(),
+            _ => null,
+        };
 
     private static void SetBodyFlag(object? body, string property)
     {
@@ -219,8 +246,8 @@ public sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilter
         }
 
         var body = Body(context);
-        var remoteLimit = await _lookup.GetRemoteBitrateLimitAsync(context.HttpContext).ConfigureAwait(false);
-        var max = EffectiveMaxBitrate(RequestedBitrate(context, body), remoteLimit);
+        var limits = await _lookup.GetCallerLimitsAsync(context.HttpContext).ConfigureAwait(false);
+        var max = EffectiveMaxBitrate(RequestedBitrate(context, body, limits.StoredProfileBitrate), limits.RemoteLimit);
         if (max is not { } limit || limit <= 0 || limit >= sourceBitrate)
         {
             return;

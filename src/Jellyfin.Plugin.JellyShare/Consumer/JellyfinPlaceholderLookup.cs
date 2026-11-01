@@ -1,6 +1,7 @@
 using Jellyfin.Plugin.JellyShare.Provider;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
+using MediaBrowser.Controller.Devices;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Http;
@@ -13,6 +14,7 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
 {
     private readonly ILibraryManager _library;
     private readonly IAuthorizationContext _auth;
+    private readonly IDeviceManager _devices;
     private readonly INetworkManager _network;
     private readonly IServerConfigurationManager _serverConfig;
     private readonly IConsumerIndex _index;
@@ -23,6 +25,7 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     /// <summary>Initializes a new instance of the <see cref="JellyfinPlaceholderLookup"/> class.</summary>
     /// <param name="library">The library manager.</param>
     /// <param name="auth">The authorization context.</param>
+    /// <param name="devices">The device manager (stored client capabilities).</param>
     /// <param name="network">The network manager.</param>
     /// <param name="serverConfig">The server configuration.</param>
     /// <param name="index">The merged index (catalog bitrate before the first probe).</param>
@@ -32,6 +35,7 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     public JellyfinPlaceholderLookup(
         ILibraryManager library,
         IAuthorizationContext auth,
+        IDeviceManager devices,
         INetworkManager network,
         IServerConfigurationManager serverConfig,
         IConsumerIndex index,
@@ -41,6 +45,7 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     {
         _library = library;
         _auth = auth;
+        _devices = devices;
         _network = network;
         _serverConfig = serverConfig;
         _index = index;
@@ -62,12 +67,45 @@ public sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     }
 
     /// <inheritdoc />
-    public async Task<int?> GetRemoteBitrateLimitAsync(HttpContext context)
+    public async Task<CallerLimits> GetCallerLimitsAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        AuthorizationInfo info;
         try
         {
-            var info = await _auth.GetAuthorizationInfo(context).ConfigureAwait(false);
+            info = await _auth.GetAuthorizationInfo(context).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "JellyShare: could not read the caller's authorization");
+            return new CallerLimits(null, null);
+        }
+
+        return new CallerLimits(RemoteLimit(context, info), StoredProfileBitrate(info));
+    }
+
+    private int? StoredProfileBitrate(AuthorizationInfo info)
+    {
+        if (string.IsNullOrEmpty(info.DeviceId))
+        {
+            return null;
+        }
+
+        try
+        {
+            return _devices.GetCapabilities(info.DeviceId)?.DeviceProfile?.MaxStreamingBitrate;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "JellyShare: could not read the caller's stored device profile");
+            return null;
+        }
+    }
+
+    private int? RemoteLimit(HttpContext context, AuthorizationInfo info)
+    {
+        try
+        {
             var limit = info.User?.RemoteClientBitrateLimit ?? 0;
             if (limit <= 0)
             {

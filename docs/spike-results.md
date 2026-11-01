@@ -421,11 +421,24 @@ From Task 9 (harness, 12.4.0, `harness/relay_gate.py`, `harness/relay_web_play.j
     request rule therefore sets the action arguments `enableDirectPlay`/`enableDirectStream` (the controller does
     `enableDirectStream ??= dto.EnableDirectStream`, so they win) and reads the body by reflection. `GET PlaybackInfo`
     takes no device profile, so it never builds a transcode; only the response rule applies to it. The effective
-    max bitrate is `maxStreamingBitrate` (query) ?? body ?? body `DeviceProfile`, capped by the remote-client limit
-    (user, else server) when the caller is outside the LAN, as `MediaInfoHelper.GetMaxBitrate` does. Not covered:
-    a client that sends no profile and relies on its stored device capabilities.
+    max bitrate is `maxStreamingBitrate` (query) ?? body ?? the profile's `MaxStreamingBitrate`, where the profile is
+    the body `DeviceProfile` or, when the body has none, the one Jellyfin stored for the caller's device
+    (`IDeviceManager.GetCapabilities(deviceId)`, device id from `IAuthorizationContext`, as `MediaInfoController`
+    does). The result is capped by the remote-client limit (user, else server) when the caller is outside the LAN,
+    as `MediaInfoHelper.GetMaxBitrate` does. The response rule also materializes lazy `IEnumerable<BaseItemDto>`
+    results (12.4 `UserLibraryController` returns `Select`s for LocalTrailers / SpecialFeatures) and puts the array
+    back into the `ObjectResult`; otherwise the serializer would re-enumerate and emit fresh DTOs with the relay URL.
 17. **Provider stream slots and long requests (Task 7/12 follow-up):** `StreamLimiter` refreshes a session only
     when a request arrives. A static direct stream is often one long Range request, so after 30 s the provider
     no longer counts it and a second title can start while the first still plays. The relay keeps one playback on
     one peer (`RelaySessions`, same 30 s grace) but cannot fix the provider count; the limiter should hold the slot
     for as long as a response is being sent. (Read from the code, not measured.)
+18. **Relay behind a reverse proxy on the same host (controller ruling).** The relay answers only loopback requests
+    without any proxy header: `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Forwarded-Port`,
+    `X-Real-IP`, `Forwarded`, `Via`, `X-Original-For`, `X-Original-Host`, `X-Original-Proto`, `CF-Connecting-IP`,
+    `True-Client-IP` → 403. A reverse proxy running on the same host as Jellyfin (or in its network namespace) that
+    forwards requests **without** any of these headers looks exactly like a local caller, so the relay would be
+    reachable from outside through it. Such a proxy must send `X-Forwarded-For` (most do by default; nginx needs
+    `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`). Documented in the README ("Security notes");
+    the Task 11 admin page must repeat the hint. Once a peer is committed, the relay aborts the response after 60 s
+    without upstream bytes, and a client that disconnects while the relay writes is not logged as a peer failure.
