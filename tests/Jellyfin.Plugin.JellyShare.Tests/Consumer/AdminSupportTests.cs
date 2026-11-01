@@ -169,6 +169,20 @@ public class PeerClientPingTests
     }
 
     [Fact]
+    public async Task Ping_ServerName_IsTruncatedTo100Chars_AndControlCharactersRemoved()
+    {
+        var name = "A\nB\u0007" + new string('x', 300);
+        var body = System.Text.Json.JsonSerializer.Serialize(new { protocolVersion = "1.0", serverName = name });
+
+        var result = await Client(new FakeHandler(_ => Resp(HttpStatusCode.OK, body))).PingAsync("http://h", CancellationToken.None);
+
+        Assert.True(result.Ok);
+        Assert.Equal(100, result.ServerName!.Length);
+        Assert.StartsWith("ABxxx", result.ServerName, StringComparison.Ordinal);
+        Assert.DoesNotContain(result.ServerName, c => char.IsControl(c));
+    }
+
+    [Fact]
     public async Task Ping_ConnectionError_IsUnreachable()
     {
         var handler = new FakeHandler((_, _) => throw new HttpRequestException("No connection could be made"));

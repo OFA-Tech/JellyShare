@@ -61,6 +61,8 @@ async function main() {
       await full(browser);
     } else if (mode === 'setup') {
       await setupChecks(browser);
+    } else if (mode === 'recheck') {
+      await recheck(browser);
     } else if (mode === 'cleanup') {
       await cleanup(browser);
     }
@@ -252,6 +254,62 @@ async function setupChecks(browser) {
   const share = cfg.Shares.find(s => s.Name === 'bob (admin page test)');
   log('alice share after edit: MaxStreams', share.MaxStreams, 'MaxBitrate', share.MaxBitrate, 'Enabled', share.Enabled, 'Libraries', share.LibraryIds.length);
   await shot(a, 'alice-share-edited');
+}
+
+// Review fixes: a saved peer's Test button with an edited address must ask for the token; attach still works;
+// empty Max streams / bitrate over 2000 Mbps are refused by the page.
+async function recheck(browser) {
+  const b = await (await browser.newContext({ viewport: { width: 1280, height: 1300 } })).newPage();
+  b.on('pageerror', e => log('bob pageerror', e.message.slice(0, 300)));
+  b.on('dialog', d => d.accept());
+  const requests = [];
+  b.on('request', r => { if (r.url().includes('/peers/test')) requests.push(r.postData() || ''); });
+  await login(b, SERVERS.bob.url);
+  await openAdmin(b, SERVERS.bob.url, 'receive');
+  const card = b.locator('#js-peers .js-card').first();
+  const urlInput = card.locator('input[type=text]').nth(1);
+  const result = card.locator('p span.js-muted, p span').last();
+  const testOnce = async label => {
+    await card.locator('button:has-text("Test")').click();
+    await b.waitForFunction(() => {
+      const s = document.querySelector('#js-peers .js-card p:last-child > span:last-child');
+      return s && /\S/.test(s.textContent) && !/Testing/.test(s.textContent);
+    }, null, { timeout: 40000 });
+    log(`bob peer Test [${label}]:`, await card.locator('p:last-child > span:last-child').innerText());
+  };
+  const saved = await urlInput.inputValue();
+  await testOnce('saved address, stored token');
+  await urlInput.fill('http://alice-typo:8096');
+  await testOnce('edited address, token field empty');
+  await shot(b, 'bob-test-edited-url');
+  await urlInput.fill(saved);
+  void result;
+  log('bob peers/test request bodies carried a token:', requests.some(r => /"token":"[^"]/.test(r)));
+
+  const token = await adminToken('bob');
+  const folders = await rest('bob', 'GET', '/Library/VirtualFolders', undefined, token);
+  const root = folders.find(f => f.Name === 'Movies').Locations.find(l => l.endsWith('/placeholders/Movies'));
+  await rest('bob', 'DELETE', `/Library/VirtualFolders/Paths?name=Movies&path=${encodeURIComponent(root)}&refreshLibrary=false`, undefined, token);
+  await reopen(b, SERVERS.bob.url, 'receive');
+  await b.locator('#js-roots button:has-text("Add to library")').first().click();
+  await b.waitForFunction(() => /Added the Movies folder/.test(document.querySelector('#js-message').textContent), null, { timeout: 30000 });
+  await waitScan('bob', token);
+  const again = await rest('bob', 'GET', '/Library/VirtualFolders', undefined, token);
+  log('bob attach after the fix: Movies library has the root again:', again.find(f => f.Name === 'Movies').Locations.includes(root));
+
+  const a = await (await browser.newContext({ viewport: { width: 1280, height: 1000 } })).newPage();
+  await login(a, SERVERS.alice.url);
+  await openAdmin(a, SERVERS.alice.url, 'share');
+  await a.fill('#js-new-name', 'validation check');
+  for (const box of await a.locator('#js-new-libs input[data-lib]').all()) await box.check();
+  await a.fill('#js-new-streams', '');
+  await a.click('#js-create-share');
+  log('alice empty Max streams ->', await message(a));
+  await a.fill('#js-new-streams', '2');
+  await a.fill('#js-new-mbps', '2001');
+  await a.click('#js-create-share');
+  log('alice 2001 Mbps ->', await message(a));
+  log('alice invitations after the two refusals:', await a.locator('#js-shares .js-card').count());
 }
 
 // Revokes the test invitation on alice and removes the test peer on bob through the page; syncs bob afterwards.

@@ -89,6 +89,7 @@ public sealed class PeerClient : IPeerClient
 
     private const long MaxImageBytes = 32L * 1024 * 1024;
     private const long MaxPingBytes = 64 * 1024;
+    private const int MaxServerNameLength = 100;
 
     private static readonly TimeSpan PingTimeout = TimeSpan.FromSeconds(15);
 
@@ -189,7 +190,8 @@ public sealed class PeerClient : IPeerClient
                     return PingFail(PingFailure.NotJellyShare, "HTTP " + code);
                 }
 
-                TryGetString(doc.RootElement, "serverName", out var name);
+                TryGetString(doc.RootElement, "serverName", out var rawName);
+                var name = new string(rawName.Where(c => !char.IsControl(c)).Take(MaxServerNameLength).ToArray());
                 return IsCompatible(version)
                     ? new PeerPingResult(true, name, version, PingFailure.None, null)
                     : new PeerPingResult(false, name, version, PingFailure.IncompatibleProtocol, null);

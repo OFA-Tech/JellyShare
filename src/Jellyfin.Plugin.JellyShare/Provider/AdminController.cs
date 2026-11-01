@@ -21,6 +21,8 @@ public class AdminController : ControllerBase
 {
     private const int MaxNameLength = 100;
     private const int MaxStreamsLimit = 100;
+    private const int MaxTokenLength = 512;
+    private const int MaxBitrateBps = 2_000_000_000;
 
     private static readonly object ConfigLock = new();
 
@@ -112,7 +114,7 @@ public class AdminController : ControllerBase
             return Bad("Missing request body.");
         }
 
-        var error = ValidateShare(request.Name, request.LibraryIds, request.MaxStreams ?? 2, request.MaxBitrate, out var name, out var libs);
+        var error = ValidateShare(request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate, out var name, out var libs);
         if (error is not null)
         {
             return Bad(error);
@@ -126,7 +128,7 @@ public class AdminController : ControllerBase
             TokenHash = hash,
             Enabled = true,
             LibraryIds = libs,
-            MaxStreams = request.MaxStreams ?? 2,
+            MaxStreams = request.MaxStreams!.Value,
             MaxBitrate = request.MaxBitrate,
         };
 
@@ -156,23 +158,31 @@ public class AdminController : ControllerBase
 
         lock (ConfigLock)
         {
-            var share = _config.Current.Shares.FirstOrDefault(s => s.Id == id);
-            if (share is null)
+            var cfg = _config.Current;
+            var current = cfg.Shares.FirstOrDefault(s => s.Id == id);
+            if (current is null)
             {
                 return NotFound(new ErrorResponse("Share not found."));
             }
 
-            var error = ValidateShare(request.Name, request.LibraryIds, request.MaxStreams ?? 2, request.MaxBitrate, out var name, out var libs);
+            var error = ValidateShare(request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate, out var name, out var libs);
             if (error is not null)
             {
                 return Bad(error);
             }
 
-            share.Name = name;
-            share.LibraryIds = libs;
-            share.MaxStreams = request.MaxStreams ?? 2;
-            share.MaxBitrate = request.MaxBitrate;
-            share.Enabled = request.Enabled ?? share.Enabled;
+            // Copy-on-write: a request that is reading the old share (catalog, stream limits) never sees a half-updated one.
+            var share = new PeerShare
+            {
+                Id = current.Id,
+                Name = name,
+                TokenHash = current.TokenHash,
+                Enabled = request.Enabled ?? current.Enabled,
+                LibraryIds = libs,
+                MaxStreams = request.MaxStreams!.Value,
+                MaxBitrate = request.MaxBitrate,
+            };
+            cfg.Shares = cfg.Shares.Select(s => s.Id == id ? share : s).ToList();
             _saver.Save();
             _logger.LogInformation("JellyShare admin: updated share {ShareId} (enabled={Enabled})", share.Id, share.Enabled);
             return Ok(new ShareView(share.Id, share.Name, share.Enabled, share.LibraryIds.ToList(), share.MaxStreams, share.MaxBitrate, _limiter.Active(share.Id)));
@@ -230,6 +240,11 @@ public class AdminController : ControllerBase
             return Bad("Enter the token from the invitation.");
         }
 
+        if (TokenError(token) is { } tokenError)
+        {
+            return Bad(tokenError);
+        }
+
         RemotePeer peer;
         lock (ConfigLock)
         {
@@ -265,8 +280,9 @@ public class AdminController : ControllerBase
 
         lock (ConfigLock)
         {
-            var peer = _config.Current.Peers.FirstOrDefault(p => p.Id == id);
-            if (peer is null)
+            var cfg = _config.Current;
+            var current = cfg.Peers.FirstOrDefault(p => p.Id == id);
+            if (current is null)
             {
                 return NotFound(new ErrorResponse("Peer not found."));
             }
@@ -283,14 +299,23 @@ public class AdminController : ControllerBase
                 return Bad(InvalidUrlMessage);
             }
 
-            peer.Name = name;
-            peer.BaseUrl = url;
-            peer.Enabled = request.Enabled ?? peer.Enabled;
-            if (!string.IsNullOrWhiteSpace(request.Token))
+            var newToken = request.Token?.Trim();
+            if (!string.IsNullOrEmpty(newToken) && TokenError(newToken) is { } tokenError)
             {
-                peer.Token = request.Token.Trim();
+                return Bad(tokenError);
             }
 
+            // Copy-on-write: a running sync keeps a self-consistent (url, token) pair.
+            var peer = new RemotePeer
+            {
+                Id = current.Id,
+                Name = name,
+                BaseUrl = url,
+                Token = string.IsNullOrEmpty(newToken) ? current.Token : newToken,
+                Enabled = request.Enabled ?? current.Enabled,
+                Priority = current.Priority,
+            };
+            cfg.Peers = cfg.Peers.Select(p => p.Id == id ? peer : p).ToList();
             _saver.Save();
             _logger.LogInformation("JellyShare admin: updated peer {PeerId} (enabled={Enabled})", peer.Id, peer.Enabled);
             return Ok(ToView(peer, _consumerIndex.PeerStates()));
@@ -346,11 +371,24 @@ public class AdminController : ControllerBase
                 .Select(p => p!)
                 .ToList();
             var ordered = listed.Concat(current.Where(p => !listed.Contains(p))).ToList();
+            var order = new Dictionary<Guid, int>();
             for (var i = 0; i < ordered.Count; i++)
             {
-                ordered[i].Priority = i;
+                order[ordered[i].Id] = i;
             }
 
+            // Copy-on-write: peers are replaced by copies carrying the new priority.
+            cfg.Peers = cfg.Peers
+                .Select(p => new RemotePeer
+                {
+                    Id = p.Id,
+                    Name = p.Name,
+                    BaseUrl = p.BaseUrl,
+                    Token = p.Token,
+                    Enabled = p.Enabled,
+                    Priority = order.TryGetValue(p.Id, out var priority) ? priority : p.Priority,
+                })
+                .ToList();
             _saver.Save();
         }
 
@@ -382,6 +420,12 @@ public class AdminController : ControllerBase
             var saved = _config.Current.Peers.FirstOrDefault(p => p.Id == savedId);
             if (saved is not null)
             {
+                // The stored token only ever goes to the address it was saved for; a changed address needs the token typed again.
+                if (!string.Equals(url, NormalizeUrl(saved.BaseUrl), StringComparison.Ordinal))
+                {
+                    return Ok(TestFail("The address was changed. Enter the token again to test the new address (the saved token is only used for the saved address)."));
+                }
+
                 token = saved.Token ?? string.Empty;
                 peerId = saved.Id;
             }
@@ -390,6 +434,11 @@ public class AdminController : ControllerBase
         if (token.Length == 0)
         {
             return Ok(TestFail("Enter the token from the invitation."));
+        }
+
+        if (TokenError(token) is { } tokenError)
+        {
+            return Ok(TestFail(tokenError));
         }
 
         var ping = await _peers.PingAsync(url, ct).ConfigureAwait(false);
@@ -492,10 +541,12 @@ public class AdminController : ControllerBase
 
             await _libraries.AddPathAsync(library.Name, root, ct).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "JellyShare admin: could not attach {Root} to {Library}", root, library.Name);
-            return StatusCode(StatusCodes.Status500InternalServerError, new ErrorResponse("Could not prepare the placeholder folder: " + ex.Message));
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new ErrorResponse($"Could not add the placeholder folder to '{library.Name}': {ex.Message}"));
         }
 
         _logger.LogInformation("JellyShare admin: added {Root} to library '{Library}' and started a refresh", root, library.Name);
@@ -604,7 +655,19 @@ public class AdminController : ControllerBase
 
     private BadRequestObjectResult Bad(string message) => BadRequest(new ErrorResponse(message));
 
-    private string? ValidateShare(string? rawName, List<Guid>? libraryIds, int maxStreams, int? maxBitrate, out string name, out List<Guid> libs)
+    private static string? TokenError(string token)
+    {
+        if (token.Length > MaxTokenLength)
+        {
+            return $"The token is too long (at most {MaxTokenLength} characters). Check that you pasted only the token.";
+        }
+
+        return token.Any(char.IsControl)
+            ? "The token contains line breaks or other control characters. Paste only the token."
+            : null;
+    }
+
+    private string? ValidateShare(string? rawName, List<Guid>? libraryIds, int? maxStreams, int? maxBitrate, out string name, out List<Guid> libs)
     {
         name = string.Empty;
         libs = new List<Guid>();
@@ -614,14 +677,14 @@ public class AdminController : ControllerBase
             return "Enter a name for the invitation (at most 100 characters).";
         }
 
-        if (maxStreams < 1 || maxStreams > MaxStreamsLimit)
+        if (maxStreams is null or < 1 or > MaxStreamsLimit)
         {
-            return $"Max streams must be between 1 and {MaxStreamsLimit}.";
+            return $"Max streams must be a number between 1 and {MaxStreamsLimit}.";
         }
 
-        if (maxBitrate is <= 0)
+        if (maxBitrate is <= 0 or > MaxBitrateBps)
         {
-            return "Max bitrate must be positive, or empty for no limit.";
+            return $"Max bitrate must be between 0 and {MaxBitrateBps / 1_000_000} Mbps, or empty for no limit.";
         }
 
         var wanted = (libraryIds ?? new List<Guid>()).Distinct().ToList();

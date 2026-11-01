@@ -94,7 +94,16 @@
             return null;
         }
         var n = Number(t);
-        return isFinite(n) && n > 0 ? Math.round(n * 1e6) : NaN;
+        return isFinite(n) && n > 0 && n <= 2000 ? Math.round(n * 1e6) : NaN;
+    }
+
+    var BITRATE_ERROR = 'Max bitrate must be a number of Mbps between 0 and 2000, or empty for no limit.';
+    var STREAMS_ERROR = 'Max streams must be a whole number between 1 and 100.';
+
+    function streamsFrom(text) {
+        var t = String(text || '').trim();
+        var n = /^\d+$/.test(t) ? parseInt(t, 10) : NaN;
+        return n >= 1 && n <= 100 ? n : NaN;
     }
 
     // ---- API ----
@@ -221,14 +230,18 @@
             var libs = el('div', {}, [libraryChecks(s.id, s.libraryIds || [])]);
             var active = el('span', { 'data-active': s.id, text: String(s.activeStreams) });
             var save = btn('Save', 'primary', function () {
+                var count = streamsFrom(streams.value);
+                if (isNaN(count)) {
+                    return showMessage('error', STREAMS_ERROR);
+                }
                 var bps = bpsFromMbps(mbps.value);
                 if (isNaN(bps)) {
-                    return showMessage('error', 'Max bitrate must be a positive number of Mbps, or empty for no limit.');
+                    return showMessage('error', BITRATE_ERROR);
                 }
                 busy(save, api('PUT', 'shares/' + encodeURIComponent(s.id), {
                     name: name.value,
                     libraryIds: checkedLibs(libs),
-                    maxStreams: parseInt(streams.value, 10),
+                    maxStreams: count,
                     maxBitrate: bps,
                     enabled: enabled.checked
                 })).then(function () {
@@ -263,14 +276,18 @@
 
     function createShare() {
         var button = $('js-create-share');
+        var count = streamsFrom($('js-new-streams').value);
+        if (isNaN(count)) {
+            return showMessage('error', STREAMS_ERROR);
+        }
         var bps = bpsFromMbps($('js-new-mbps').value);
         if (isNaN(bps)) {
-            return showMessage('error', 'Max bitrate must be a positive number of Mbps, or empty for no limit.');
+            return showMessage('error', BITRATE_ERROR);
         }
         busy(button, api('POST', 'shares', {
             name: $('js-new-name').value,
             libraryIds: checkedLibs($('js-new-libs')),
-            maxStreams: parseInt($('js-new-streams').value, 10),
+            maxStreams: count,
             maxBitrate: bps
         })).then(function (created) {
             $('js-created-name').textContent = created.name;

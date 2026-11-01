@@ -44,31 +44,53 @@ public sealed class JellyfinAdminLibraries : IAdminLibraries
         return result;
     }
 
+    internal static void AddPathWithMonitorRecovery(
+        Action stopMonitor,
+        Action startMonitor,
+        Action addPath,
+        Action queueScan,
+        Action<Action> background,
+        Action<Exception> onScanQueueFailure)
+    {
+        stopMonitor();
+        try
+        {
+            addPath();
+        }
+        catch
+        {
+            // Nothing was queued that would start the monitor again.
+            startMonitor();
+            throw;
+        }
+
+        // The queued scan restarts real-time monitoring; if queueing it fails, do that here.
+        background(() =>
+        {
+            try
+            {
+                queueScan();
+            }
+            catch (Exception ex)
+            {
+                onScanQueueFailure(ex);
+                startMonitor();
+            }
+        });
+    }
+
     /// <inheritdoc />
     public Task AddPathAsync(string libraryName, string path, CancellationToken ct)
     {
-        _monitor.Stop();
-        try
-        {
-            _libraryManager.AddMediaPath(libraryName, new MediaPathInfo(path));
-        }
-        finally
-        {
-            // One library scan: it creates the Folder item for the new root, which targeted placeholder scans resolve to.
-            // Not awaited; it runs in the library's own scan queue.
-            _ = Task.Run(() =>
-            {
-                try
-                {
-                    _libraryManager.QueueLibraryScan();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "JellyShare admin: could not queue the library scan after adding a placeholder folder");
-                }
-            });
-        }
-
+        // One library scan after adding: it creates the Folder item for the new root, which targeted placeholder scans
+        // resolve to. Not awaited; it runs in the library's own scan queue.
+        AddPathWithMonitorRecovery(
+            _monitor.Stop,
+            _monitor.Start,
+            () => _libraryManager.AddMediaPath(libraryName, new MediaPathInfo(path)),
+            _libraryManager.QueueLibraryScan,
+            work => _ = Task.Run(work),
+            ex => _logger.LogWarning(ex, "JellyShare admin: could not queue the library scan after adding a placeholder folder"));
         return Task.CompletedTask;
     }
 }

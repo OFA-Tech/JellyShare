@@ -38,10 +38,17 @@ internal sealed class FakeLibraries : IAdminLibraries
 
     public List<(string Library, string Path)> Added { get; } = new();
 
+    public Exception? AddThrows { get; set; }
+
     public IReadOnlyList<LibraryInfo> List() => Libraries.ToList();
 
     public Task AddPathAsync(string libraryName, string path, CancellationToken ct)
     {
+        if (AddThrows is not null)
+        {
+            throw AddThrows;
+        }
+
         Added.Add((libraryName, path));
         var i = Libraries.FindIndex(l => l.Name == libraryName);
         Libraries[i] = Libraries[i] with { Locations = Libraries[i].Locations.Append(path).ToList() };
@@ -336,10 +343,12 @@ public sealed class AdminControllerTests : IDisposable
         var result = _c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice2", "http://alice2:8096/", "", false));
 
         var view = Value<PeerView>(result);
-        Assert.Equal("alice2", peer.Name);
-        Assert.Equal("http://alice2:8096", peer.BaseUrl);
-        Assert.False(peer.Enabled);
-        Assert.Equal(Token, peer.Token);
+        var stored = _config.Current.Peers.Single();
+        Assert.Equal("alice2", stored.Name);
+        Assert.Equal("http://alice2:8096", stored.BaseUrl);
+        Assert.False(stored.Enabled);
+        Assert.Equal(Token, stored.Token);
+        Assert.Equal(peer.Priority, stored.Priority);
         Assert.False(view.Enabled);
     }
 
@@ -350,7 +359,106 @@ public sealed class AdminControllerTests : IDisposable
 
         _c.UpdatePeer(peer.Id, new UpdatePeerRequest("alice", peer.BaseUrl, "js1_new", true));
 
-        Assert.Equal("js1_new", peer.Token);
+        Assert.Equal("js1_new", _config.Current.Peers.Single().Token);
+    }
+
+    [Fact]
+    public void UpdatePeer_IsCopyOnWrite_ARunningSyncKeepsASelfConsistentPeer()
+    {
+        var peer = SeedPeer();
+        var listBefore = _config.Current.Peers;
+
+        _c.UpdatePeer(peer.Id, new UpdatePeerRequest("renamed", "http://other:8096", "js1_new", false));
+
+        Assert.Equal("alice", peer.Name);
+        Assert.Equal("http://alice:8096", peer.BaseUrl);
+        Assert.Equal(Token, peer.Token);
+        Assert.True(peer.Enabled);
+        Assert.NotSame(listBefore, _config.Current.Peers);
+        Assert.NotSame(peer, _config.Current.Peers.Single());
+    }
+
+    [Fact]
+    public void UpdateShare_IsCopyOnWrite()
+    {
+        var created = CreateShare();
+        var before = _config.Current.Shares.Single();
+
+        _c.UpdateShare(created.Id, new UpdateShareRequest("renamed", [FakeLibraries.ShowsId], 7, 1_000_000, false));
+
+        Assert.Equal("bob", before.Name);
+        Assert.Equal(2, before.MaxStreams);
+        Assert.True(before.Enabled);
+        Assert.NotSame(before, _config.Current.Shares.Single());
+        Assert.Equal("renamed", _config.Current.Shares.Single().Name);
+    }
+
+    [Fact]
+    public void ReorderPeers_IsCopyOnWrite()
+    {
+        var a = SeedPeer("a", 0);
+        var b = SeedPeer("b", 1);
+
+        _c.ReorderPeers(new ReorderPeersRequest([b.Id, a.Id]));
+
+        Assert.Equal(0, a.Priority);
+        Assert.Equal(1, b.Priority);
+        Assert.Equal(["b", "a"], Status().Peers.Select(p => p.Name));
+    }
+
+    [Theory]
+    [InlineData("js1_bad\ntoken")]
+    [InlineData("js1_bad\u0000token")]
+    public void Peer_TokenWithControlCharacters_IsBadRequest(string token)
+    {
+        Assert.IsType<BadRequestObjectResult>(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", token, true)));
+        Assert.Empty(_config.Current.Peers);
+        var peer = SeedPeer();
+        Assert.IsType<BadRequestObjectResult>(_c.UpdatePeer(peer.Id, new UpdatePeerRequest("n", "http://x:8096", token, true)));
+        Assert.Equal(Token, _config.Current.Peers.Single().Token);
+    }
+
+    [Fact]
+    public void Peer_TokenLongerThan512_IsBadRequest_512IsFine()
+    {
+        Assert.IsType<BadRequestObjectResult>(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 513), true)));
+        Assert.IsType<OkObjectResult>(_c.AddPeer(new AddPeerRequest("n", "http://x:8096", new string('a', 512), true)));
+    }
+
+    [Fact]
+    public async Task TestPeer_TokenWithControlCharactersOrTooLong_IsErrorWithoutNetwork()
+    {
+        foreach (var token in new[] { "js1_bad\ntoken", new string('a', 513) })
+        {
+            var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://x:8096", token), CancellationToken.None));
+            Assert.False(response.Ok);
+            Assert.Contains("token", response.Error, StringComparison.OrdinalIgnoreCase);
+        }
+
+        Assert.Empty(_peers.PingedUrls);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(0)]
+    [InlineData(101)]
+    public void Shares_MissingOrOutOfRangeMaxStreams_IsBadRequest_NotSilentlyReset(int? streams)
+    {
+        var created = CreateShare();
+
+        Assert.IsType<BadRequestObjectResult>(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], streams, null)));
+        Assert.IsType<BadRequestObjectResult>(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], streams, null, true)));
+        Assert.Equal(2, _config.Current.Shares.Single().MaxStreams);
+    }
+
+    [Fact]
+    public void Shares_MaxBitrateAbove2000Mbps_IsBadRequest_2000IsFine()
+    {
+        var created = CreateShare();
+
+        Assert.IsType<BadRequestObjectResult>(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_001)));
+        Assert.IsType<BadRequestObjectResult>(_c.UpdateShare(created.Id, new UpdateShareRequest("bob", [FakeLibraries.MoviesId], 2, int.MaxValue, true)));
+        Assert.IsType<OkObjectResult>(_c.CreateShare(new CreateShareRequest("x", [FakeLibraries.MoviesId], 2, 2_000_000_000)));
     }
 
     [Fact]
@@ -384,11 +492,9 @@ public sealed class AdminControllerTests : IDisposable
         var result = _c.ReorderPeers(new ReorderPeersRequest([c.Id, Guid.NewGuid(), a.Id]));
 
         Assert.IsType<NoContentResult>(result);
-        Assert.Equal(0, c.Priority);
-        Assert.Equal(1, a.Priority);
-        Assert.Equal(2, b.Priority);
-        Assert.Equal(3, d.Priority);
         Assert.Equal(["c", "a", "b", "d"], Status().Peers.Select(p => p.Name));
+        Assert.Equal([0, 1, 2, 3], _config.Current.Peers.OrderBy(p => p.Priority).Select(p => p.Priority));
+        _ = (a, b, c, d);
     }
 
     // ---- test connection ----
@@ -478,6 +584,52 @@ public sealed class AdminControllerTests : IDisposable
 
         Assert.True(response.Ok, response.Error);
         Assert.Equal(1, response.Titles);
+    }
+
+    [Theory]
+    [InlineData("http://alice:8096/")]
+    [InlineData("HTTP://ALICE:8096")]
+    [InlineData(" http://alice:8096 ")]
+    public async Task TestPeer_SavedPeer_SameUrlInAnotherSpelling_StillUsesStoredToken(string url)
+    {
+        var peer = SeedPeer();
+        _peers.Catalogs[peer.Id] = _ => FakePeerClient.Ok(Keys.TestItems.Movie("A", tmdb: "1", id: "1"));
+
+        var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, "", peer.Id), CancellationToken.None));
+
+        Assert.True(response.Ok, response.Error);
+    }
+
+    [Theory]
+    [InlineData("http://alice-typo:8096")]
+    [InlineData("http://alice:8097")]
+    [InlineData("https://alice:8096")]
+    [InlineData("http://alice:8096/jellyfin")]
+    [InlineData("http://evil.example")]
+    public async Task TestPeer_SavedPeer_EditedUrl_NeverSendsTheStoredToken(string url)
+    {
+        var peer = SeedPeer();
+        _peers.Catalogs[peer.Id] = _ => FakePeerClient.Ok(Keys.TestItems.Movie("A", tmdb: "1", id: "1"));
+
+        var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest(url, "", peer.Id), CancellationToken.None));
+
+        Assert.False(response.Ok);
+        Assert.Contains("token", response.Error, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(Token, response.Error!, StringComparison.Ordinal);
+        Assert.Empty(_peers.PingedUrls);
+        Assert.Empty(_peers.Fetches);
+    }
+
+    [Fact]
+    public async Task TestPeer_SavedPeer_EditedUrl_WithTheTokenReEntered_Works()
+    {
+        var peer = SeedPeer();
+        _peers.Catalogs[Guid.Empty] = _ => FakePeerClient.Ok(Keys.TestItems.Movie("A", tmdb: "1", id: "1"));
+
+        var response = Value<TestPeerResponse>(await _c.TestPeer(new TestPeerRequest("http://other:8096", "js1_typed", peer.Id), CancellationToken.None));
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal("http://other:8096", _peers.PingedUrls.Single());
     }
 
     // ---- sync ----
@@ -631,6 +783,33 @@ public sealed class AdminControllerTests : IDisposable
 
         Assert.Single(_libs.Added);
         Assert.True(Value<PlaceholderRootView>(again).Attached);
+    }
+
+    [Theory]
+    [InlineData(typeof(ArgumentException))]
+    [InlineData(typeof(InvalidOperationException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task Attach_LibraryManagerFails_IsReadableError_NotAnUnhandledException(Type exceptionType)
+    {
+        _libs.AddThrows = (Exception)Activator.CreateInstance(exceptionType, "boom from Jellyfin")!;
+
+        var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
+
+        var obj = Assert.IsAssignableFrom<ObjectResult>(result);
+        Assert.Equal(500, obj.StatusCode);
+        var message = Assert.IsType<ErrorResponse>(obj.Value).Error;
+        Assert.Contains("boom from Jellyfin", message, StringComparison.Ordinal);
+        Assert.Contains("Could not add", message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Attach_Cancelled_StillPropagatesCancellation()
+    {
+        _libs.AddThrows = new OperationCanceledException();
+
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None));
     }
 
     [Fact]

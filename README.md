@@ -11,6 +11,10 @@ Status: skeleton. The plugin currently exposes the anonymous `GET /JellyShare/v1
 
 - Placeholder `.strm` files contain only a loopback relay URL (`http://127.0.0.1:{port}{BaseUrl}/JellyShare/v1/play/{key}`),
   never a token. Peer tokens are sent only in the `X-JellyShare-Token` header and are never logged.
+- The standard Jellyfin plugin configuration API (`/Plugins/{id}/Configuration`) returns the whole plugin configuration to
+  administrators, including the peer tokens you received and the hashes of the invitations you created. The JellyShare
+  admin page never receives them (its own `/JellyShare/v1/admin/...` endpoints are admin-only and return neither), but
+  anyone with an administrator login or API key on your server can read them through the standard API.
 - The relay answers only requests from loopback that carry **no** proxy header (`X-Forwarded-For`, `X-Forwarded-Host`,
   `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Real-IP`, `Forwarded`, `Via`, `X-Original-*`, `CF-Connecting-IP`,
   `True-Client-IP`); everything else gets 403. Jellyfin also hides the relay URL from clients.
