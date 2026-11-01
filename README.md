@@ -215,6 +215,10 @@ Admin login on both: `admin` / `admin` (throwaway harness credentials).
    `py harness/add_peer.py bob --sync` re-runs only the sync task. Placeholders appear in the library about
    60 s after a sync (Jellyfin's `LibraryMonitorDelay`).
 
+7. End-to-end suite (pairs both ways, syncs, then checks merge/dedupe, loop guard, relay, playback, limits, fallback; undoes
+   what it changes; about 3-5 minutes): `py harness/e2e.py` prints one line per check and `ALL PASS`.
+   `py harness/e2e.py --deploy` first copies the Release DLL into both containers and restarts them.
+
 After rebuilding the plugin, `docker compose -f harness/docker-compose.yml restart` to load the new DLL.
 To start over from scratch: `docker compose -f harness/docker-compose.yml down`, delete `harness/config/`, repeat steps 3-4.
 
