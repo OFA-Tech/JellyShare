@@ -1,6 +1,7 @@
 using Jellyfin.Plugin.JellyShare.Configuration;
 using Jellyfin.Plugin.JellyShare.Protocol;
 using Jellyfin.Plugin.JellyShare.Provider;
+using Xunit;
 
 namespace Jellyfin.Plugin.JellyShare.Tests.Provider;
 
@@ -38,45 +39,135 @@ internal sealed class FakeFfmpegRunner : IFfmpegRunner
 
     public bool FailFirstCallWithoutOutput { get; set; }
 
-    public bool SawCancellation { get; private set; }
+    public bool FailHardwareWithoutOutput { get; set; }
+
+    public bool FailAlwaysWithoutOutput { get; set; }
+
+    public bool ThrowStartFailure { get; set; }
+
+    public bool SawCancellation => Cancellations > 0;
+
+    public int Cancellations => Volatile.Read(ref _cancellations);
+
+    public int MaxRunning => Volatile.Read(ref _maxRunning);
 
     public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private readonly SemaphoreSlim _starts = new(0);
+    private int _running;
+    private int _maxRunning;
+    private int _cancellations;
+
+    public async Task WaitForStartsAsync(int count)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            Assert.True(await _starts.WaitAsync(TimeSpan.FromSeconds(5)), "runner did not start");
+        }
+    }
+
     public async Task<FfmpegRunResult> RunAsync(string executable, IReadOnlyList<string> arguments, Stream output, CancellationToken cancellationToken)
     {
+        int callNumber;
         lock (Calls)
         {
             Calls.Add((executable, arguments.ToList()));
+            callNumber = Calls.Count;
         }
 
-        Started.TrySetResult();
-        if (FailFirstCallWithoutOutput && Calls.Count == 1)
+        if (ThrowStartFailure)
         {
-            return new FfmpegRunResult(1, 0, "Unknown encoder");
+            throw new System.ComponentModel.Win32Exception(2, "No such file or directory");
         }
 
-        await output.WriteAsync(Payload, cancellationToken);
-        if (BlockUntilCancelled)
+        var running = Interlocked.Increment(ref _running);
+        InterlockedMax(ref _maxRunning, running);
+        try
         {
-            try
+            Started.TrySetResult();
+            _starts.Release();
+            if ((FailFirstCallWithoutOutput && callNumber == 1)
+                || FailAlwaysWithoutOutput
+                || (FailHardwareWithoutOutput && !arguments.Contains("libx264")))
             {
-                await Task.Delay(Timeout.Infinite, cancellationToken);
+                return new FfmpegRunResult(1, 0, "Unknown encoder");
             }
-            catch (OperationCanceledException)
-            {
-                SawCancellation = true;
-                throw;
-            }
-        }
 
-        return new FfmpegRunResult(0, Payload.Length, string.Empty);
+            await output.WriteAsync(Payload, cancellationToken);
+            if (BlockUntilCancelled)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    Interlocked.Increment(ref _cancellations);
+                    throw;
+                }
+            }
+
+            return new FfmpegRunResult(0, Payload.Length, string.Empty);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _running);
+        }
+    }
+
+    private static void InterlockedMax(ref int target, int value)
+    {
+        int current;
+        while ((current = Volatile.Read(ref target)) < value && Interlocked.CompareExchange(ref target, value, current) != current)
+        {
+        }
+    }
+}
+
+/// <summary>Request lifetime that cancels <c>RequestAborted</c> on <c>Abort()</c>, as Kestrel does.</summary>
+internal sealed class RecordingLifetime : Microsoft.AspNetCore.Http.Features.IHttpRequestLifetimeFeature
+{
+    private readonly CancellationTokenSource _cts;
+
+    public RecordingLifetime(CancellationToken shared, CancellationToken extra)
+    {
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(shared, extra);
+        RequestAborted = _cts.Token;
+    }
+
+    public bool Aborted { get; private set; }
+
+    public CancellationToken RequestAborted { get; set; }
+
+    public void Abort()
+    {
+        Aborted = true;
+        _cts.Cancel();
+    }
+}
+
+internal sealed class LevelLogger<T> : Microsoft.Extensions.Logging.ILogger<T>
+{
+    public List<(Microsoft.Extensions.Logging.LogLevel Level, string Message)> Entries { get; } = new();
+
+    public IDisposable? BeginScope<TState>(TState state)
+        where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, Microsoft.Extensions.Logging.EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (Entries)
+        {
+            Entries.Add((logLevel, formatter(state, exception)));
+        }
     }
 }
 
 internal static class FakeCapped
 {
     public static CappedStreamService Create()
-        => new(new FakeEncoderSettings(), new FakeFfmpegRunner(), Microsoft.Extensions.Logging.Abstractions.NullLogger<CappedStreamService>.Instance);
+        => new(new FakeEncoderSettings(), new FakeFfmpegRunner(), TimeProvider.System, Microsoft.Extensions.Logging.Abstractions.NullLogger<CappedStreamService>.Instance);
 }
 
 /// <summary>Response feature that records OnCompleted callbacks so tests can finish a response.</summary>

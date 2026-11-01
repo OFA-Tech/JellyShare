@@ -36,7 +36,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
 
         var source = new FakeSource();
         source.Items.Add((Lib, new LocalItem(MovieId, "Movie", file, null, () => throw new InvalidOperationException())));
-        source.Streams[MovieId] = new StreamInfo("Movie", "Movie", file, null);
+        source.Streams[MovieId] = new StreamInfo("Movie", "Movie", file, 1_000_000);
         source.Items.Add((Lib, new LocalItem(CappedId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[CappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
         _config.Current.Shares[0].MaxBitrate = 2_000_000;

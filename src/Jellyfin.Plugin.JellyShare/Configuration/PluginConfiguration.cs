@@ -25,6 +25,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the seconds between presence sweeps of local files (clamped to 15..3600).</summary>
     public int PresenceSweepSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Gets or sets how many capped (transcoded) streams this server runs at once across all shares.
+    /// Further capped requests get 429 so the consumer can try another peer.
+    /// </summary>
+    public int MaxConcurrentTranscodes { get; set; } = 4;
+
     /// <summary>Gets or sets an override for the loopback relay base URL used in placeholder files.</summary>
     public string? RelayBaseOverride { get; set; }
 

@@ -11,6 +11,9 @@ public static class CappedStreamArgs
     /// <summary>Smallest video bitrate worth transcoding to.</summary>
     public const long MinimumVideoBitrate = 100_000;
 
+    /// <summary>Upper bound for <c>start</c> (seconds) when the runtime is unknown: 7 days.</summary>
+    public const double MaxStartWithoutRuntime = 7 * 24 * 3600;
+
     /// <summary>Whether a cap leaves room for video after audio.</summary>
     /// <param name="cap">The cap in bits per second.</param>
     /// <returns><c>true</c> when a transcode can fit.</returns>
@@ -40,7 +43,8 @@ public static class CappedStreamArgs
             args.Add(start.ToString("0.###", CultureInfo.InvariantCulture));
         }
 
-        args.AddRange(new[] { "-i", inputPath, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn" });
+        // "file:" keeps a path from being read as an option ("-…") or another protocol ("concat:…", "http:…").
+        args.AddRange(new[] { "-i", "file:" + inputPath, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn" });
         switch (hardware)
         {
             case HardwareEncoder.Nvenc:
@@ -99,10 +103,8 @@ public static class CappedStreamArgs
             return false;
         }
 
-        if (runTimeTicks is { } ticks && ticks > 0)
-        {
-            value = Math.Min(value, TimeSpan.FromTicks(ticks).TotalSeconds);
-        }
+        var limit = runTimeTicks is { } ticks && ticks > 0 ? TimeSpan.FromTicks(ticks).TotalSeconds : MaxStartWithoutRuntime;
+        value = Math.Min(value, limit);
 
         seconds = value;
         return true;

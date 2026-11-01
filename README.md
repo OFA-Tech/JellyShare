@@ -35,11 +35,16 @@ Status: skeleton. The plugin currently exposes the anonymous `GET /JellyShare/v1
   a live transcode with Jellyfin's own ffmpeg (Dashboard → Playback → Transcoding: the ffmpeg path, and the hardware
   encoder when hardware encoding is on: NVENC, QSV, VA-API, VideoToolbox or AMF; otherwise software x264 `veryfast`) to
   MPEG-TS: H.264 at cap − 192 kbps (`-maxrate`/`-bufsize` at that rate) and AAC stereo at 192 kbps. If a hardware
-  encoder fails before sending any data, the provider retries in software. A title with an unknown bitrate is sent as
-  is. If Jellyfin has no ffmpeg path, or the cap is below 292 kbps (no room for video after the audio), the provider
-  answers `409` and the consumer tries another peer.
-- The transcode counts as a stream like any other, and ffmpeg is killed (whole process tree) as soon as the
-  consumer disconnects or the transcode finishes.
+  encoder fails before sending any data, the provider retries in software and skips the hardware encoder for 10
+  minutes (one warning in the log). A title whose bitrate is unknown is transcoded too (the bitrate is the container
+  total, else video + audio streams). If Jellyfin has no ffmpeg path, or the cap is below 292 kbps (no room for
+  video after the audio), the provider answers `409`; if ffmpeg fails before sending anything it answers `503`.
+  Either way the consumer tries another peer.
+- The transcode counts as a stream like any other. Only one transcode runs per stream (share + title): a new request
+  for the same title stops the previous transcode and cuts its connection (this is also how a seek restarts it). The
+  server runs at most `MaxConcurrentTranscodes` transcodes across all shares (plugin setting, default 4); beyond
+  that capped requests get `429` with `Retry-After: 30`. ffmpeg is killed (whole process tree) as soon as the
+  consumer disconnects, the request is replaced, or the transcode finishes.
 - **Seeking a capped title:** the transcode has no byte ranges (`Accept-Ranges: none`, Range requests get the whole
   stream from the start, status 200). A peer can start at an offset with `?start=<seconds>` (cut to the runtime).
   On the consumer, Jellyfin sees a live MPEG-TS without a duration: the web client plays it through the consumer's

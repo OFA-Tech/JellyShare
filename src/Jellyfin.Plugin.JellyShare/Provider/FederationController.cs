@@ -168,7 +168,8 @@ public class FederationController : ControllerBase
         EncoderSettings? encoder = null;
         double? startSeconds = null;
         var cap = share.MaxBitrate;
-        var overCap = cap is { } c && info.Bitrate is { } bitrate && bitrate > c;
+        // An unknown bitrate cannot be shown to be within the cap, so it is transcoded too.
+        var overCap = cap is { } c && (info.Bitrate is not { } bitrate || bitrate > c);
         if (overCap)
         {
             if (!CappedStreamArgs.TryParseStart(start, info.RunTimeTicks, out startSeconds))
@@ -190,10 +191,27 @@ public class FederationController : ControllerBase
             return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("stream limit reached"));
         }
 
+        // The session stays held until the response has been sent (Kestrel runs this when the request ends).
+        // Abort below runs first when nothing is served; releasing is idempotent.
+        Response.RegisterForDispose(lease);
         if (!IsReadable(info.Path))
         {
             lease.Abort();
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse("file unavailable"));
+        }
+
+        TranscodeSlot? slot = null;
+        if (encoder is not null && !HttpMethods.IsHead(Request.Method))
+        {
+            slot = _capped.TryReserve(share.Id, id, _config.Current.MaxConcurrentTranscodes);
+            if (slot is null)
+            {
+                lease.Abort();
+                Response.Headers.RetryAfter = "30";
+                return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("transcode limit reached"));
+            }
+
+            Response.RegisterForDispose(slot);
         }
 
         if (lease.IsNewSession)
@@ -201,11 +219,9 @@ public class FederationController : ControllerBase
             _logger.LogInformation("Stream started for share {Share}: {Item}{Mode}", share.Name, info.Name, encoder is null ? string.Empty : " (capped transcode)");
         }
 
-        // The session stays held until the response has been sent (Kestrel runs this when the request ends).
-        Response.RegisterForDispose(lease);
         if (encoder is not null)
         {
-            return _capped.CreateResult(encoder, info.Path, cap!.Value, startSeconds, lease);
+            return _capped.CreateResult(encoder, info.Path, cap!.Value, startSeconds, lease, slot);
         }
 
         if (!VideoContentTypes.TryGetContentType(info.Path, out var contentType))
@@ -234,7 +250,7 @@ public class FederationController : ControllerBase
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             return true;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException or System.Security.SecurityException or ArgumentException)
         {
             return false;
         }

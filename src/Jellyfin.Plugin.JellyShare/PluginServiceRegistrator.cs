@@ -22,7 +22,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<ILocalItemSource, JellyfinLocalItemSource>();
         serviceCollection.AddSingleton<IEncoderSettingsSource, JellyfinEncoderSettings>();
         serviceCollection.AddSingleton<IFfmpegRunner, FfmpegProcessRunner>();
-        serviceCollection.AddSingleton<CappedStreamService>();
+        serviceCollection.AddSingleton(sp => new CappedStreamService(
+            sp.GetRequiredService<IEncoderSettingsSource>(),
+            sp.GetRequiredService<IFfmpegRunner>(),
+            TimeProvider.System,
+            sp.GetRequiredService<ILogger<CappedStreamService>>()));
         serviceCollection.AddSingleton<CatalogBuilder>(sp => new CatalogBuilder(
             sp.GetRequiredService<ILocalItemSource>(),
             sp.GetRequiredService<IServerIdentity>(),

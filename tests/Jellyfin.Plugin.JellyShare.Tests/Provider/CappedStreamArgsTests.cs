@@ -52,8 +52,15 @@ public sealed class CappedStreamArgsTests
 
         var args = CappedStreamArgs.Build(nasty, 2_000_000, null, HardwareEncoder.None, null);
 
-        Assert.Equal(nasty, After(args, "-i"));
-        Assert.Single(args, a => a == nasty);
+        Assert.Equal("file:" + nasty, After(args, "-i"));
+        Assert.Single(args, a => a.Contains(nasty, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InputPath_IsFileProtocolPrefixed_SoItCannotBeReadAsOptionOrProtocol()
+    {
+        Assert.Equal("file:-i.mkv", After(CappedStreamArgs.Build("-i.mkv", 2_000_000, null, HardwareEncoder.None, null), "-i"));
+        Assert.Equal("file:concat:/a|/b", After(CappedStreamArgs.Build("concat:/a|/b", 2_000_000, null, HardwareEncoder.None, null), "-i"));
     }
 
     [Fact]
@@ -138,9 +145,11 @@ public sealed class CappedStreamArgsTests
     }
 
     [Fact]
-    public void TryParseStart_UnknownRuntime_IsNotCapped()
+    public void TryParseStart_UnknownRuntime_IsClampedToSevenDays()
     {
         Assert.True(CappedStreamArgs.TryParseStart("5000", null, out var seconds));
         Assert.Equal(5000.0, seconds);
+        Assert.True(CappedStreamArgs.TryParseStart("99999999", null, out var clamped));
+        Assert.Equal(TimeSpan.FromDays(7).TotalSeconds, clamped);
     }
 }

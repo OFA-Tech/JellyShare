@@ -106,8 +106,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         {
             case Movie:
             case Episode:
-                var bitrate = item.TotalBitrate
-                    ?? _mediaSourceManager.GetMediaStreams(item.Id).FirstOrDefault(s => s.Type == MediaStreamType.Video)?.BitRate;
+                var bitrate = item.TotalBitrate ?? SumOfStreamBitrates(_mediaSourceManager.GetMediaStreams(item.Id));
                 return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate, item.RunTimeTicks);
             case null:
                 return null;
@@ -129,7 +128,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             .Where(s => s.Type == MediaStreamType.Subtitle)
             .Select(s => new SubtitleTrack(s.Language, s.Codec, s.Title ?? s.DisplayTitle))
             .ToArray();
-        var bitRate = item.TotalBitrate ?? video?.BitRate;
+        var bitRate = item.TotalBitrate ?? SumOfStreamBitrates(streams);
 
         return new CatalogItem(
             item.Id.ToString("N"),
@@ -150,6 +149,23 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                 .ToArray(),
             item.DateModified,
             episode is null || episode.SeriesId == Guid.Empty ? null : episode.SeriesId.ToString("N"));
+    }
+
+    /// <summary>Video plus audio stream bitrates when the container has no total; <c>null</c> when none is known.</summary>
+    internal static int? SumOfStreamBitrates(IEnumerable<MediaStream> streams)
+    {
+        long sum = 0;
+        var known = false;
+        foreach (var stream in streams)
+        {
+            if ((stream.Type == MediaStreamType.Video || stream.Type == MediaStreamType.Audio) && stream.BitRate is { } rate && rate > 0)
+            {
+                sum += rate;
+                known = true;
+            }
+        }
+
+        return known ? (int)Math.Min(sum, int.MaxValue) : null;
     }
 
     private static Dictionary<string, string> CopyIds(Dictionary<string, string>? ids)
