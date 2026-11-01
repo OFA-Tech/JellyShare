@@ -29,7 +29,11 @@ public sealed record LocalSeriesItem(string Name, string? Path, IReadOnlyDiction
 /// <summary>Everything the local index reads from the library, in one pass.</summary>
 /// <param name="Media">All movies and episodes in all libraries.</param>
 /// <param name="Series">All series in all libraries.</param>
-public sealed record LocalLibrarySnapshot(IReadOnlyList<LocalMedia> Media, IReadOnlyList<LocalSeriesItem> Series);
+public sealed record LocalLibrarySnapshot(IReadOnlyList<LocalMedia> Media, IReadOnlyList<LocalSeriesItem> Series)
+{
+    /// <summary>Gets the configured library folder paths (all libraries).</summary>
+    public IReadOnlyList<string> Locations { get; init; } = [];
+}
 
 /// <summary>Result of a file existence probe.</summary>
 public enum FilePresence

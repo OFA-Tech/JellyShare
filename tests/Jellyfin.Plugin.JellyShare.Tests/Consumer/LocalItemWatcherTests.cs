@@ -561,40 +561,87 @@ public sealed class LocalItemWatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task Sweep_TooManyHungProbes_SkipsPassUntilTheyReturn()
+    public async Task Sweep_HungMount_QuarantinesOnlyItsLocation()
     {
         using var release = new ManualResetEventSlim(false);
-        for (var i = 1; i <= 6; i++)
+        const string gone = "/media/Movies/Gone/g.mkv";
+        _library.Locations.Add("/mnt/dead/Movies");
+        _library.Locations.Add("/media/Movies");
+        for (var i = 1; i <= 5; i++)
         {
-            _library.Media.Add(LocalMovie("/media/Movies/S" + i + "/s.mkv", i.ToString()));
+            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString()));
         }
 
-        OfferNumbered(1, 2, 3, 4, 5, 6);
+        _library.Media.Add(LocalMovie(gone, "9"));
+        OfferNumbered(1, 2, 3, 4, 5, 9);
         await _sync.RunAsync(CancellationToken.None);
-        var watcher = NewWatcher(TimeSpan.FromMilliseconds(100), _ =>
+        var deadProbes = 0;
+        var watcher = NewWatcher(TimeSpan.FromMilliseconds(100), p =>
         {
-            release.Wait(TimeSpan.FromSeconds(30));
-            return FilePresence.Present;
+            if (p.StartsWith("/mnt/dead/", StringComparison.Ordinal))
+            {
+                Interlocked.Increment(ref deadProbes);
+                release.Wait(TimeSpan.FromSeconds(30));
+            }
+
+            return _missing.Contains(p) ? FilePresence.Missing : FilePresence.Present;
         });
 
         try
         {
-            for (var i = 0; i < LocalItemWatcher.MaxHungProbes; i++)
+            await watcher.SweepAsync(CancellationToken.None);
+            _missing.Add(gone);
+            for (var i = 0; i < 8; i++)
             {
                 Assert.False((await watcher.SweepAsync(CancellationToken.None)).Skipped);
             }
 
-            Assert.True((await watcher.SweepAsync(CancellationToken.None)).Skipped);
-
+            Assert.True(MoviePlaceholder("T9 (2000) [tmdbid-9]"));
+            Assert.Equal(1, Volatile.Read(ref deadProbes));
+            Assert.False(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
+        }
+        finally
+        {
             release.Set();
-            var result = new SweepResult(0, 0, 0, false, true);
-            for (var i = 0; i < 100 && result.Skipped; i++)
+        }
+    }
+
+    [Fact]
+    public async Task Sweep_QuarantinedLocation_RecoversWhenProbeReturns()
+    {
+        using var release = new ManualResetEventSlim(false);
+        _library.Locations.Add("/mnt/dead/Movies");
+        for (var i = 1; i <= 3; i++)
+        {
+            _library.Media.Add(LocalMovie("/mnt/dead/Movies/D" + i + "/d.mkv", i.ToString()));
+        }
+
+        OfferNumbered(1, 2, 3);
+        await _sync.RunAsync(CancellationToken.None);
+        var deadProbes = 0;
+        var watcher = NewWatcher(TimeSpan.FromMilliseconds(100), p =>
+        {
+            Interlocked.Increment(ref deadProbes);
+            release.Wait(TimeSpan.FromSeconds(30));
+            return _missing.Contains(p) ? FilePresence.Missing : FilePresence.Present;
+        });
+
+        try
+        {
+            await watcher.SweepAsync(CancellationToken.None);
+            await watcher.SweepAsync(CancellationToken.None);
+            Assert.Equal(1, Volatile.Read(ref deadProbes));
+
+            _missing.Add("/mnt/dead/Movies/D2/d.mkv");
+            release.Set();
+            for (var i = 0; i < 100 && !MoviePlaceholder("T2 (2000) [tmdbid-2]"); i++)
             {
                 await Task.Delay(30);
-                result = await watcher.SweepAsync(CancellationToken.None);
+                await watcher.SweepAsync(CancellationToken.None);
             }
 
-            Assert.False(result.Skipped);
+            Assert.True(MoviePlaceholder("T2 (2000) [tmdbid-2]"));
+            Assert.True(Volatile.Read(ref deadProbes) > 1);
         }
         finally
         {

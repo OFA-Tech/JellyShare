@@ -98,12 +98,14 @@ internal sealed class FakeLocalLibrary : ILocalLibrary
 
     public List<LocalSeriesItem> Series { get; } = new();
 
+    public List<string> Locations { get; } = new();
+
     public int Reads { get; private set; }
 
     public LocalLibrarySnapshot Read()
     {
         Reads++;
-        return new(Media.ToList(), Series.ToList());
+        return new(Media.ToList(), Series.ToList()) { Locations = Locations.ToList() };
     }
 
     public static Func<string, FilePresence> Exists(Func<string, bool> exists)

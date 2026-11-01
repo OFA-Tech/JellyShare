@@ -58,9 +58,6 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     /// <summary>More events or changed keys than this in one window go to a full sync.</summary>
     public const int StormThreshold = 500;
 
-    /// <summary>Abandoned file checks (stuck on a hung mount) allowed before sweeping pauses until they return.</summary>
-    public const int MaxHungProbes = 4;
-
     /// <summary>The sweep candidate list is rebuilt (one library read) at least this often.</summary>
     public static readonly TimeSpan CandidateRefreshInterval = TimeSpan.FromMinutes(10);
 
@@ -91,6 +88,8 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly ConcurrentDictionary<string, byte> _probing = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<TaskCompletionSource, byte> _passes = new();
+    private readonly ConcurrentDictionary<string, string> _quarantine = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, FilePresence> _late = new(StringComparer.Ordinal);
     private readonly HashSet<string> _slowWarned = new(StringComparer.Ordinal);
 
     private int _disposed;
@@ -100,8 +99,6 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
     private ITimer? _processTimer;
     private ITimer? _sweepTimer;
     private int _cursor;
-    private int _hungProbes;
-    private int _hungWarned;
     private int _dirty;
     private List<Candidate>? _candidates;
     private IReadOnlyDictionary<string, LocalSeries> _series = new Dictionary<string, LocalSeries>();
@@ -303,17 +300,6 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                 return new SweepResult(0, 0, 0, false);
             }
 
-            if (Volatile.Read(ref _hungProbes) >= MaxHungProbes)
-            {
-                if (Interlocked.Exchange(ref _hungWarned, 1) == 0)
-                {
-                    _logger.LogWarning("JellyShare sweep: {Count} file checks are stuck (hung mount?); sweeping paused until they return", MaxHungProbes);
-                }
-
-                return new SweepResult(n, 0, 0, false, true);
-            }
-
-            Volatile.Write(ref _hungWarned, 0);
             var start = _cursor % n;
             var ordered = new Candidate[n];
             for (var i = 0; i < n; i++)
@@ -416,16 +402,26 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         var stop = 0;
         var probe = _probe;
         var probing = _probing;
+        var quarantine = _quarantine;
+        var late = _late;
 
-        // A fresh worker per pass: a check stuck on a hung mount is abandoned (its thread finishes when the OS call
-        // returns) and the next pass skips that path, so one dead mount never blocks the others.
+        // A fresh worker per pass. A check stuck on a hung mount is abandoned (its thread finishes when the OS call
+        // returns) and its library location is quarantined: nothing under it is probed (counted as present, never as
+        // missing) until that stuck check returns, so one dead mount costs at most one thread and never blocks others.
         var worker = Task.Factory.StartNew(
             () =>
             {
                 for (var i = 0; i < n && Volatile.Read(ref stop) == 0; i++)
                 {
-                    var path = ordered[i].Path;
-                    if (!probing.TryAdd(path, 0))
+                    var candidate = ordered[i];
+                    var path = candidate.Path;
+                    if (late.TryRemove(path, out var known))
+                    {
+                        Volatile.Write(ref states[i], ToState(known));
+                        continue;
+                    }
+
+                    if (quarantine.ContainsKey(candidate.Location) || !probing.TryAdd(path, 0))
                     {
                         Volatile.Write(ref states[i], InFlight);
                         continue;
@@ -444,14 +440,16 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                     finally
                     {
                         probing.TryRemove(path, out _);
+                        quarantine.TryRemove(new KeyValuePair<string, string>(candidate.Location, path));
                     }
 
-                    Volatile.Write(ref states[i], presence switch
+                    if (Volatile.Read(ref stop) != 0)
                     {
-                        FilePresence.Present => PresentState,
-                        FilePresence.Missing => MissingState,
-                        _ => UnknownState,
-                    });
+                        // Arrived after the pass gave up on it: keep it for the next pass.
+                        late[path] = presence;
+                    }
+
+                    Volatile.Write(ref states[i], ToState(presence));
                 }
             },
             CancellationToken.None,
@@ -480,20 +478,63 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
 
         if (timedOut && !worker.IsCompleted)
         {
-            Interlocked.Increment(ref _hungProbes);
-            _ = worker.ContinueWith(_ => Interlocked.Decrement(ref _hungProbes), CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
             var stuck = Volatile.Read(ref current);
             if (stuck >= 0 && snapshot[stuck] == NotChecked)
             {
                 snapshot[stuck] = Stuck;
-                if (_slowWarned.Add(ordered[stuck].Path))
+                var candidate = ordered[stuck];
+                quarantine[candidate.Location] = candidate.Path;
+                if (!probing.ContainsKey(candidate.Path))
                 {
-                    _logger.LogWarning("JellyShare sweep: checking a local file took longer than {Budget} s (slow or hung mount); it is treated as present", _budget.TotalSeconds);
+                    // The check returned between the timeout and here.
+                    quarantine.TryRemove(new KeyValuePair<string, string>(candidate.Location, candidate.Path));
+                }
+                else if (_slowWarned.Add(candidate.Location))
+                {
+                    _logger.LogWarning(
+                        "JellyShare sweep: a file check under {Location} took longer than {Budget} s (slow or hung mount); titles there are treated as present until it answers",
+                        candidate.Location,
+                        _budget.TotalSeconds);
                 }
             }
         }
 
         return snapshot;
+    }
+
+    private static int ToState(FilePresence presence) => presence switch
+    {
+        FilePresence.Present => PresentState,
+        FilePresence.Missing => MissingState,
+        _ => UnknownState,
+    };
+
+    private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
+
+    private static string LocationOf(string path, IReadOnlyList<string> locations)
+    {
+        var normalized = Normalize(path);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string? best = null;
+        foreach (var location in locations)
+        {
+            if (location.Length > 0
+                && normalized.Length > location.Length
+                && normalized[location.Length] == '/'
+                && normalized.StartsWith(location, comparison)
+                && (best is null || location.Length > best.Length))
+            {
+                best = location;
+            }
+        }
+
+        if (best is not null)
+        {
+            return best;
+        }
+
+        var slash = normalized.LastIndexOf('/');
+        return slash > 0 ? normalized[..slash] : normalized;
     }
 
     private List<Candidate> EnsureCandidates(PluginConfiguration cfg)
@@ -536,6 +577,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         {
             var snapshot = _library.Read();
             series = LocalIndex.BuildSeries(snapshot.Series, cfg);
+            var locations = snapshot.Locations.Where(l => !string.IsNullOrWhiteSpace(l)).Select(Normalize).ToList();
             foreach (var media in snapshot.Media)
             {
                 if (string.IsNullOrWhiteSpace(media.Path)
@@ -548,7 +590,7 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
                 var keys = LocalIndex.KeysFor(media).Where(canonicalOf.ContainsKey).ToArray();
                 if (keys.Length > 0)
                 {
-                    candidates.Add(new Candidate(media.Type, media.Path, keys, keys.Select(k => canonicalOf[k]).Distinct().ToArray()));
+                    candidates.Add(new Candidate(media.Type, media.Path, keys, keys.Select(k => canonicalOf[k]).Distinct().ToArray(), LocationOf(media.Path, locations)));
                 }
             }
         }
@@ -767,5 +809,5 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
         }
     }
 
-    private sealed record Candidate(string Type, string Path, string[] Keys, string[] Canonicals);
+    private sealed record Candidate(string Type, string Path, string[] Keys, string[] Canonicals, string Location);
 }
