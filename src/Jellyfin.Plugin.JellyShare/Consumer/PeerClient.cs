@@ -70,6 +70,18 @@ public sealed class PeerClient : IPeerClient
         _timeout = timeout ?? DefaultTimeout;
     }
 
+    /// <summary>Name of the HTTP client registered for peer requests (see <see cref="CreatePrimaryHandler"/>).</summary>
+    public const string HttpClientName = "JellyShare.Peer";
+
+    /// <summary>Creates the primary HTTP handler for peer requests: redirects are never followed.</summary>
+    /// <returns>The handler.</returns>
+    public static HttpMessageHandler CreatePrimaryHandler() => new SocketsHttpHandler
+    {
+        // The token is a custom header, which HttpClient would forward to a redirect target. Never follow.
+        AllowAutoRedirect = false,
+        AutomaticDecompression = DecompressionMethods.All,
+    };
+
     /// <summary>Joins a peer base URL (which may have a sub-path) and an API path.</summary>
     /// <param name="baseUrl">The peer base URL, e.g. <c>https://h/jellyfin</c>.</param>
     /// <param name="relative">The API path, e.g. <c>JellyShare/v1/catalog</c>.</param>
@@ -116,9 +128,15 @@ public sealed class PeerClient : IPeerClient
                 return new PeerFetchResult(false, true, null, null);
             }
 
+            var code = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture);
+            if (code[0] == '3')
+            {
+                return Fail("HTTP " + code + " (redirects are not followed)");
+            }
+
             if (!response.IsSuccessStatusCode)
             {
-                return Fail("HTTP " + ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture));
+                return Fail("HTTP " + code);
             }
 
             var stream = await response.Content.ReadAsStreamAsync(cts.Token).ConfigureAwait(false);

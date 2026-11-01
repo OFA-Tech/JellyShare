@@ -72,8 +72,9 @@ public class PlaceholderWriterTests
             },
         };
 
-        await Assert.ThrowsAsync<IOException>(
+        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(
             () => writer.ApplyAsync(Diff([Movie("strm", "new content")]), root, null, CancellationToken.None));
+        Assert.IsType<IOException>(ex.InnerException);
 
         Assert.Equal(["old"], seenDuringWrite);
         Assert.Equal("old", File.ReadAllText(target));
@@ -204,6 +205,112 @@ public class PlaceholderWriterTests
             },
             CancellationToken.None);
         Assert.Equal([(series, "Backdrop")], calls);
+    }
+
+    [Fact]
+    public async Task Writer_Failure_ReportsPartialChangedDirs()
+    {
+        using var tmp = new TempDir();
+        var root = tmp.Sub("root");
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "Blocked"), "file where a folder should be");
+
+        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
+            Diff([Movie("strm"), new FileWrite("Blocked/x.strm", "x")]), root, null, CancellationToken.None));
+
+        Assert.Equal(1, ex.Partial.Written);
+        Assert.Equal([Path.GetFullPath(Path.Combine(root, MovieDir))], ex.Partial.ChangedDirs);
+        Assert.IsType<IOException>(ex.InnerException, exactMatch: false);
+    }
+
+    [Fact]
+    public async Task Writer_Cancelled_ReportsPartialChangedDirs()
+    {
+        using var tmp = new TempDir();
+        var root = tmp.Sub("root");
+        using var cts = new CancellationTokenSource();
+        var writer = new PlaceholderWriter { BeforeCommit = (_, final) => { if (final.EndsWith(".nfo", StringComparison.Ordinal)) { cts.Cancel(); } } };
+
+        var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(() => writer.ApplyAsync(
+            Diff([Movie("nfo"), Movie("strm"), new FileWrite("Other/o.strm", "o")]), root, null, cts.Token));
+
+        Assert.IsAssignableFrom<OperationCanceledException>(ex.InnerException);
+        Assert.Contains(Path.GetFullPath(Path.Combine(root, MovieDir)), ex.Partial.ChangedDirs);
+    }
+
+    [Theory]
+    [InlineData("root", "root2/a/b.strm", false)]
+    [InlineData("root", "root/a/b.strm", true)]
+    [InlineData("root", "root", false)]
+    [InlineData("root/", "root/a", true)]
+    public void Writer_IsStrictlyInside_HandlesSiblingPrefixes(string root, string candidate, bool expected)
+    {
+        using var tmp = new TempDir();
+        Assert.Equal(expected, PlaceholderWriter.IsStrictlyInside(Path.GetFullPath(tmp.Sub(root)), Path.GetFullPath(tmp.Sub(candidate))));
+    }
+
+    [Fact]
+    public void Writer_IsStrictlyInside_CaseVariantRoot_FollowsPlatform()
+    {
+        using var tmp = new TempDir();
+        var root = Path.GetFullPath(tmp.Sub("Root"));
+        var candidate = Path.GetFullPath(tmp.Sub("ROOT", "a.strm"));
+        Assert.Equal(OperatingSystem.IsWindows(), PlaceholderWriter.IsStrictlyInside(root, candidate));
+        Assert.Null(PlaceholderWriter.Resolve(root, "../root2/a.strm"));
+        Assert.Null(PlaceholderWriter.Resolve(root, "../Root2/a/b.strm"));
+    }
+
+    [Fact]
+    public async Task Writer_RefusesPathsThroughReparsePoints()
+    {
+        using var tmp = new TempDir();
+        var root = tmp.Sub("root");
+        var outside = tmp.Sub("outside");
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(Path.Combine(outside, "Season 01"));
+        File.WriteAllText(Path.Combine(outside, "Season 01", "victim.strm"), "keep");
+        if (!TryLink(Path.Combine(root, "Linked"), outside))
+        {
+            return;
+        }
+
+        var result = await new PlaceholderWriter().ApplyAsync(
+            Diff(
+                [new FileWrite("Linked/Season 01/evil.strm", "pwn"), new FileWrite("Linked/x.nfo", "pwn")],
+                ["Linked/Season 01/victim.strm"]),
+            root,
+            null,
+            CancellationToken.None);
+
+        Assert.Equal(3, result.Refused);
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(outside, "Season 01", "victim.strm")));
+        Assert.False(File.Exists(Path.Combine(outside, "Season 01", "evil.strm")));
+        Assert.False(File.Exists(Path.Combine(outside, "x.nfo")));
+        Assert.DoesNotContain("Linked/Season 01/victim.strm", PlaceholderWriter.ScanExisting(root).Keys);
+    }
+
+    private static bool TryLink(string link, string target)
+    {
+        try
+        {
+            Directory.CreateSymbolicLink(link, target);
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                return false;
+            }
+        }
+
+        using var p = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        })!;
+        p.WaitForExit();
+        return Directory.Exists(link);
     }
 
     [Fact]

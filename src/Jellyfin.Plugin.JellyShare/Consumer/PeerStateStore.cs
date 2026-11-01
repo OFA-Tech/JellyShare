@@ -22,6 +22,18 @@ public sealed class PeerState
     public string? LastError { get; set; }
 }
 
+/// <summary>The peer state file exists but cannot be read.</summary>
+public sealed class PeerStateUnreadableException : Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="PeerStateUnreadableException"/> class.</summary>
+    /// <param name="message">The message.</param>
+    /// <param name="inner">The cause.</param>
+    public PeerStateUnreadableException(string message, Exception? inner = null)
+        : base(message, inner)
+    {
+    }
+}
+
 /// <summary>Persists <see cref="PeerState"/> per peer id as JSON (atomic writes).</summary>
 public sealed class PeerStateStore
 {
@@ -36,23 +48,33 @@ public sealed class PeerStateStore
         _path = path;
     }
 
-    /// <summary>Loads the states; a missing or unreadable file yields an empty map.</summary>
+    /// <summary>
+    /// Loads the states. Only a missing file means "no state"; a file that exists but cannot be read or parsed
+    /// throws, because treating it as empty would drop every failing peer's last good catalog (and its placeholders).
+    /// The file is left untouched.
+    /// </summary>
     /// <returns>Peer id to state.</returns>
+    /// <exception cref="PeerStateUnreadableException">The file exists but cannot be read.</exception>
     public Dictionary<Guid, PeerState> Load()
     {
-        try
-        {
-            if (!File.Exists(_path))
-            {
-                return new Dictionary<Guid, PeerState>();
-            }
-
-            using var stream = File.OpenRead(_path);
-            return JsonSerializer.Deserialize<Dictionary<Guid, PeerState>>(stream, JsonOptions) ?? new Dictionary<Guid, PeerState>();
-        }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        if (!File.Exists(_path))
         {
             return new Dictionary<Guid, PeerState>();
+        }
+
+        try
+        {
+            using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            return JsonSerializer.Deserialize<Dictionary<Guid, PeerState>>(stream, JsonOptions)
+                ?? throw new PeerStateUnreadableException("JellyShare peer state file is empty: " + _path);
+        }
+        catch (FileNotFoundException)
+        {
+            return new Dictionary<Guid, PeerState>();
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException)
+        {
+            throw new PeerStateUnreadableException("JellyShare peer state file cannot be read: " + _path, ex);
         }
     }
 

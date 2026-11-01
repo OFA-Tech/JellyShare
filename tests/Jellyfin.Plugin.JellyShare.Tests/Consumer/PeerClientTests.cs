@@ -180,6 +180,105 @@ public class PeerClientTests
     }
 
     [Fact]
+    public async Task PeerClient_RedirectingFakeHandler_IsErrorAndNotFollowed()
+    {
+        var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.Found)
+        {
+            Headers = { Location = new Uri("https://evil.example/collect") },
+        }));
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+        Assert.False(result.Ok);
+        Assert.Equal("HTTP 302 (redirects are not followed)", result.Error);
+        Assert.Single(handler.Requests);
+    }
+
+    [Fact]
+    public async Task PeerClient_PrimaryHandler_DoesNotFollowRedirects_SoTheTokenStaysHome()
+    {
+        using var server = new RedirectServer();
+        using var http = new HttpClient(PeerClient.CreatePrimaryHandler());
+        var client = new PeerClient(() => http);
+        var peer = Peer(server.BaseUrl);
+
+        var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
+        await client.GetImageAsync(peer, "abc", "Primary", CancellationToken.None);
+        using var stream = await client.OpenStreamAsync(peer, "abc", null, CancellationToken.None);
+
+        Assert.False(result.Ok);
+        Assert.StartsWith("HTTP 30", result.Error, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Redirect, stream.StatusCode);
+        Assert.Empty(server.RedirectTargetHits);
+        Assert.Equal(3, server.Hits);
+    }
+
+    private sealed class RedirectServer : IDisposable
+    {
+        private readonly System.Net.Sockets.TcpListener _listener = new(IPAddress.Loopback, 0);
+        private readonly CancellationTokenSource _cts = new();
+
+        public RedirectServer()
+        {
+            _listener.Start();
+            BaseUrl = $"http://127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
+            _ = Task.Run(LoopAsync);
+        }
+
+        public string BaseUrl { get; }
+
+        public int Hits;
+
+        public System.Collections.Concurrent.ConcurrentBag<string> RedirectTargetHits { get; } = new();
+
+        private async Task LoopAsync()
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                System.Net.Sockets.TcpClient tcp;
+                try
+                {
+                    tcp = await _listener.AcceptTcpClientAsync(_cts.Token);
+                }
+                catch (Exception)
+                {
+                    return;
+                }
+
+                using (tcp)
+                {
+                    var stream = tcp.GetStream();
+                    var reader = new StreamReader(stream, Encoding.ASCII);
+                    var requestLine = await reader.ReadLineAsync() ?? string.Empty;
+                    string? line;
+                    while (!string.IsNullOrEmpty(line = await reader.ReadLineAsync()))
+                    {
+                    }
+
+                    string response;
+                    if (requestLine.Contains("/collect", StringComparison.Ordinal))
+                    {
+                        RedirectTargetHits.Add(requestLine);
+                        response = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+                    }
+                    else
+                    {
+                        Interlocked.Increment(ref Hits);
+                        response = $"HTTP/1.1 302 Found\r\nLocation: {BaseUrl}/collect\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                    }
+
+                    var bytes = Encoding.ASCII.GetBytes(response);
+                    await stream.WriteAsync(bytes);
+                }
+            }
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _listener.Stop();
+        }
+    }
+
+    [Fact]
     public async Task PeerClient_GetImage_ReturnsBytesOrNull()
     {
         var (client, _) = Create(new FakeHandler(r => r.RequestUri!.AbsolutePath.EndsWith("/Primary", StringComparison.Ordinal)

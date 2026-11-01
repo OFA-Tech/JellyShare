@@ -1,6 +1,5 @@
 using Jellyfin.Plugin.JellyShare.Consumer;
 using Jellyfin.Plugin.JellyShare.Provider;
-using MediaBrowser.Common.Net;
 using Microsoft.Extensions.Logging;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
@@ -27,10 +26,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             sp.GetRequiredService<IConfigProvider>()));
 
         serviceCollection.AddSingleton<IRelayBase, JellyfinRelayBase>();
+        serviceCollection.AddHttpClient(PeerClient.HttpClientName)
+            .ConfigurePrimaryHttpMessageHandler(PeerClient.CreatePrimaryHandler);
         serviceCollection.AddSingleton<IPeerClient>(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
-            return new PeerClient(() => factory.CreateClient(NamedClient.Default));
+            return new PeerClient(() => factory.CreateClient(PeerClient.HttpClientName));
         });
         serviceCollection.AddSingleton<ILocalLibrary, JellyfinLocalLibrary>();
         serviceCollection.AddSingleton<ILocalIndex>(sp => new LocalIndex(

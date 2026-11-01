@@ -98,14 +98,29 @@ internal sealed class FakeLocalLibrary : ILocalLibrary
 
     public List<LocalSeriesItem> Series { get; } = new();
 
-    public LocalLibrarySnapshot Read() => new(Media.ToList(), Series.ToList());
+    public List<string> Roots { get; } = new();
+
+    public LocalLibrarySnapshot Read() => new(Media.ToList(), Series.ToList(), Roots.ToList());
+
+    public static Func<string, FilePresence> Exists(Func<string, bool> exists)
+        => p => exists(p) ? FilePresence.Present : FilePresence.Missing;
 }
 
 internal sealed class FakeScans : IScanReporter
 {
     public List<string> Reported { get; } = new();
 
-    public void ReportChanged(string fullPath) => Reported.Add(fullPath);
+    public Func<string, bool>? FailFor { get; set; }
+
+    public void ReportChanged(string fullPath)
+    {
+        if (FailFor?.Invoke(fullPath) == true)
+        {
+            throw new InvalidOperationException("monitor unavailable");
+        }
+
+        Reported.Add(fullPath);
+    }
 }
 
 internal sealed class FixedRelay : IRelayBase

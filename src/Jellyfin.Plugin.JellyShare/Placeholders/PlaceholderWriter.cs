@@ -19,6 +19,22 @@ public delegate Task<Stream?> PlaceholderImageFetcher(string topDir, string imag
 /// <param name="ChangedDirs">Full paths of directories that changed (including removed ones), ordered.</param>
 public sealed record PlaceholderWriteResult(int Written, int Deleted, int Refused, int ImagesWritten, IReadOnlyList<string> ChangedDirs);
 
+/// <summary>Thrown when applying a diff fails part-way; <see cref="Partial"/> holds what was already changed.</summary>
+public sealed class PlaceholderWriteException : Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="PlaceholderWriteException"/> class.</summary>
+    /// <param name="partial">What was done before the failure.</param>
+    /// <param name="inner">The cause.</param>
+    public PlaceholderWriteException(PlaceholderWriteResult partial, Exception inner)
+        : base("Applying placeholder changes failed part-way", inner)
+    {
+        Partial = partial;
+    }
+
+    /// <summary>Gets what was done before the failure.</summary>
+    public PlaceholderWriteResult Partial { get; }
+}
+
 /// <summary>Applies a <see cref="PlaceholderDiff"/> to a plugin-owned placeholder root.</summary>
 public sealed class PlaceholderWriter
 {
@@ -108,77 +124,86 @@ public sealed class PlaceholderWriter
         var removedTops = new SortedSet<string>(StringComparer.Ordinal);
         int written = 0, deleted = 0, refused = 0, images = 0;
 
-        foreach (var rel in diff.Deletes)
+        try
         {
-            var full = IsOwned(rel) ? Resolve(rootFull, rel) : null;
-            if (full is null)
+            foreach (var rel in diff.Deletes)
             {
-                refused++;
-                _logger.LogWarning("JellyShare: refused to delete unsafe placeholder path");
-                continue;
-            }
-
-            if (File.Exists(full))
-            {
-                File.Delete(full);
-                deleted++;
-            }
-
-            changed.Add(Path.GetDirectoryName(full)!);
-            removedTops.Add(TopDir(rel));
-        }
-
-        var strmTops = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var write in diff.Writes)
-        {
-            ct.ThrowIfCancellationRequested();
-            var full = IsOwned(write.RelativePath) ? Resolve(rootFull, write.RelativePath) : null;
-            if (full is null)
-            {
-                refused++;
-                _logger.LogWarning("JellyShare: refused to write unsafe placeholder path");
-                continue;
-            }
-
-            AtomicFile.WriteAllText(full, write.Content, BeforeCommit);
-            written++;
-            changed.Add(Path.GetDirectoryName(full)!);
-            if (write.RelativePath.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
-            {
-                strmTops.Add(TopDir(write.RelativePath));
-            }
-        }
-
-        if (imageFetcher is not null)
-        {
-            foreach (var top in strmTops)
-            {
-                var topFull = Path.Combine(rootFull, top);
-                foreach (var (type, fileName) in Images)
+                ct.ThrowIfCancellationRequested();
+                var full = IsOwned(rel) ? ResolveSafe(rootFull, rel) : null;
+                if (full is null)
                 {
-                    var target = Path.Combine(topFull, fileName);
-                    if (File.Exists(target))
-                    {
-                        continue;
-                    }
+                    refused++;
+                    _logger.LogWarning("JellyShare: refused to delete unsafe placeholder path");
+                    continue;
+                }
 
-                    if (await TryDownloadAsync(imageFetcher, top, type, target, ct).ConfigureAwait(false))
+                if (File.Exists(full))
+                {
+                    File.Delete(full);
+                    deleted++;
+                }
+
+                changed.Add(Path.GetDirectoryName(full)!);
+                removedTops.Add(TopDir(rel));
+            }
+
+            var strmTops = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var write in diff.Writes)
+            {
+                ct.ThrowIfCancellationRequested();
+                var full = IsOwned(write.RelativePath) ? ResolveSafe(rootFull, write.RelativePath) : null;
+                if (full is null)
+                {
+                    refused++;
+                    _logger.LogWarning("JellyShare: refused to write unsafe placeholder path");
+                    continue;
+                }
+
+                AtomicFile.WriteAllText(full, write.Content, BeforeCommit);
+                written++;
+                changed.Add(Path.GetDirectoryName(full)!);
+                if (write.RelativePath.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
+                {
+                    strmTops.Add(TopDir(write.RelativePath));
+                }
+            }
+
+            if (imageFetcher is not null)
+            {
+                foreach (var top in strmTops)
+                {
+                    var topFull = Path.Combine(rootFull, top);
+                    foreach (var (type, fileName) in Images)
                     {
-                        images++;
-                        changed.Add(topFull);
+                        var target = Path.Combine(topFull, fileName);
+                        if (File.Exists(target) || HasReparsePoint(rootFull, target))
+                        {
+                            continue;
+                        }
+
+                        if (await TryDownloadAsync(imageFetcher, top, type, target, ct).ConfigureAwait(false))
+                        {
+                            images++;
+                            changed.Add(topFull);
+                        }
                     }
                 }
             }
-        }
 
-        foreach (var top in removedTops)
-        {
-            RemoveIfNoStrm(rootFull, top);
-        }
+            foreach (var top in removedTops)
+            {
+                RemoveIfNoStrm(rootFull, top);
+            }
 
-        foreach (var dir in changed)
+            foreach (var dir in changed)
+            {
+                RemoveEmptyUpwards(rootFull, dir);
+            }
+        }
+        catch (Exception ex)
         {
-            RemoveEmptyUpwards(rootFull, dir);
+            // Files already changed on disk must still be scanned: hand the partial result to the caller.
+            throw new PlaceholderWriteException(new PlaceholderWriteResult(written, deleted, refused, images, changed.ToList()), ex);
         }
 
         return new PlaceholderWriteResult(written, deleted, refused, images, changed.ToList());
@@ -205,7 +230,48 @@ public sealed class PlaceholderWriter
         return IsStrictlyInside(rootFull, full) ? full : null;
     }
 
-    private static bool IsStrictlyInside(string rootFull, string full)
+    /// <summary>
+    /// Checks whether the target or any existing directory between the root (exclusive) and the target is a
+    /// reparse point (symlink, junction). Unreadable attributes count as a reparse point.
+    /// </summary>
+    /// <param name="rootFull">The full root path.</param>
+    /// <param name="full">The full target path inside the root.</param>
+    /// <returns><c>true</c> when the path goes through a link.</returns>
+    internal static bool HasReparsePoint(string rootFull, string full)
+    {
+        var current = full;
+        while (IsStrictlyInside(rootFull, current))
+        {
+            try
+            {
+                if ((File.Exists(current) || Directory.Exists(current))
+                    && File.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                return true;
+            }
+
+            current = Path.GetDirectoryName(current);
+            if (current is null)
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    private static string? ResolveSafe(string rootFull, string relativePath)
+    {
+        var full = Resolve(rootFull, relativePath);
+        return full is null || HasReparsePoint(rootFull, full) ? null : full;
+    }
+
+    internal static bool IsStrictlyInside(string rootFull, string full)
     {
         var prefix = Path.TrimEndingDirectorySeparator(rootFull) + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -255,37 +321,66 @@ public sealed class PlaceholderWriter
     private void RemoveIfNoStrm(string rootFull, string top)
     {
         var topFull = Path.GetFullPath(Path.Combine(rootFull, top));
-        if (!IsStrictlyInside(rootFull, topFull) || !Directory.Exists(topFull))
-        {
-            return;
-        }
-
-        var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
-        if (Directory.EnumerateFiles(topFull, "*.strm", options).Any())
+        if (!IsStrictlyInside(rootFull, topFull) || !Directory.Exists(topFull) || HasReparsePoint(rootFull, topFull))
         {
             return;
         }
 
         try
         {
+            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = FileAttributes.ReparsePoint };
+            if (Directory.EnumerateFiles(topFull, "*.strm", options).Any() || ContainsReparsePoint(topFull))
+            {
+                return;
+            }
+
             Directory.Delete(topFull, true);
         }
-        catch (IOException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("JellyShare: could not remove placeholder folder: {Error}", ex.Message);
+            _logger.LogWarning("JellyShare: could not remove placeholder folder: {Error}", ex.GetType().Name);
         }
+    }
+
+    private static bool ContainsReparsePoint(string dir)
+    {
+        var pending = new Stack<string>();
+        pending.Push(dir);
+        while (pending.Count > 0)
+        {
+            foreach (var entry in Directory.EnumerateFileSystemEntries(pending.Pop()))
+            {
+                var attributes = File.GetAttributes(entry);
+                if (attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return true;
+                }
+
+                if (attributes.HasFlag(FileAttributes.Directory))
+                {
+                    pending.Push(entry);
+                }
+            }
+        }
+
+        return false;
     }
 
     private static void RemoveEmptyUpwards(string rootFull, string dir)
     {
         var current = dir;
-        while (IsStrictlyInside(rootFull, current) && Directory.Exists(current) && !Directory.EnumerateFileSystemEntries(current).Any())
+        while (IsStrictlyInside(rootFull, current) && Directory.Exists(current) && !HasReparsePoint(rootFull, current))
         {
             try
             {
+                if (Directory.EnumerateFileSystemEntries(current).Any())
+                {
+                    return;
+                }
+
                 Directory.Delete(current);
             }
-            catch (IOException)
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 return;
             }

@@ -29,7 +29,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Current.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
         _config.Current.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
         _config.Current.Peers.Add(_alice);
-        var index = new LocalIndex(_library, _config, p => !_missing.Contains(p));
+        var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
         _sync = new SyncService(
             _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance);
     }
@@ -306,6 +306,59 @@ public sealed class SyncServiceTests : IDisposable
         Assert.Equal(2, report.Unmatched);
         Assert.Equal(1, report.Offered);
         Assert.Equal(0, report.Skipped);
+    }
+
+    [Fact]
+    public async Task Sync_UnreadablePeerState_AbortsWithoutDeleting()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+
+        var statePath = Path.Combine(DataDir, "peer-state.json");
+        File.WriteAllText(statePath, "{ truncated");
+        _client.Catalogs[_alice.Id] = _ => FakePeerClient.Fail("connection failed");
+        _clock.Now += TimeSpan.FromHours(6);
+
+        await Assert.ThrowsAsync<PeerStateUnreadableException>(() => _sync.RunAsync(CancellationToken.None));
+
+        Assert.True(MoviePlaceholder(BunnyDir));
+        Assert.Equal("{ truncated", File.ReadAllText(statePath));
+    }
+
+    [Fact]
+    public async Task Sync_WriterFailure_KeepsChangedDirsQueued()
+    {
+        Offer(Bunny(), Pioneer(2, 1));
+        Directory.CreateDirectory(ShowsRoot);
+        var blocker = Path.Combine(ShowsRoot, PioneerDir);
+        File.WriteAllText(blocker, "a file where the series folder should go");
+
+        await Assert.ThrowsAnyAsync<Exception>(() => _sync.RunAsync(CancellationToken.None));
+        Assert.True(MoviePlaceholder(BunnyDir));
+
+        File.Delete(blocker);
+        _scans.Reported.Clear();
+        await _sync.RunAsync(CancellationToken.None);
+
+        Assert.Contains(Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir)), _scans.Reported);
+        Assert.Contains(Path.GetFullPath(Path.Combine(ShowsRoot, PioneerDir)), _scans.Reported);
+    }
+
+    [Fact]
+    public async Task Sync_ScanReportFailure_RequeuesDir()
+    {
+        Offer(Bunny());
+        var bunnyFull = Path.GetFullPath(Path.Combine(MoviesRoot, BunnyDir));
+        _scans.FailFor = p => p == bunnyFull;
+
+        var first = await _sync.RunAsync(CancellationToken.None);
+        Assert.Empty(_scans.Reported);
+        Assert.Equal(1, first.PendingScans);
+
+        _scans.FailFor = null;
+        var second = await _sync.RunAsync(CancellationToken.None);
+        Assert.Equal([bunnyFull], _scans.Reported);
+        Assert.Equal(0, second.PendingScans);
     }
 
     [Fact]

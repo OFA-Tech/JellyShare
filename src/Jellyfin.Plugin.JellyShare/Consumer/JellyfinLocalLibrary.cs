@@ -61,7 +61,13 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
             }
         }
 
-        return new LocalLibrarySnapshot(media, series);
+        var roots = _libraryManager.GetVirtualFolders()
+            .SelectMany(f => f.Locations ?? [])
+            .Where(l => !string.IsNullOrWhiteSpace(l))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return new LocalLibrarySnapshot(media, series, roots);
     }
 
     private static Dictionary<string, string> Copy(Dictionary<string, string>? ids)

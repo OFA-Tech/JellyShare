@@ -206,13 +206,13 @@ public sealed class SyncService
         var skippedLocal = movies.Count(e => e.Keys.Any(local.MovieKeys.Contains))
             + episodes.Count(e => e.Keys.Any(local.EpisodeKeys.Contains));
 
-        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
-        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
+        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
+        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
 
         MergedIndexStore.Save(Path.Combine(dataDir, MergedIndexStore.FileName), index.Entries, now);
         stateStore.Save(states);
 
-        var (scanned, pending) = ReportScans(dataDir, movieResult.Write.ChangedDirs.Concat(showResult.Write.ChangedDirs));
+        var (scanned, pending) = ReportScans(dataDir);
 
         return new SyncReport(
             index.Entries.Count,
@@ -307,6 +307,7 @@ public sealed class SyncService
         string root,
         string relay,
         IReadOnlyDictionary<Guid, RemotePeer> peers,
+        string dataDir,
         CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(root))
@@ -343,7 +344,19 @@ public sealed class SyncService
             return null;
         }
 
-        var result = await _writer.ApplyAsync(diff, root, Fetch, ct).ConfigureAwait(false);
+        PlaceholderWriteResult result;
+        try
+        {
+            result = await _writer.ApplyAsync(diff, root, Fetch, ct).ConfigureAwait(false);
+        }
+        catch (PlaceholderWriteException ex)
+        {
+            // Persist what already changed on disk before failing, so those folders are still scanned later.
+            EnqueueScans(dataDir, ex.Partial.ChangedDirs);
+            throw;
+        }
+
+        EnqueueScans(dataDir, result.ChangedDirs);
         return (result, diff.Skipped);
     }
 
@@ -379,44 +392,70 @@ public sealed class SyncService
         return map;
     }
 
-    private (int Scanned, int Pending) ReportScans(string dataDir, IEnumerable<string> changed)
+    private List<string> ReadPending(string path)
     {
-        var path = Path.Combine(dataDir, PendingScansFile);
-        var queue = new List<string>();
         try
         {
             if (File.Exists(path))
             {
-                queue.AddRange(JsonSerializer.Deserialize<List<string>>(File.ReadAllText(path)) ?? []);
+                return JsonSerializer.Deserialize<List<string>>(File.ReadAllText(path)) ?? [];
             }
         }
-        catch (Exception ex) when (ex is JsonException or IOException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            _logger.LogWarning("JellyShare sync: pending scan list unreadable, ignoring it");
+            _logger.LogWarning("JellyShare sync: pending scan list unreadable ({Error}), starting a new one", ex.GetType().Name);
         }
 
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-        var ordered = queue.Concat(changed).Where(p => !string.IsNullOrWhiteSpace(p) && seen.Add(p)).ToList();
-        var now = ordered.Take(MaxScansPerRun).ToList();
-        var rest = ordered.Skip(MaxScansPerRun).ToList();
+        return [];
+    }
 
-        foreach (var dir in now)
+    private static List<string> Distinct(IEnumerable<string> paths)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        return paths.Where(p => !string.IsNullOrWhiteSpace(p) && seen.Add(p)).ToList();
+    }
+
+    private void EnqueueScans(string dataDir, IEnumerable<string> dirs)
+    {
+        var added = dirs.ToList();
+        if (added.Count == 0)
+        {
+            return;
+        }
+
+        var path = Path.Combine(dataDir, PendingScansFile);
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(Distinct(ReadPending(path).Concat(added))));
+    }
+
+    private (int Scanned, int Pending) ReportScans(string dataDir)
+    {
+        var path = Path.Combine(dataDir, PendingScansFile);
+        if (!File.Exists(path))
+        {
+            return (0, 0);
+        }
+
+        var ordered = Distinct(ReadPending(path));
+        var batch = ordered.Take(MaxScansPerRun).ToList();
+        var rest = ordered.Skip(MaxScansPerRun).ToList();
+        var scanned = 0;
+
+        foreach (var dir in batch)
         {
             try
             {
                 _scans.ReportChanged(dir);
+                scanned++;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("JellyShare sync: scan request failed: {Error}", ex.Message);
+                // Keep it queued for the next run.
+                rest.Add(dir);
+                _logger.LogWarning("JellyShare sync: scan request failed, will retry: {Error}", ex.GetType().Name);
             }
         }
 
-        if (rest.Count > 0 || File.Exists(path))
-        {
-            AtomicFile.WriteAllText(path, JsonSerializer.Serialize(rest));
-        }
-
-        return (now.Count, rest.Count);
+        AtomicFile.WriteAllText(path, JsonSerializer.Serialize(rest));
+        return (scanned, rest.Count);
     }
 }
