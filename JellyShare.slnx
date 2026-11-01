@@ -28,6 +28,7 @@
   </Folder>
   <Folder Name="/Source/Infrastructure/Platform/">
     <Project Path="Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj" />
+    <Project Path="Source/Infrastructure/Platform/Media/JellyShare.Media.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="Tests/ArchitectureTests/JellyShare.ArchitectureTests.csproj" />

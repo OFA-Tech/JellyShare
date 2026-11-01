@@ -21,6 +21,7 @@
     <ProjectReference Include="..\..\Source\Application\JellyShare.Application.csproj" />
     <ProjectReference Include="..\..\Source\Infrastructure\Api\Data.Peers\JellyShare.Data.Peers.csproj" />
     <ProjectReference Include="..\..\Source\Infrastructure\Data\Data.Files\JellyShare.Data.Files.csproj" />
+    <ProjectReference Include="..\..\Source\Infrastructure\Platform\Media\JellyShare.Media.csproj" />
   </ItemGroup>
 
 </Project>

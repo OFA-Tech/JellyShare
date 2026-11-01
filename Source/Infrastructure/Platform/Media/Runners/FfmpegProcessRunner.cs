@@ -3,7 +3,7 @@ using JellyShare.Domain.Interfaces.Streaming;
 using JellyShare.Domain.Models.Streaming;
 using Microsoft.Extensions.Logging;
 
-namespace JellyShare.Application.Features.Streaming;
+namespace JellyShare.Media.Runners;
 
 /// <summary>Runs ffmpeg as a child process without a shell; the process tree is killed when the run is cancelled.</summary>
 public sealed class FfmpegProcessRunner : IFfmpegRunner

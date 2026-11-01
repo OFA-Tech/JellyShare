@@ -1,6 +1,7 @@
 using JellyShare.Data.Files.Modules;
 using JellyShare.Data.Peers.Modules;
 using JellyShare.Domain.Interfaces.Modules;
+using JellyShare.Media.Modules;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,7 @@ public sealed class InfrastructureModuleLoader
             [
                 new PeersModule(),
                 new FilesModule(),
+                new MediaModule(),
             ])
     {
     }

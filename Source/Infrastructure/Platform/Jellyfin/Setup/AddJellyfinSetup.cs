@@ -1,11 +1,8 @@
-using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
-using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Streaming;
-using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Jellyfin.Adapters;
 using JellyShare.Jellyfin.Configuration;
 using JellyShare.Jellyfin.Filters;
@@ -30,7 +27,6 @@ public static class JellyfinSetup
         services.AddSingleton<ISettingsStore, PluginSettingsStore>();
         services.AddSingleton<ILocalItemSource, JellyfinLocalItemSource>();
         services.AddSingleton<IEncoderSettingsSource, JellyfinEncoderSettings>();
-        services.AddSingleton<IFfmpegRunner, FfmpegProcessRunner>();
 
         services.AddSingleton<IRelayBase, JellyfinRelayBase>();
         services.AddSingleton<ILocalLibrary, JellyfinLocalLibrary>();

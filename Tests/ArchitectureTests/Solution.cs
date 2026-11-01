@@ -14,6 +14,7 @@ internal static class Solution
     [
         ("JellyShare.Data.Peers", "Source/Infrastructure/Api/Data.Peers"),
         ("JellyShare.Data.Files", "Source/Infrastructure/Data/Data.Files"),
+        ("JellyShare.Media", "Source/Infrastructure/Platform/Media"),
     ];
 
     public static readonly string[] HostNamespaces = ["MediaBrowser", "Jellyfin", "Emby", "Microsoft.AspNetCore"];

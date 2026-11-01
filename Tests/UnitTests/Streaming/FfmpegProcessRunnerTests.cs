@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using JellyShare.Application.Features.Streaming;
+using JellyShare.Media.Runners;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
