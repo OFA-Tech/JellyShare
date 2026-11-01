@@ -1,5 +1,9 @@
 # JellyShare (Jellyfin federation plugin) Implementation Plan
 
+> **Superseded for code layout.** The behaviour described here still holds, but the projects, namespaces, file paths
+> and test locations below are from before the restructure. The current layout is in
+> [`2026-11-01-template-restructure.md`](2026-11-01-template-restructure.md) and the README.
+
 > **Spike results change later tasks.** Before starting Tasks 4, 6–12 and 14 read
 > `docs/spike-results.md` → "Plan corrections" (items 8–13 from the Task 2 spike): series NFO ids
 > (Task 4); a `PlaybackInfo` filter (Task 9, accepted, signed URLs rejected) that hides the relay

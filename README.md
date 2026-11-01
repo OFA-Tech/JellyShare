@@ -1,9 +1,20 @@
 # JellyShare
 
-A Jellyfin 12 plugin that lets several Jellyfin servers share movies and shows with each other.
-Design: [`docs/specs/2026-10-31-jellyfin-federation-plugin-design.md`](docs/specs/2026-10-31-jellyfin-federation-plugin-design.md).
-Implementation plan: [`docs/plans/2026-10-31-jellyfin-federation-plugin.md`](docs/plans/2026-10-31-jellyfin-federation-plugin.md).
-Verified API names and plan corrections: [`docs/spike-results.md`](docs/spike-results.md).
+A Jellyfin 12 plugin that lets several Jellyfin servers share movies and shows with each other. A provider server
+shares some of its libraries with a token; a consumer server pulls the provider's catalog, writes small `.strm`/`.nfo`
+placeholders for the titles it does not already own, and plays them through a local relay that streams from the
+provider. Titles you already own are never duplicated, and your own media folders are never touched.
+
+The code follows the OFA-TECH WebApi template layout (Domain, Application, infrastructure modules, presentation), so
+an update to a new Jellyfin version only touches one project: `Source/Infrastructure/Platform/Jellyfin`.
+
+Documentation:
+
+- Design (binding for behaviour): [`docs/specs/2026-10-31-jellyfin-federation-plugin-design.md`](docs/specs/2026-10-31-jellyfin-federation-plugin-design.md)
+- Verified Jellyfin API names and plan corrections: [`docs/spike-results.md`](docs/spike-results.md)
+- Layout restructure plan: [`docs/plans/2026-11-01-template-restructure.md`](docs/plans/2026-11-01-template-restructure.md)
+  (the original implementation plan, [`docs/plans/2026-10-31-jellyfin-federation-plugin.md`](docs/plans/2026-10-31-jellyfin-federation-plugin.md), is superseded for code layout)
+- Changes: [`CHANGELOG.md`](CHANGELOG.md)
 
 ## Install
 
@@ -58,6 +69,33 @@ Things to know:
   default trigger when the task is first registered). If your own file for a title disappears (deleted, or the drive is offline),
   the peer's copy takes over within a minute or two, and goes away again when your file is back.
 
+## Stream limits and the bitrate cap
+
+- **Streams at once (per share):** a stream is one (share, title) session. It stays counted while any response for it
+  is still being sent, and for 30 s after the last one ends. Extra titles get `429` with `Retry-After: 30`; a request
+  for a file that turns out to be unreadable (`503`) gives its new slot back at once.
+- **Max bitrate (per share):** when a title's bitrate is above the cap, the provider does not send the file. It runs
+  a live transcode with Jellyfin's own ffmpeg (Dashboard → Playback → Transcoding: the ffmpeg path, and the hardware
+  encoder when hardware encoding is on: NVENC, QSV, VA-API, VideoToolbox or AMF; otherwise software x264 `veryfast`) to
+  MPEG-TS: H.264 at cap − 192 kbps (`-maxrate`/`-bufsize` at that rate) and AAC stereo at 192 kbps. If a hardware
+  encoder fails before sending any data, the provider retries in software and skips the hardware encoder for 10
+  minutes (one warning in the log). A title whose bitrate is unknown is transcoded too (the bitrate is the container
+  total, else video + audio streams). If Jellyfin has no ffmpeg path, or the cap is below 292 kbps (no room for
+  video after the audio), the provider answers `409`; if ffmpeg fails before sending anything it answers `503`.
+  Either way the consumer tries another peer.
+- The transcode counts as a stream like any other. At most two transcodes run per stream (share + title), so two
+  people on the consumer can watch the same title; a third request for it stops the oldest transcode and cuts its
+  connection (this also covers a seek that restarts the stream). The
+  server runs at most `MaxConcurrentTranscodes` transcodes across all shares (plugin setting, default 4); beyond
+  that capped requests get `429` with `Retry-After: 30`. ffmpeg is killed (whole process tree) as soon as the
+  consumer disconnects, the request is replaced, or the transcode finishes.
+- **Seeking a capped title:** the transcode has no byte ranges (`Accept-Ranges: none`, Range requests get the whole
+  stream from the start, status 200). A peer can start at an offset with `?start=<seconds>` (cut to the runtime).
+  On the consumer, Jellyfin sees a live MPEG-TS without a duration: the web client plays it through the consumer's
+  own HLS transcode. Seeking works within what the consumer has already received (in the harness a 2-minute clip
+  at a 500 kbps cap arrived in ~10 s and a seek to 1:30 played); a seek beyond that waits for the stream to catch up
+  or, in clients that reopen the URL, restarts it from the beginning. Uncapped titles keep full byte-range seeking.
+
 ## Known limitations
 
 - **Native apps (phone, TV) are not confirmed yet.** Everything was verified with Jellyfin Web. Other clients should
@@ -95,14 +133,6 @@ Things to know:
   placeholder folder is, contains or is inside one of your library folders, or when it already contains files but no
   `.jellyshare` marker.
 
-## Uninstall
-
-1. In each library that has a JellyShare placeholder folder (Movies, Shows), remove that folder from the library
-   (Dashboard → Libraries → Manage library → Folders) and let the library scan, so the placeholder items disappear.
-2. **Dashboard → Plugins → JellyShare → Uninstall**, then restart Jellyfin.
-3. Delete the two placeholder folders (the ones shown in the plugin's Setup section; by default `placeholders/Movies` and
-   `placeholders/Shows` in the plugin's data folder) if they are still on disk. Your own media folders are never touched.
-
 ## Security notes
 
 - Placeholder `.strm` files contain only a loopback relay URL (`http://127.0.0.1:{port}{BaseUrl}/JellyShare/v1/play/{key}`),
@@ -124,32 +154,99 @@ Things to know:
   proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
   ```
 
-## Stream limits and the bitrate cap
+## Uninstall
 
-- **Streams at once (per share):** a stream is one (share, title) session. It stays counted while any response for it
-  is still being sent, and for 30 s after the last one ends. Extra titles get `429` with `Retry-After: 30`; a request
-  for a file that turns out to be unreadable (`503`) gives its new slot back at once.
-- **Max bitrate (per share):** when a title's bitrate is above the cap, the provider does not send the file. It runs
-  a live transcode with Jellyfin's own ffmpeg (Dashboard → Playback → Transcoding: the ffmpeg path, and the hardware
-  encoder when hardware encoding is on: NVENC, QSV, VA-API, VideoToolbox or AMF; otherwise software x264 `veryfast`) to
-  MPEG-TS: H.264 at cap − 192 kbps (`-maxrate`/`-bufsize` at that rate) and AAC stereo at 192 kbps. If a hardware
-  encoder fails before sending any data, the provider retries in software and skips the hardware encoder for 10
-  minutes (one warning in the log). A title whose bitrate is unknown is transcoded too (the bitrate is the container
-  total, else video + audio streams). If Jellyfin has no ffmpeg path, or the cap is below 292 kbps (no room for
-  video after the audio), the provider answers `409`; if ffmpeg fails before sending anything it answers `503`.
-  Either way the consumer tries another peer.
-- The transcode counts as a stream like any other. At most two transcodes run per stream (share + title), so two
-  people on the consumer can watch the same title; a third request for it stops the oldest transcode and cuts its
-  connection (this also covers a seek that restarts the stream). The
-  server runs at most `MaxConcurrentTranscodes` transcodes across all shares (plugin setting, default 4); beyond
-  that capped requests get `429` with `Retry-After: 30`. ffmpeg is killed (whole process tree) as soon as the
-  consumer disconnects, the request is replaced, or the transcode finishes.
-- **Seeking a capped title:** the transcode has no byte ranges (`Accept-Ranges: none`, Range requests get the whole
-  stream from the start, status 200). A peer can start at an offset with `?start=<seconds>` (cut to the runtime).
-  On the consumer, Jellyfin sees a live MPEG-TS without a duration: the web client plays it through the consumer's
-  own HLS transcode. Seeking works within what the consumer has already received (in the harness a 2-minute clip
-  at a 500 kbps cap arrived in ~10 s and a seek to 1:30 played); a seek beyond that waits for the stream to catch up
-  or, in clients that reopen the URL, restarts it from the beginning. Uncapped titles keep full byte-range seeking.
+1. In each library that has a JellyShare placeholder folder (Movies, Shows), remove that folder from the library
+   (Dashboard → Libraries → Manage library → Folders) and let the library scan, so the placeholder items disappear.
+2. **Dashboard → Plugins → JellyShare → Uninstall**, then restart Jellyfin.
+3. Delete the two placeholder folders (the ones shown in the plugin's Setup section; by default `placeholders/Movies` and
+   `placeholders/Shows` in the plugin's data folder) if they are still on disk. Your own media folders are never touched.
+
+## Structure
+
+```text
+JellyShare.slnx
+Directory.Build.props  Directory.Packages.props  .editorconfig  global.json  Nuget.config
+Source/
+  Domain/                      JellyShare.Domain
+  Application/                 JellyShare.Application
+  Infrastructure/
+    Api/Data.Peers/            JellyShare.Data.Peers
+    Data/Data.Files/           JellyShare.Data.Files
+    Platform/Media/            JellyShare.Media
+    Platform/Jellyfin/         JellyShare.Jellyfin   (plugin entry DLL and composition root)
+Tests/
+  UnitTests/  JellyfinTests/  ArchitectureTests/
+build/  harness/  docs/  .github/workflows/
+```
+
+| Project | Contains | References |
+| --- | --- | --- |
+| `JellyShare.Domain` | Plugin settings as plain classes, protocol and admin models, request records, ports (`Interfaces/<Area>/I*.cs`), `Result`/`Error`, messaging contracts, media keys and merge logic | nothing |
+| `JellyShare.Application` | Use cases: handlers behind `ISender` (`Features/<Area>`), sync, catalog, streaming, relay, placeholder planning, logging and validation behaviors | Domain |
+| `JellyShare.Data.Peers` | Outbound peer HTTP client (`IPeerClient`) | Domain |
+| `JellyShare.Data.Files` | Atomic files and JSON stores in the plugin data folder, placeholder writer | Domain |
+| `JellyShare.Media` | ffmpeg process runner (`IFfmpegRunner`) | Domain |
+| `JellyShare.Jellyfin` | `Plugin`, service registrator, `PluginConfiguration`, controllers, PlaybackInfo filter, scheduled task, Jellyfin adapters for the Domain ports, module loader, admin page | all of the above, Jellyfin |
+| `JellyShare.UnitTests` | Domain, Application and infrastructure module tests (no Jellyfin types) | Domain, Application, modules |
+| `JellyShare.JellyfinTests` | Everything that needs Jellyfin or ASP.NET Core types: controllers, filter, adapters, HTTP tests | all |
+| `JellyShare.ArchitectureTests` | Layer and naming rules (NetArchTest, Mono.Cecil) | Domain, Application, Jellyfin output |
+
+### Dependency rules
+
+Enforced by `Tests/ArchitectureTests`:
+
+- Domain depends on nothing; Application only on Domain; each infrastructure module only on Domain.
+- Only `JellyShare.Jellyfin` (and its tests) may use `Jellyfin.*`, `MediaBrowser.*` or `Microsoft.AspNetCore.*`.
+- Ports (interfaces) live in the Domain. Handlers are public sealed `*Handler` classes in
+  `JellyShare.Application.Features.<Area>`; requests are `*Command`/`*Query` records in
+  `JellyShare.Domain.Models.Requests.<Area>` and respond with `Result` or `Result<T>`.
+- Namespaces match folders; the infrastructure group folders (`Api/`, `Data/`, `Platform/`) are not part of namespaces.
+- Each infrastructure project has `Modules/<X>Module.cs` (an `IInfrastructureModule`) and `Setup/Add<X>Setup.cs`.
+  `JellyShare.Jellyfin/Modules/InfrastructureModuleLoader` lists the modules explicitly.
+
+Jellyfin loads every DLL in the plugin folder, so the shipped DLLs carry no third-party runtime dependency.
+`Microsoft.Extensions.*` abstractions are referenced compile-only (`ExcludeAssets="runtime"`), because the Jellyfin host
+provides them. The release zip contains only the six `JellyShare.*.dll`.
+
+### Build settings
+
+`Directory.Build.props` and `.editorconfig` are the template's: `AnalysisLevel` `latest-recommended`,
+`EnforceCodeStyleInBuild`, `TreatWarningsAsErrors`, and the analyzers `Microsoft.CodeAnalysis.NetAnalyzers` and
+`SonarAnalyzer.CSharp` as `GlobalPackageReference` (build-time only, never shipped). Package versions are central in
+`Directory.Packages.props`. A rule is turned off only where it conflicts with Jellyfin's or a framework's contract, with
+a targeted `[SuppressMessage(..., Justification = "...")]` next to the code.
+
+## Updating for a new Jellyfin version
+
+Only `Source/Infrastructure/Platform/Jellyfin` (and `Tests/JellyfinTests`) reference Jellyfin. To move to a new
+version: bump `Jellyfin.Controller`/`Jellyfin.Model` in `Directory.Packages.props`, `targetAbi` in `build.yaml` and
+`build/update_manifest.py`, and the harness image tag; then fix what no longer compiles in that project. These are the
+Jellyfin APIs it uses:
+
+| File | Jellyfin API |
+| --- | --- |
+| `Plugin.cs` | `BasePlugin<PluginConfiguration>`, `IHasWebPages`/`PluginPageInfo`, `IApplicationPaths`, `IXmlSerializer` |
+| `PluginServiceRegistrator.cs` | `IPluginServiceRegistrator`, `IServerApplicationHost` |
+| `Configuration/PluginConfiguration.cs` | `BasePluginConfiguration` (XML-serialized by Jellyfin; mapped to the Domain `JellyShareSettings` by `PluginSettingsProvider`/`PluginSettingsStore`) |
+| `Adapters/JellyfinLocalItemSource.cs` | `ILibraryManager` queries, `IMediaSourceManager`, `BaseItem`/`Movie`/`Series`/`Episode`, `ImageType` |
+| `Adapters/JellyfinLocalLibrary.cs` | `ILibraryManager` item queries by provider id (`Jellyfin.Data.Enums.BaseItemKind`) |
+| `Adapters/JellyfinLocalItemEvents.cs` | `ILibraryManager.ItemAdded`/`ItemRemoved` |
+| `Adapters/JellyfinAdminLibraries.cs` | `ILibraryManager.GetVirtualFolders`/`AddMediaPath` (`MediaPathInfo`, `LibraryOptions`)/`QueueLibraryScan`, `ILibraryMonitor.Stop`/`Start` around the attach |
+| `Adapters/LibraryMonitorScanReporter.cs` | `ILibraryMonitor.ReportFileSystemChanged` |
+| `Adapters/JellyfinEncoderSettings.cs` | `IConfigurationManager.GetEncodingOptions()` (hardware encoder, VA-API device), `IMediaEncoder.EncoderPath` |
+| `Adapters/JellyfinRelayBase.cs` | `IServerApplicationHost.HttpPort`, `IServerConfigurationManager.GetNetworkConfiguration()` (BaseUrl) |
+| `Adapters/JellyfinPlaceholderLookup.cs` | `ILibraryManager`, `INetworkManager`, `IDeviceManager`, `IServerConfigurationManager` |
+| `Adapters/JellyfinCallerResolver.cs` | `IAuthorizationContext` |
+| `Adapters/ServerIdentity.cs` | `IServerApplicationHost.FriendlyName` |
+| `Controllers/V1/*` | ASP.NET Core MVC; `AdminController` uses Jellyfin's `Policies.RequiresElevation` |
+| `Filters/PlaybackInfoFilter.cs` | an MVC filter on Jellyfin's PlaybackInfo and item endpoints: `PlaybackInfoResponse`, `MediaSourceInfo`, `BaseItemDto`, `QueryResult<T>` |
+| `Filters/PlaybackInfoTargetCheck.cs` | checks at startup that Jellyfin's PlaybackInfo actions still have the route and parameter names the filter expects (logs a warning otherwise) |
+| `Tasks/SyncTask.cs` | `IScheduledTask`, `TaskTriggerInfo` |
+| `Web/configPage.{html,js}` | the dashboard's `ApiClient` (`getUrl`, `ajax`) |
+
+`Tests/JellyfinTests/Filters/PlaybackInfoFilterTests.cs` pins the PlaybackInfo routes and parameter names of the
+supported version; update it with the filter. Then run the full test suite and the harness e2e (below).
 
 ## Build and test
 
@@ -157,48 +254,11 @@ Requires the .NET 10 SDK (and Python 3 for the release scripts).
 
 ```powershell
 dotnet build JellyShare.slnx -c Release
-dotnet test JellyShare.slnx
+dotnet test JellyShare.slnx -c Release
 py -m unittest discover -s build -p "test_*.py"
 ```
 
-Layout: `Source/Domain` (`JellyShare.Domain`: settings, protocol and admin models, ports, keys), `Source/Application`
-(`JellyShare.Application`: use cases as handlers behind `ISender`, sync, catalog, streaming, relay and placeholder logic),
-the infrastructure modules `Source/Infrastructure/Api/Data.Peers` (`JellyShare.Data.Peers`: outbound peer HTTP client),
-`Source/Infrastructure/Data/Data.Files` (`JellyShare.Data.Files`: data-folder JSON stores, placeholder writer) and
-`Source/Infrastructure/Platform/Media` (`JellyShare.Media`: ffmpeg runner), each referencing only the Domain, and the plugin itself,
-`Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj` (entry DLL `JellyShare.Jellyfin.dll`: controllers,
-filter, task, Jellyfin adapters, module loader, composition root). Tests: `Tests/UnitTests` (Domain/Application, no Jellyfin),
-`Tests/JellyfinTests` (Jellyfin/ASP.NET-dependent) and `Tests/ArchitectureTests` (layer rules). Shared build settings and package versions live in
-`Directory.Build.props` and `Directory.Packages.props` at the root.
-
-## Releasing
-
-Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a tag `v<version>` is pushed. The version
-has four numbers and becomes the plugin's assembly version:
-
-```powershell
-git tag v0.1.0.1
-git push origin v0.1.0.1
-```
-
-The workflow (the tagged commit must be on `main`):
-
-1. runs `dotnet test` and the `build/` script tests;
-2. runs `dotnet publish -c Release` with the version from the tag;
-3. zips only the `JellyShare.*.dll` artifacts listed in `build.yaml` (`JellyShare.Jellyfin`, `.Application`, `.Domain`,
-   `.Data.Peers`, `.Data.Files`, `.Media`; Jellyfin already ships the rest, and
-   writes `meta.json` itself on install) as `jellyshare_<version>.zip`;
-4. creates the GitHub Release `v<version>` with the zip (a re-run replaces the asset);
-5. adds the version to `manifest.json` on `main` with `build/update_manifest.py`: version, changelog (commit subjects
-   since the previous tag), `targetAbi` `12.0.0.0`, `sourceUrl` of the release asset, lowercase MD5 `checksum` of the zip
-   (what Jellyfin verifies) and a UTC `timestamp`. Re-running for the same version replaces its entry.
-
-The committed `manifest.json` starts with an empty `versions` list. Jellyfin accepts such a repository without errors
-but shows no JellyShare entry in the Catalog until the first release is added.
-
-Try the whole pipeline without GitHub: `./build/package.ps1 -Version 0.1.0.1 -BaseUrl http://host.docker.internal:8000`
-builds the zip and a copy of the manifest in `dist/`; serve `dist/` with `python -m http.server` and add that
-`manifest.json` as a plugin repository (nothing is committed or tagged).
+The build must stay at 0 warnings (warnings are errors). Tests use xUnit with Shouldly assertions.
 
 ## Two-server harness
 
@@ -256,3 +316,43 @@ After rebuilding the plugin, `docker compose -f harness/docker-compose.yml resta
 To start over from scratch: `docker compose -f harness/docker-compose.yml down`, delete `harness/config/`, repeat steps 3-4.
 
 The image tag is `jellyfin/jellyfin:12.4` because `12.4.0` does not exist on Docker Hub.
+
+Placeholder names in the harness look doubled, for example
+`Tears of Steel (2012) [tmdbid-133701] (2012) [tmdbid-133701]`. That comes from the harness, not from JellyShare: the
+servers run without metadata downloaders or NFO files, so Jellyfin keeps the whole folder name, year and id tag
+included, as the item's Name (`py harness/list_items.py bob` shows `'Tears of Steel (2012) [tmdbid-133701]'` for bob's
+own file). The consumer then names the placeholder folder `<Name> (<Year>) [tmdbid-<id>]` from what the provider sends.
+On a server with metadata (or NFO files) the Name is the plain title and the folder is `Tears of Steel (2012) [tmdbid-133701]`.
+
+## Releasing
+
+`.github/workflows/ci.yml` builds (warnings are errors) and runs all tests and the `build/` script tests on every push
+and pull request to `main`. The template's OFA-TECH reusable Docker/Swarm pipeline does not apply: JellyShare is a
+Jellyfin plugin shipped as a zip through a plugin repository manifest, not a service.
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`) when a tag `v<version>` is pushed. The version
+has four numbers and becomes the plugin's assembly version:
+
+```powershell
+git tag v0.1.0.1
+git push origin v0.1.0.1
+```
+
+The workflow (the tagged commit must be on `main`):
+
+1. runs `dotnet test` and the `build/` script tests;
+2. runs `dotnet publish -c Release` with the version from the tag;
+3. zips only the `JellyShare.*.dll` artifacts listed in `build.yaml` (`JellyShare.Jellyfin`, `.Application`, `.Domain`,
+   `.Data.Peers`, `.Data.Files`, `.Media`; Jellyfin already ships the rest, and
+   writes `meta.json` itself on install) as `jellyshare_<version>.zip`;
+4. creates the GitHub Release `v<version>` with the zip (a re-run replaces the asset);
+5. adds the version to `manifest.json` on `main` with `build/update_manifest.py`: version, changelog (commit subjects
+   since the previous tag), `targetAbi` `12.0.0.0`, `sourceUrl` of the release asset, lowercase MD5 `checksum` of the zip
+   (what Jellyfin verifies) and a UTC `timestamp`. Re-running for the same version replaces its entry.
+
+The committed `manifest.json` starts with an empty `versions` list. Jellyfin accepts such a repository without errors
+but shows no JellyShare entry in the Catalog until the first release is added.
+
+Try the whole pipeline without GitHub: `./build/package.ps1 -Version 0.1.0.1 -BaseUrl http://host.docker.internal:8000`
+builds the zip and a copy of the manifest in `dist/`; serve `dist/` with `python -m http.server` and add that
+`manifest.json` as a plugin repository (nothing is committed or tagged).
