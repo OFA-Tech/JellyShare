@@ -81,6 +81,8 @@ public sealed class SyncService : ISyncRunner
     private readonly object _lastLock = new();
     private SyncReport? _last;
     private bool _lastLoaded;
+    private List<MergedEntry>? _merged;
+    private (DateTime WriteUtc, long Length) _mergedStamp;
     private PlaceholderLedger? _ledger;
     private (DateTime WriteUtc, long Length) _ledgerStamp;
 
@@ -232,21 +234,21 @@ public sealed class SyncService : ISyncRunner
         EnsureRootsSeparate(cfg);
 
         var dataDir = _dataDir();
-        var file = MergedIndexStore.Load(Path.Combine(dataDir, MergedIndexStore.FileName));
-        if (file is null || keys.Count == 0)
+        var merged = MergedEntries(dataDir);
+        if (merged is null || keys.Count == 0)
         {
             return new ReconcileReport(0, 0, 0, 0, 0);
         }
 
         var wanted = new HashSet<string>(keys, StringComparer.Ordinal);
-        var affected = file.ToEntries().Where(e => e.Keys.Any(wanted.Contains)).ToList();
+        var affected = merged.Where(e => e.Keys.Any(wanted.Contains)).ToList();
         if (affected.Count == 0)
         {
             return new ReconcileReport(0, 0, 0, 0, 0);
         }
 
         var entryKeys = new HashSet<string>(affected.SelectMany(e => e.Keys), StringComparer.Ordinal);
-        var local = known ?? await _localIndex.BuildForKeysAsync(entryKeys, ct).ConfigureAwait(false);
+        var local = known ?? await _localIndex.BuildForKeysAsync(entryKeys, LibraryScope.ForEntries(affected), ct).ConfigureAwait(false);
         var contributing = cfg.Peers
             .Where(p => p.Enabled && p.Id != Guid.Empty)
             .GroupBy(p => p.Id)
@@ -355,7 +357,10 @@ public sealed class SyncService : ISyncRunner
         var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
         var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, dataDir, ct).ConfigureAwait(false);
 
-        MergedIndexStore.Save(Path.Combine(dataDir, MergedIndexStore.FileName), index.Entries, now);
+        var mergedPath = Path.Combine(dataDir, MergedIndexStore.FileName);
+        MergedIndexStore.Save(mergedPath, index.Entries, now);
+        _merged = index.Entries.ToList();
+        _mergedStamp = FileStamp(mergedPath);
         stateStore.Save(states);
 
         var (scanned, pending) = ReportScans(dataDir);
@@ -633,6 +638,24 @@ public sealed class SyncService : ISyncRunner
         }
 
         return map;
+    }
+
+    /// <summary>Gets how often the merged index file was parsed (test hook).</summary>
+    internal int MergedIndexLoads { get; private set; }
+
+    private IReadOnlyList<MergedEntry>? MergedEntries(string dataDir)
+    {
+        // The full sync keeps what it saved in memory; the file is parsed again only when it changed on disk.
+        var path = Path.Combine(dataDir, MergedIndexStore.FileName);
+        var stamp = FileStamp(path);
+        if (_merged is null || stamp != _mergedStamp)
+        {
+            MergedIndexLoads++;
+            _merged = MergedIndexStore.Load(path)?.ToEntries().ToList();
+            _mergedStamp = stamp;
+        }
+
+        return _merged;
     }
 
     private PlaceholderLedger Ledger(string dataDir)

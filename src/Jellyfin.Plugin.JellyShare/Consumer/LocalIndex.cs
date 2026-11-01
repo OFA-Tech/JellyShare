@@ -48,12 +48,86 @@ public enum FilePresence
     Unknown,
 }
 
+/// <summary>
+/// Which local titles a targeted reconcile needs: movies with any of <see cref="MovieIds"/>, series with any of
+/// <see cref="SeriesIds"/> and their episodes. Provider kinds and ids are lowercase.
+/// </summary>
+/// <param name="MovieIds">Movie provider ids by kind (<c>tmdb</c>, <c>imdb</c>).</param>
+/// <param name="SeriesIds">Series provider ids by kind (<c>tvdb</c>, <c>imdb</c>, <c>tmdb</c>).</param>
+public sealed record LibraryScope(
+    IReadOnlyDictionary<string, IReadOnlySet<string>> MovieIds,
+    IReadOnlyDictionary<string, IReadOnlySet<string>> SeriesIds)
+{
+    /// <summary>Gets a value indicating whether nothing is asked for.</summary>
+    public bool IsEmpty => MovieIds.Count == 0 && SeriesIds.Count == 0;
+
+    /// <summary>Builds the scope covering merged entries (their keys and, for episodes, all their series ids).</summary>
+    /// <param name="entries">The entries.</param>
+    /// <returns>The scope.</returns>
+    public static LibraryScope ForEntries(IEnumerable<MergedEntry> entries)
+    {
+        var movies = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var series = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        static void Add(Dictionary<string, HashSet<string>> map, string kind, string id)
+        {
+            if (!map.TryGetValue(kind, out var set))
+            {
+                set = new HashSet<string>(StringComparer.Ordinal);
+                map[kind] = set;
+            }
+
+            set.Add(id);
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.Sources.Count == 0)
+            {
+                continue;
+            }
+
+            if (entry.Sources[0].Item.Type == "Episode")
+            {
+                foreach (var (kind, id) in PathNaming.SeriesIds(entry))
+                {
+                    Add(series, kind, id);
+                }
+            }
+            else
+            {
+                foreach (var key in entry.Keys)
+                {
+                    // movie:{kind}:{id}
+                    var parts = key.Split(':');
+                    if (parts.Length == 3 && parts[0] == "movie")
+                    {
+                        Add(movies, parts[1], parts[2]);
+                    }
+                }
+            }
+        }
+
+        return new LibraryScope(
+            movies.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal),
+            series.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<string>)kv.Value, StringComparer.Ordinal));
+    }
+}
+
 /// <summary>Reads the local library.</summary>
 public interface ILocalLibrary
 {
     /// <summary>Reads all movies, episodes and series.</summary>
     /// <returns>The snapshot.</returns>
     LocalLibrarySnapshot Read();
+
+    /// <summary>Reads only the titles in <paramref name="scope"/> (provider-id queries, no full library read).</summary>
+    /// <param name="scope">The provider ids of interest.</param>
+    /// <returns>The matching movies, series and those series' episodes (no locations).</returns>
+    LocalLibrarySnapshot Read(LibraryScope scope);
+
+    /// <summary>Gets the folders of all libraries.</summary>
+    /// <returns>The library locations.</returns>
+    IReadOnlyList<string> GetLocations();
 }
 
 /// <summary>The titles the owner has locally.</summary>
@@ -86,11 +160,15 @@ public interface ILocalIndex
     /// <returns>The local keys and series.</returns>
     Task<LocalIndexResult> BuildAsync(CancellationToken ct);
 
-    /// <summary>Builds the index for the titles that have any of the given keys; only those files are checked.</summary>
+    /// <summary>
+    /// Builds the index for the titles that have any of the given keys, reading only the titles in
+    /// <paramref name="scope"/> from the library; only those files are checked.
+    /// </summary>
     /// <param name="keys">The keys of interest.</param>
+    /// <param name="scope">The provider ids to read from the library (covering <paramref name="keys"/>).</param>
     /// <param name="ct">The cancellation token.</param>
-    /// <returns>The local keys (restricted to titles matching <paramref name="keys"/>) and all series.</returns>
-    Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, CancellationToken ct);
+    /// <returns>The local keys (restricted to titles matching <paramref name="keys"/>) and the series in scope.</returns>
+    Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, LibraryScope scope, CancellationToken ct);
 }
 
 /// <summary>
@@ -175,19 +253,22 @@ public sealed class LocalIndex : ILocalIndex
     internal static IReadOnlyList<string> KeysFor(LocalMedia media) => MediaKey.For(ToItem(media));
 
     /// <inheritdoc />
-    public Task<LocalIndexResult> BuildAsync(CancellationToken ct) => BuildCoreAsync(null, ct);
+    public Task<LocalIndexResult> BuildAsync(CancellationToken ct) => BuildCoreAsync(null, null, ct);
 
     /// <inheritdoc />
-    public Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, CancellationToken ct)
+    public Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, LibraryScope scope, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(keys);
-        return BuildCoreAsync(keys, ct);
+        ArgumentNullException.ThrowIfNull(scope);
+        return BuildCoreAsync(keys, scope, ct);
     }
 
-    private async Task<LocalIndexResult> BuildCoreAsync(IReadOnlySet<string>? onlyKeys, CancellationToken ct)
+    private async Task<LocalIndexResult> BuildCoreAsync(IReadOnlySet<string>? onlyKeys, LibraryScope? scope, CancellationToken ct)
     {
         var cfg = _config.Current;
-        var snapshot = _library.Read();
+        var snapshot = scope is null
+            ? _library.Read()
+            : scope.IsEmpty ? new LocalLibrarySnapshot([], []) : _library.Read(scope);
 
         var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys)>();
         foreach (var media in snapshot.Media)

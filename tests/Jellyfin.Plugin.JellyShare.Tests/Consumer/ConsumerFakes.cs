@@ -118,6 +118,29 @@ internal sealed class FakeLocalLibrary : ILocalLibrary
         return new(Media.ToList(), Series.ToList()) { Locations = Locations.ToList() };
     }
 
+    public int ScopedReads { get; private set; }
+
+    public LibraryScope? LastScope { get; private set; }
+
+    public LocalLibrarySnapshot Read(LibraryScope scope)
+    {
+        ScopedReads++;
+        LastScope = scope;
+
+        // Like the provider-id query: movies by their ids, series by theirs, and the episodes of those series.
+        static bool Matches(IReadOnlyDictionary<string, string>? ids, IReadOnlyDictionary<string, IReadOnlySet<string>> wanted)
+            => ids is not null && ids.Any(kv => wanted.TryGetValue(kv.Key.ToLowerInvariant(), out var set) && set.Contains(kv.Value.ToLowerInvariant()));
+
+        var media = Media.Where(m => m.Type == "Movie"
+                ? Matches(m.ProviderIds, scope.MovieIds)
+                : Matches(m.SeriesProviderIds, scope.SeriesIds))
+            .ToList();
+        var series = Series.Where(s => Matches(s.ProviderIds, scope.SeriesIds)).ToList();
+        return new(media, series);
+    }
+
+    public IReadOnlyList<string> GetLocations() => Locations.ToList();
+
     public static Func<string, FilePresence> Exists(Func<string, bool> exists)
         => p => exists(p) ? FilePresence.Present : FilePresence.Missing;
 }

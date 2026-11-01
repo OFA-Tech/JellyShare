@@ -62,6 +62,9 @@ public sealed class PlaceholderWriter
         _logger = logger ?? NullLogger.Instance;
     }
 
+    /// <summary>Test hook: called with each file <see cref="ScanExisting"/> reads (per async flow).</summary>
+    internal static readonly AsyncLocal<Action<string>?> ReadObserver = new();
+
     /// <summary>Gets or sets a test hook called with (temp path, target path) before a placeholder file is committed.</summary>
     internal Action<string, string>? BeforeCommit { get; set; }
 
@@ -98,6 +101,7 @@ public sealed class PlaceholderWriter
 
             try
             {
+                ReadObserver.Value?.Invoke(file);
                 result[rel] = PlaceholderPlanner.Hash(File.ReadAllText(file));
             }
             catch (IOException)

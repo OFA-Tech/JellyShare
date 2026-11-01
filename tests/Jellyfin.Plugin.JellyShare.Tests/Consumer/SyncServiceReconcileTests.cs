@@ -148,6 +148,58 @@ public sealed class SyncServiceReconcileTests : IDisposable
     }
 
     [Fact]
+    public async Task Reconcile_TouchesOnlyAffectedTitles_NoFullLibraryRead_NoPlaceholderReads_NoIndexReparse()
+    {
+        AddLocalSintel();
+        Offer(Bunny(), Sintel(), Pioneer(1, 1));
+        await _sync.RunAsync(CancellationToken.None);
+        var fullReads = _library.Reads;
+        var loads = _sync.MergedIndexLoads;
+        var reads = new List<string>();
+        Jellyfin.Plugin.JellyShare.Placeholders.PlaceholderWriter.ReadObserver.Value = reads.Add;
+
+        _missing.Add(SintelPath);
+        var report = await _sync.ReconcileAsync(["movie:tmdb:45745"], CancellationToken.None);
+
+        Assert.Equal(2, report.Written);
+        Assert.True(MoviePlaceholder(SintelDir));
+        Assert.Equal(fullReads, _library.Reads);
+        Assert.Equal(1, _library.ScopedReads);
+        Assert.Contains("45745", _library.LastScope!.MovieIds["tmdb"]);
+        Assert.Empty(_library.LastScope.SeriesIds);
+        Assert.Empty(reads);
+        Assert.Equal(loads, _sync.MergedIndexLoads);
+    }
+
+    [Fact]
+    public async Task Reconcile_MergedIndexReplacedOnDisk_IsReloaded()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        var path = Path.Combine(_tmp.Sub("data"), MergedIndexStore.FileName);
+        MergedIndexStore.Save(path, Array.Empty<MergedEntry>(), DateTimeOffset.UnixEpoch);
+        File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(5));
+
+        var report = await _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None);
+
+        Assert.Equal(0, report.Entries);
+    }
+
+    [Fact]
+    public async Task Reconcile_Episode_ScopesSeriesQueryToItsSeriesIds()
+    {
+        Offer(Pioneer(1, 1), Pioneer(1, 2));
+        await _sync.RunAsync(CancellationToken.None);
+        AddLocalPioneer(1, 1);
+
+        var report = await _sync.ReconcileAsync([MediaKey.For(Pioneer(1, 1)).First()], CancellationToken.None);
+
+        Assert.Equal(2, report.Deleted);
+        Assert.Contains("153021", _library.LastScope!.SeriesIds["tvdb"]);
+        Assert.Empty(_library.LastScope.MovieIds);
+    }
+
+    [Fact]
     public async Task Reconcile_WaitsForRunningSync()
     {
         Offer(Bunny());
