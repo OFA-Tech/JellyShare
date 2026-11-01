@@ -19,7 +19,7 @@ try {
     }
     $pub = Join-Path $root "dist/publish"
     if (Test-Path $pub) { Remove-Item $pub -Recurse -Force }
-    dotnet publish src/Jellyfin.Plugin.JellyShare -c Release -o $pub "-p:Version=$Version" "-p:AssemblyVersion=$Version" "-p:FileVersion=$Version"
+    dotnet publish Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj -c Release -o $pub "-p:Version=$Version" "-p:AssemblyVersion=$Version" "-p:FileVersion=$Version"
     if ($LASTEXITCODE) { throw "dotnet publish failed" }
     & $Python build/package.py --publish-dir $pub --version $Version --out dist
     if ($LASTEXITCODE) { throw "package failed" }

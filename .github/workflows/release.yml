@@ -45,12 +45,12 @@ jobs:
 
       - name: Test
         run: |
-          dotnet test -c Release
+          dotnet test JellyShare.slnx -c Release
           python3 -m unittest discover -s build -p "test_*.py"
 
       - name: Publish
         run: >
-          dotnet publish src/Jellyfin.Plugin.JellyShare -c Release -o publish
+          dotnet publish Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj -c Release -o publish
           -p:Version="$VERSION" -p:AssemblyVersion="$VERSION" -p:FileVersion="$VERSION"
 
       - name: Zip the plugin DLL

@@ -10,6 +10,6 @@ description: >
 category: "General"
 owner: "OFA-TECH"
 artifacts:
-  - "Jellyfin.Plugin.JellyShare.dll"
+  - "JellyShare.Jellyfin.dll"
 changelog: >
   First release.

@@ -13,7 +13,7 @@ JellyShare needs Jellyfin 12 (target ABI 12.0.0.0). Install it on every server t
 2. Name: `JellyShare`. URL:
 
    ```text
-   https://raw.githubusercontent.com/CaioMBA/jellyfin-plugin-jellyshare/main/manifest.json
+   https://raw.githubusercontent.com/OFA-Tech/JellyShare/main/manifest.json
    ```
 
 3. **Dashboard → Plugins → Catalog → General → JellyShare → Install** (pick the newest version).
@@ -156,10 +156,14 @@ Things to know:
 Requires the .NET 10 SDK (and Python 3 for the release scripts).
 
 ```powershell
-dotnet build -c Release
-dotnet test
+dotnet build JellyShare.slnx -c Release
+dotnet test JellyShare.slnx
 py -m unittest discover -s build -p "test_*.py"
 ```
+
+Layout: the plugin is `Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj` (entry DLL
+`JellyShare.Jellyfin.dll`), its tests are `Tests/JellyfinTests`. Shared build settings and package versions live in
+`Directory.Build.props` and `Directory.Packages.props` at the root.
 
 ## Releasing
 
@@ -175,7 +179,7 @@ The workflow (the tagged commit must be on `main`):
 
 1. runs `dotnet test` and the `build/` script tests;
 2. runs `dotnet publish -c Release` with the version from the tag;
-3. zips only `Jellyfin.Plugin.JellyShare.dll` (the artifacts listed in `build.yaml`; Jellyfin already ships the rest, and
+3. zips only `JellyShare.Jellyfin.dll` (the artifacts listed in `build.yaml`; Jellyfin already ships the rest, and
    writes `meta.json` itself on install) as `jellyshare_<version>.zip`;
 4. creates the GitHub Release `v<version>` with the zip (a re-run replaces the asset);
 5. adds the version to `manifest.json` on `main` with `build/update_manifest.py`: version, changelog (commit subjects
@@ -191,7 +195,7 @@ builds the zip and a copy of the manifest in `dist/`; serve `dist/` with `python
 
 ## Two-server harness
 
-Two Jellyfin 12.4 servers in Docker, with the plugin from `src/Jellyfin.Plugin.JellyShare/bin/Release/net10.0/`
+Two Jellyfin 12.4 servers in Docker, with the plugin from `Source/Infrastructure/Platform/Jellyfin/bin/Release/net10.0/`
 mounted as a dev plugin:
 
 | Server | URL | Notes |
@@ -201,7 +205,7 @@ mounted as a dev plugin:
 
 Admin login on both: `admin` / `admin` (throwaway harness credentials).
 
-1. Build the plugin: `dotnet build -c Release`.
+1. Build the plugin: `dotnet build JellyShare.slnx -c Release`.
 2. Generate test media (needs ffmpeg; there is none on the host, so use the one inside the Jellyfin image):
 
    ```powershell

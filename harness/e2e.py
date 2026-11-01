@@ -40,8 +40,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 SECRETS = HERE / ".secrets"
 MEDIA = HERE / "media"
 BASE_MKV = MEDIA / ".base.mkv"
-DLL = HERE.parent / "src" / "Jellyfin.Plugin.JellyShare" / "bin" / "Release" / "net10.0" / "Jellyfin.Plugin.JellyShare.dll"
-PLUGIN_DLL_NAME = "Jellyfin.Plugin.JellyShare.dll"
+DLL = HERE.parent / "Source" / "Infrastructure" / "Platform" / "Jellyfin" / "bin" / "Release" / "net10.0" / "JellyShare.Jellyfin.dll"
+PLUGIN_DLL_NAME = "JellyShare.Jellyfin.dll"
 PLUGIN_DLL_FALLBACK = "/config/plugins/JellyShare_0.0.0.1/" + PLUGIN_DLL_NAME
 FFPROBE = "/usr/lib/jellyfin-ffmpeg/ffprobe"
 CLIENT = 'MediaBrowser Client="jellyshare-harness", Device="e2e", DeviceId="jellyshare-harness-e2e", Version="1.0"'

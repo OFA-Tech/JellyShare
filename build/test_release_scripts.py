@@ -19,7 +19,7 @@ import package  # noqa: E402
 import update_manifest as um  # noqa: E402
 
 GUID = "8a55d113-5072-47cf-9827-f3c49f1c3971"
-URL = "https://github.com/CaioMBA/jellyfin-plugin-jellyshare/releases/download/v{v}/jellyshare_{v}.zip"
+URL = "https://github.com/OFA-Tech/JellyShare/releases/download/v{v}/jellyshare_{v}.zip"
 
 
 def base_manifest():
@@ -40,7 +40,7 @@ class UpdateManifestTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.zip_path = os.path.join(self.tmp.name, "jellyshare_0.1.0.0.zip")
         with zipfile.ZipFile(self.zip_path, "w") as z:
-            z.writestr("Jellyfin.Plugin.JellyShare.dll", b"dll-bytes")
+            z.writestr("JellyShare.Jellyfin.dll", b"dll-bytes")
         with open(self.zip_path, "rb") as f:
             self.md5 = hashlib.md5(f.read()).hexdigest()
 
@@ -75,7 +75,7 @@ class UpdateManifestTests(unittest.TestCase):
         m = self.add(base_manifest(), "0.1.0.0", changelog="a", now="2026-11-01T10:00:00Z")
         m = self.add(m, "0.1.0.1")
         with zipfile.ZipFile(self.zip_path, "w") as z:
-            z.writestr("Jellyfin.Plugin.JellyShare.dll", b"other")
+            z.writestr("JellyShare.Jellyfin.dll", b"other")
         m = self.add(m, "0.1.0.0", changelog="b", now="2026-11-02T10:00:00Z")
         versions = m[0]["versions"]
         self.assertEqual([v["version"] for v in versions], ["0.1.0.1", "0.1.0.0"])
@@ -142,14 +142,14 @@ class PackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pub = os.path.join(tmp, "pub")
             os.makedirs(pub)
-            for name in ("Jellyfin.Plugin.JellyShare.dll", "Jellyfin.Plugin.JellyShare.pdb",
-                         "Jellyfin.Plugin.JellyShare.deps.json", "Jellyfin.Controller.dll"):
+            for name in ("JellyShare.Jellyfin.dll", "JellyShare.Jellyfin.pdb",
+                         "JellyShare.Jellyfin.deps.json", "Jellyfin.Controller.dll"):
                 with open(os.path.join(pub, name), "wb") as f:
                     f.write(name.encode())
             out = os.path.join(tmp, "dist", "jellyshare_0.1.0.0.zip")
-            package.make_zip(pub, ["Jellyfin.Plugin.JellyShare.dll"], out)
+            package.make_zip(pub, ["JellyShare.Jellyfin.dll"], out)
             with zipfile.ZipFile(out) as z:
-                self.assertEqual(z.namelist(), ["Jellyfin.Plugin.JellyShare.dll"])
+                self.assertEqual(z.namelist(), ["JellyShare.Jellyfin.dll"])
 
     def test_missing_artifact_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -169,7 +169,7 @@ class PackageTests(unittest.TestCase):
     def test_artifacts_read_from_build_yaml(self):
         root = os.path.dirname(HERE)
         arts = package.read_artifacts(os.path.join(root, "build.yaml"))
-        self.assertEqual(arts, ["Jellyfin.Plugin.JellyShare.dll"])
+        self.assertEqual(arts, ["JellyShare.Jellyfin.dll"])
 
 
 if __name__ == "__main__":

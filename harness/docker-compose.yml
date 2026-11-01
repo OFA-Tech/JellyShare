@@ -18,7 +18,7 @@ services:
     volumes:
       - ./config/alice:/config
       - ./media/alice:/media
-      - ../src/Jellyfin.Plugin.JellyShare/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
+      - ../Source/Infrastructure/Platform/Jellyfin/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
 
   bob:
     <<: *jellyfin
@@ -28,4 +28,4 @@ services:
     volumes:
       - ./config/bob:/config
       - ./media/bob:/media
-      - ../src/Jellyfin.Plugin.JellyShare/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
+      - ../Source/Infrastructure/Platform/Jellyfin/bin/Release/net10.0:/config/plugins/JellyShare_0.0.0.1
