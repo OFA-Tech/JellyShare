@@ -309,8 +309,44 @@ public sealed class PlaceholderWriter
 
     private static string TopDir(string rel) => rel[..rel.IndexOf('/', StringComparison.Ordinal)];
 
-    private static void EnsureRoot(string rootFull)
+    /// <summary>
+    /// Checks that a placeholder root may be used: it does not exist yet, is empty, or carries the
+    /// <see cref="MarkerName"/> marker. A non-empty folder without the marker is someone else's folder.
+    /// </summary>
+    /// <param name="root">The placeholder root.</param>
+    /// <returns>A clear error, or <c>null</c> when the root may be used.</returns>
+    public static string? RootProblem(string root)
     {
+        var rootFull = Path.GetFullPath(root);
+        try
+        {
+            if (!Directory.Exists(rootFull)
+                || File.Exists(Path.Combine(rootFull, MarkerName))
+                || !Directory.EnumerateFileSystemEntries(rootFull).Any())
+            {
+                return null;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return $"JellyShare: the placeholder folder '{root}' cannot be read ({ex.GetType().Name}).";
+        }
+
+        return $"JellyShare: the placeholder folder '{root}' already contains files but no {MarkerName} marker, so it is not a "
+            + "JellyShare folder and nothing is written or deleted there. Choose a new, empty folder.";
+    }
+
+    /// <summary>Creates the root and its marker; the marker is only ever created in a new or empty folder.</summary>
+    /// <param name="root">The placeholder root.</param>
+    /// <exception cref="InvalidOperationException">The folder is not empty and has no marker.</exception>
+    public static void EnsureRoot(string root)
+    {
+        if (RootProblem(root) is { } problem)
+        {
+            throw new InvalidOperationException(problem);
+        }
+
+        var rootFull = Path.GetFullPath(root);
         Directory.CreateDirectory(rootFull);
         var marker = Path.Combine(rootFull, MarkerName);
         if (!File.Exists(marker))

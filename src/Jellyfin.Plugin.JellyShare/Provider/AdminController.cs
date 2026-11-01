@@ -530,15 +530,15 @@ public class AdminController : ControllerBase
                 : Conflict(new ErrorResponse($"This folder is already part of the library '{holder.Name}'. Remove it there first."));
         }
 
+        if (PlaceholderWriter.RootProblem(root) is { } problem)
+        {
+            return Conflict(new ErrorResponse(problem));
+        }
+
         try
         {
-            Directory.CreateDirectory(root);
-            var marker = Path.Combine(root, PlaceholderWriter.MarkerName);
-            if (!System.IO.File.Exists(marker))
-            {
-                await System.IO.File.WriteAllBytesAsync(marker, [], ct).ConfigureAwait(false);
-            }
-
+            // The marker is only created in a new or empty folder (RootProblem above refuses anything else).
+            PlaceholderWriter.EnsureRoot(root);
             await _libraries.AddPathAsync(library.Name, root, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

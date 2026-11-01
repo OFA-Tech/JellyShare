@@ -330,6 +330,7 @@ public sealed class SyncServiceTests : IDisposable
     {
         Offer(Bunny(), Pioneer(2, 1));
         Directory.CreateDirectory(ShowsRoot);
+        File.WriteAllText(Path.Combine(ShowsRoot, PlaceholderWriter.MarkerName), string.Empty);
         var blocker = Path.Combine(ShowsRoot, PioneerDir);
         File.WriteAllText(blocker, "a file where the series folder should go");
 
@@ -509,6 +510,87 @@ public sealed class SyncServiceTests : IDisposable
 
         Assert.Equal(1, report.Written);
         Assert.True(File.Exists(BunnyStrm));
+    }
+
+    [Theory]
+    [InlineData("ph")]                 // a library folder containing the placeholder roots
+    [InlineData("ph/Movies/Owner")]    // a library folder inside a placeholder root
+    public async Task Sync_RootOverlapsAnOwnerLibraryFolder_RefusesWithClearError(string location)
+    {
+        _library.Locations.Add(_tmp.Sub(location.Split('/')));
+        Offer(Bunny());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+
+        Assert.Contains("library folder", ex.Message, StringComparison.Ordinal);
+        Assert.False(MoviePlaceholder(BunnyDir));
+    }
+
+    [Fact]
+    public async Task Sync_RootIsAnOwnerMovieFolder_RefusesAndDeletesNothing()
+    {
+        var owner = _tmp.Sub("media", "Movies");
+        Directory.CreateDirectory(Path.Combine(owner, "Owned (2001)"));
+        var ownerNfo = Path.Combine(owner, "Owned (2001)", "Owned (2001).nfo");
+        File.WriteAllText(ownerNfo, "<movie/>");
+        _library.Locations.Add(owner);
+        _config.Current.MoviesPlaceholderPath = owner;
+        Offer(Bunny());
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+
+        Assert.True(File.Exists(ownerNfo));
+        Assert.False(File.Exists(Path.Combine(owner, ".jellyshare")));
+    }
+
+    [Fact]
+    public async Task Sync_AttachedPluginRoots_AreNotOverlaps()
+    {
+        _library.Locations.Add(MoviesRoot);
+        _library.Locations.Add(ShowsRoot);
+        _library.Locations.Add(_tmp.Sub("media", "Movies"));
+        Offer(Bunny());
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        Assert.True(MoviePlaceholder(BunnyDir));
+    }
+
+    [Fact]
+    public async Task Sync_ExistingNonEmptyRootWithoutMarker_Refuses()
+    {
+        Directory.CreateDirectory(MoviesRoot);
+        var foreign = Path.Combine(MoviesRoot, "someone else.nfo");
+        File.WriteAllText(foreign, "x");
+        Offer(Bunny());
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+
+        Assert.Contains(".jellyshare", ex.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(foreign));
+        Assert.False(File.Exists(Path.Combine(MoviesRoot, ".jellyshare")));
+    }
+
+    [Fact]
+    public async Task Sync_ExistingEmptyRoot_IsAdopted()
+    {
+        Directory.CreateDirectory(MoviesRoot);
+        Offer(Bunny());
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        Assert.True(File.Exists(Path.Combine(MoviesRoot, ".jellyshare")));
+        Assert.True(MoviePlaceholder(BunnyDir));
+    }
+
+    [Fact]
+    public async Task Reconcile_RootOverlapsLibraryFolder_Refuses()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+        _library.Locations.Add(_tmp.Sub("ph"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => _sync.ReconcileAsync(["movie:tmdb:10378"], CancellationToken.None));
     }
 
     [Fact]

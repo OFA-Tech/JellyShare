@@ -213,6 +213,7 @@ public class PlaceholderWriterTests
         using var tmp = new TempDir();
         var root = tmp.Sub("root");
         Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
         File.WriteAllText(Path.Combine(root, "Blocked"), "file where a folder should be");
 
         var ex = await Assert.ThrowsAsync<PlaceholderWriteException>(() => new PlaceholderWriter().ApplyAsync(
@@ -267,6 +268,7 @@ public class PlaceholderWriterTests
         var root = tmp.Sub("root");
         var outside = tmp.Sub("outside");
         Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, PlaceholderWriter.MarkerName), string.Empty);
         Directory.CreateDirectory(Path.Combine(outside, "Season 01"));
         File.WriteAllText(Path.Combine(outside, "Season 01", "victim.strm"), "keep");
         if (!TryLink(Path.Combine(root, "Linked"), outside))

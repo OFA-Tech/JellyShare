@@ -822,4 +822,18 @@ public sealed class AdminControllerTests : IDisposable
         Assert.IsType<ConflictObjectResult>(result);
         Assert.Empty(_libs.Added);
     }
+
+    [Fact]
+    public async Task Attach_NonEmptyFolderWithoutMarker_IsConflict_AndNoMarkerIsCreated()
+    {
+        var root = _config.Current.MoviesPlaceholderPath;
+        Directory.CreateDirectory(root);
+        File.WriteAllText(Path.Combine(root, "owner.mkv"), "x");
+
+        var result = await _c.Attach(new AttachLibraryRequest(FakeLibraries.MoviesId, "Movies"), CancellationToken.None);
+
+        Assert.Contains(".jellyshare", ErrorOf(Assert.IsType<ConflictObjectResult>(result)), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Combine(root, ".jellyshare")));
+        Assert.Empty(_libs.Added);
+    }
 }

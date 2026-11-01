@@ -169,6 +169,10 @@ public interface ILocalIndex
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The local keys (restricted to titles matching <paramref name="keys"/>) and the series in scope.</returns>
     Task<LocalIndexResult> BuildForKeysAsync(IReadOnlySet<string> keys, LibraryScope scope, CancellationToken ct);
+
+    /// <summary>Gets the folders of all libraries.</summary>
+    /// <returns>The library locations.</returns>
+    IReadOnlyList<string> LibraryLocations();
 }
 
 /// <summary>
@@ -262,6 +266,9 @@ public sealed class LocalIndex : ILocalIndex
         ArgumentNullException.ThrowIfNull(scope);
         return BuildCoreAsync(keys, scope, ct);
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<string> LibraryLocations() => _library.GetLocations();
 
     private async Task<LocalIndexResult> BuildCoreAsync(IReadOnlySet<string>? onlyKeys, LibraryScope? scope, CancellationToken ct)
     {

@@ -276,12 +276,45 @@ public sealed class SyncService : ISyncRunner
         return report;
     }
 
-    private static void EnsureRootsSeparate(PluginConfiguration cfg)
+    private void EnsureRootsSeparate(PluginConfiguration cfg)
     {
         if (RelayBase.OverrideError(cfg.RelayBaseOverride) is { } relayError)
         {
             // .strm files pointing elsewhere would always be refused by the relay (403).
             throw new InvalidOperationException(relayError);
+        }
+
+        // Every .strm/.nfo the plugin wrote under a root is its own to delete, so a root must never be (or contain, or
+        // sit inside) one of the owner's library folders, and must be the plugin's own folder.
+        var locations = _localIndex.LibraryLocations();
+        foreach (var (label, root) in new[] { ("movie", cfg.MoviesPlaceholderPath), ("show", cfg.ShowsPlaceholderPath) })
+        {
+            if (string.IsNullOrWhiteSpace(root))
+            {
+                continue;
+            }
+
+            foreach (var location in locations)
+            {
+                if (string.IsNullOrWhiteSpace(location)
+                    || SamePath(location, cfg.MoviesPlaceholderPath)
+                    || SamePath(location, cfg.ShowsPlaceholderPath))
+                {
+                    continue;
+                }
+
+                if (RootsOverlap(root, location))
+                {
+                    throw new InvalidOperationException(
+                        $"JellyShare: the {label} placeholder folder '{root}' overlaps the library folder '{location}'. "
+                        + "Choose a new, empty folder outside your media folders.");
+                }
+            }
+
+            if (PlaceholderWriter.RootProblem(root) is { } problem)
+            {
+                throw new InvalidOperationException(problem);
+            }
         }
 
         if (RootsOverlap(cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath))
@@ -452,6 +485,20 @@ public sealed class SyncService : ISyncRunner
         var y = Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)) + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         return x.StartsWith(y, comparison) || y.StartsWith(x, comparison);
+    }
+
+    private static bool SamePath(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+        {
+            return false;
+        }
+
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)),
+            comparison);
     }
 
     private static void MarkSuccess(PeerState state, DateTimeOffset now)
