@@ -796,7 +796,7 @@ def single_local_sintel():
 FRIEND = "jellyshare-e2e-friend"
 ACCOUNT_PEER = "bob-account"
 PEERS_API = "/JellyShare/v1/admin/peers"
-ALICE_CONFIG = "/config/plugins/configurations/JellyShare.Jellyfin.xml"
+PLUGIN_CONFIG = "/config/plugins/configurations/JellyShare.Jellyfin.xml"
 
 
 def peer_view(server, name):
@@ -812,7 +812,7 @@ def put_peer(server, view, **changes):
 
 def stored_peer_token(server, peer_id):
     """The access token the plugin saved for a peer (read from its settings file in the container). Never printed."""
-    res = sh("docker", "exec", server.container, "cat", ALICE_CONFIG)
+    res = sh("docker", "exec", server.container, "cat", PLUGIN_CONFIG)
     for peer in ET.fromstring(res.stdout).iter("RemotePeer"):
         if (peer.findtext("Id") or "").replace("-", "") == peer_id.replace("-", ""):
             return peer.findtext("Token") or None
@@ -1039,7 +1039,7 @@ def check_account_peers():
               view["LimitAction"] == "Refuse" and info.get("ErrorCode") == "RateLimitExceeded", f"ErrorCode={info.get('ErrorCode')}")
         hold_thread.join(HOLD_SECONDS + 30)
         res = hold.get("res")
-        check("StopOldest: title A's relay connection is cut (reader ends with a broken transfer, not the full clip or its timeout)",
+        check("StopOldest: a direct read of title A's relay URL is cut (broken transfer, not the full clip or its timeout; Jellyfin's own ffmpeg read is not exercised)",
               res is not None and res[2] in (18, 56) and res[1] < BASE_MKV.stat().st_size,
               f"HTTP {res[0]}, {res[1]} bytes, curl exit {res[2]}, after {hold['seconds']:.0f} s" if res else hold.get("err", "no result"))
 
@@ -1067,16 +1067,26 @@ def check_account_peers():
         if hold_thread:
             hold_thread.join(120)
             sh("docker", "exec", ALICE.container, "rm", "-f", hold.get("file", "/nonexistent"))
+        # Each undo step has its own try, so one failing step never skips the others.
+        def undo(label, fn):
+            try:
+                fn()
+            except Exception as exc:
+                check(f"cleanup: {label}", False, f"{type(exc).__name__}: {str(exc)[:200]}")
+
+        undo("stop the playback session", lambda: ALICE.api("POST", "/Sessions/Playing/Stopped", {"PositionTicks": 0}, raw=True))
+        # The token peer goes first: deleting the account peer starts a sync, and one that runs while the token peer is
+        # still off would delete all of bob's placeholders (and the sync below would only wait for that one).
+        if token_peer:
+            undo("enable the token peer to bob again", lambda: put_peer(ALICE, token_peer, Enabled=True))
+        if peer_id:
+            undo("delete the account peer", lambda: ALICE.api("DELETE", f"{PEERS_API}/{peer_id}", raw=True))
+        if friend_id:
+            undo("delete the friend user", lambda: BOB.api("DELETE", f"/Users/{friend_id}", raw=True))
         try:
-            ALICE.api("POST", "/Sessions/Playing/Stopped", {"PositionTicks": 0}, raw=True)
-            if token_peer:
-                put_peer(ALICE, token_peer, Enabled=True)
-            if peer_id:
-                ALICE.api("DELETE", f"{PEERS_API}/{peer_id}", raw=True)
-            if friend_id:
-                BOB.api("DELETE", f"/Users/{friend_id}", raw=True)
+            now_token_peer = peer_view(ALICE, "bob")
             check("cleanup: account peer and friend user removed, token peer to bob enabled again",
-                  peer_view(ALICE, ACCOUNT_PEER) is None and peer_view(ALICE, "bob")["Enabled"]
+                  peer_view(ALICE, ACCOUNT_PEER) is None and bool(now_token_peer and now_token_peer["Enabled"])
                   and all(u["Name"] != FRIEND for u in BOB.api("GET", "/Users")))
             ALICE.sync()
             ALICE.refresh()

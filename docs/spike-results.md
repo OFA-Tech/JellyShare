@@ -530,11 +530,15 @@ scratch console app driving `AccountPeerClient` (both outside the repo; no token
   at a time and another viewer started.") and `Playstate` `{"Command":"Stop"}` to that session. No warning in the log.
 - **`RateLimitExceeded` as the API shows it.** `POST /Items/{id}/PlaybackInfo` answers **200** with
   `"ErrorCode":"RateLimitExceeded"` and an empty `MediaSources` (not an HTTP error status).
-- **Stop cuts the relay copy, but not at once for the reader.** Releasing the session aborts the relay connection;
-  a reader of the relay URL at 250 kB/s kept receiving what the kernel had already buffered (3–4.5 MB, 10–15 s more)
-  and then got a reset (curl exit 56). Through Jellyfin's `/Videos/{id}/stream?static=true` the extra hop buffers the
-  whole 19.7 MB harness clip at once, so with the harness media the relay copy is already finished when a stop comes;
-  only the session (slot) release is observable there. Real titles are far bigger than the buffers.
+- **Stop releases the slot; the relay cut is seen only on a direct read.** Releasing the session aborts the relay
+  connection: a curl reading the relay URL (from the `.strm`) directly at 250 kB/s kept receiving what the kernel had
+  already buffered (3–4.5 MB, 10–15 s more) and then got a reset (curl exit 56). Jellyfin's own ffmpeg-to-relay read
+  (what a real client triggers) was **not exercised**: through `/Videos/{id}/stream?static=true` the extra hop buffers
+  the whole 19.7 MB harness clip at once, so the relay copy is already finished when a stop comes and only the
+  session (slot) release is observable there.
+- **Not verified on live servers: the friend's bitrate limit.** bob's `RemoteClientBitrateLimit` is 0 in the harness,
+  so the path where a title above the account's limit is fetched as a transcoded progressive stream (non-seekable) was
+  never run against a real server. It is covered by unit tests only (`AccountPeerClientTests`, transcode URL choice).
 - **Changing the friend's password revokes the token.** `POST /Users/{id}/Password` (admin, other user) revoked the
   account's access token at once: the next sync failed with `sign-in failed: HTTP 401`, `SignInFailed` was set, the
   placeholders stayed. `PUT admin/peers/{id}` with the new password stored a new token; the next sync cleared the state.
