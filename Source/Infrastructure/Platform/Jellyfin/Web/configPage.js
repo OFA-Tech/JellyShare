@@ -107,6 +107,36 @@
         return n >= 1 && n <= 100 ? n : NaN;
     }
 
+    var ACCOUNT_STREAMS_ERROR = 'Max streams at a time must be a whole number between 1 and 20.';
+
+    function accountStreamsFrom(text) {
+        var t = String(text || '').trim();
+        var n = /^\d+$/.test(t) ? parseInt(t, 10) : NaN;
+        return n >= 1 && n <= 20 ? n : NaN;
+    }
+
+    // The API names the enums as strings; a number (the enum value) is accepted too.
+    function isAccount(p) {
+        return p.kind === 'Account' || p.kind === 1;
+    }
+
+    function limitActionName(p) {
+        return p.limitAction === 'StopOldest' || p.limitAction === 1 ? 'StopOldest' : 'Refuse';
+    }
+
+    function limitActionSelect(value) {
+        var select = el('select', {}, [
+            el('option', { value: 'Refuse', text: 'Refuse the new viewer' }),
+            el('option', { value: 'StopOldest', text: 'Stop the oldest viewer' })
+        ]);
+        select.value = value;
+        return select;
+    }
+
+    function streamsText(n) {
+        return 'max ' + n + (n === 1 ? ' stream' : ' streams');
+    }
+
     // ---- API ----
 
     function errorText(e) {
@@ -444,7 +474,10 @@
         peers.forEach(function (p, index) {
             var name = el('input', { type: 'text', value: p.name, maxlength: '100' });
             var url = el('input', { type: 'text', value: p.baseUrl });
+            var account = isAccount(p);
             var token = el('input', { type: 'password', placeholder: 'unchanged', autocomplete: 'new-password' });
+            var streams = account ? el('input', { type: 'number', value: String(p.maxStreams), min: '1', max: '20' }) : null;
+            var action = account ? limitActionSelect(limitActionName(p)) : null;
             var enabled = el('input', { type: 'checkbox', checked: p.enabled });
             var result = el('span', { class: 'js-muted' });
             var st = peerStatusText(p);
@@ -457,7 +490,10 @@
             };
             var test = btn('Test', '', function () {
                 result.textContent = 'Testing...';
-                busy(test, api('POST', 'peers/test', { url: url.value, token: token.value, peerId: p.id })).then(function (r) {
+                var body = account
+                    ? { url: url.value, peerId: p.id, kind: 'Account', username: p.username, password: token.value }
+                    : { url: url.value, token: token.value, peerId: p.id };
+                busy(test, api('POST', 'peers/test', body)).then(function (r) {
                     result.className = r.ok ? '' : 'js-muted';
                     result.textContent = testResultText(r);
                 }).catch(function (e) {
@@ -465,16 +501,38 @@
                     fail(e);
                 });
             });
-            var save = btn('Save', 'primary', function () {
-                busy(save, api('PUT', 'peers/' + encodeURIComponent(p.id), {
-                    name: name.value,
-                    baseUrl: url.value,
-                    token: token.value,
-                    enabled: enabled.checked
-                })).then(function () {
-                    showMessage('ok', 'Saved "' + name.value.trim() + '". Run a sync to apply the change.');
+            var submit = function (button, okText) {
+                var body = { name: name.value, baseUrl: url.value, enabled: enabled.checked };
+                if (account) {
+                    var count = accountStreamsFrom(streams.value);
+                    if (isNaN(count)) {
+                        return showMessage('error', ACCOUNT_STREAMS_ERROR);
+                    }
+                    body.kind = 'Account';
+                    body.username = p.username;
+                    body.password = token.value;
+                    body.maxStreams = count;
+                    body.limitAction = action.value;
+                } else {
+                    body.token = token.value;
+                }
+                if (account) {
+                    token.value = '';
+                }
+                busy(button, api('PUT', 'peers/' + encodeURIComponent(p.id), body)).then(function () {
+                    showMessage('ok', okText);
                     return refresh();
                 }).catch(fail);
+            };
+            var save = btn('Save', 'primary', function () {
+                submit(save, 'Saved "' + name.value.trim() + '". Run a sync to apply the change.');
+            });
+            var signIn = btn('Sign in again', 'primary', function () {
+                if (!token.value) {
+                    token.focus();
+                    return showMessage('error', 'Type the password for "' + p.username + '" in the Password box first.');
+                }
+                submit(signIn, 'Signed in "' + p.name + '". Run a sync to fetch its titles.');
             });
             var remove = btn('Remove', 'danger', function () {
                 if (!window.confirm('Remove "' + p.name + '"? Its placeholders are deleted by the sync that starts now.')) {
@@ -499,27 +557,54 @@
                 el('div', { class: 'js-row' }, [
                     field('Name', name, 'grow'),
                     field('Server address', url, 'grow'),
-                    field('New token (optional)', token, 'grow'),
+                    account ? null : field('New token (optional)', token, 'grow'),
+                    account ? field(p.signInFailed ? 'Password' : 'New password (optional)', token, 'grow') : null,
+                    account ? field('Max streams at a time', streams) : null,
+                    account ? field('When the limit is reached', action) : null,
                     el('label', { class: 'js-check', title: 'Turning a peer off removes its placeholders at the next sync.' }, [enabled, 'Enabled'])
                 ]),
+                account ? el('div', { class: 'js-muted', text: 'Jellyfin account \u00B7 ' + p.username + ' \u00B7 ' + streamsText(p.maxStreams) }) : null,
                 el('div', { class: 'js-muted', text: 'Disabling a peer removes its placeholders at the next sync (they come back when you enable it again).' }),
                 el('div', { class: st.cls, text: st.text }),
-                el('p', {}, [up, ' ', down, ' ', test, ' ', save, ' ', remove, ' ', result])
+                p.signInFailed ? el('div', { class: 'js-msg error', text: 'Sign-in failed. Type the current password in the Password box and press "Sign in again".' }) : null,
+                el('p', {}, [up, ' ', down, ' ', test, ' ', save, ' ', p.signInFailed ? signIn : null, p.signInFailed ? ' ' : null, remove, ' ', result])
             ]));
         });
     }
 
+    function newPeerIsAccount() {
+        return $('js-peer-kind').value === 'Account';
+    }
+
+    function showPeerKind() {
+        var account = newPeerIsAccount();
+        $('js-peer-token-field').classList.toggle('js-hidden', account);
+        $('js-peer-account-fields').classList.toggle('js-hidden', !account);
+        $('js-peer-account-note').classList.toggle('js-hidden', !account);
+    }
+
     function addPeer() {
         var button = $('js-peer-add');
-        busy(button, api('POST', 'peers', {
-            name: $('js-peer-name').value,
-            baseUrl: $('js-peer-url').value,
-            token: $('js-peer-token').value,
-            enabled: true
-        })).then(function () {
+        var body = { name: $('js-peer-name').value, baseUrl: $('js-peer-url').value, enabled: true };
+        if (newPeerIsAccount()) {
+            var count = accountStreamsFrom($('js-peer-max-streams').value);
+            if (isNaN(count)) {
+                return showMessage('error', ACCOUNT_STREAMS_ERROR);
+            }
+            body.kind = 'Account';
+            body.username = $('js-peer-username').value;
+            body.password = $('js-peer-password').value;
+            body.maxStreams = count;
+            body.limitAction = $('js-peer-limit-action').value;
+        } else {
+            body.token = $('js-peer-token').value;
+        }
+        $('js-peer-password').value = '';
+        busy(button, api('POST', 'peers', body)).then(function () {
+            $('js-peer-token').value = '';
             $('js-peer-name').value = '';
             $('js-peer-url').value = '';
-            $('js-peer-token').value = '';
+            $('js-peer-username').value = '';
             $('js-peer-test-result').textContent = '';
             showMessage('ok', 'Peer added. Press "Sync now" to fetch its titles.');
             return refresh();
@@ -529,10 +614,10 @@
     function testNewPeer() {
         var out = $('js-peer-test-result');
         out.textContent = 'Testing...';
-        busy($('js-peer-test'), api('POST', 'peers/test', {
-            url: $('js-peer-url').value,
-            token: $('js-peer-token').value
-        })).then(function (r) {
+        var body = newPeerIsAccount()
+            ? { url: $('js-peer-url').value, kind: 'Account', username: $('js-peer-username').value, password: $('js-peer-password').value }
+            : { url: $('js-peer-url').value, token: $('js-peer-token').value };
+        busy($('js-peer-test'), api('POST', 'peers/test', body)).then(function (r) {
             out.textContent = testResultText(r);
         }).catch(function (e) {
             out.textContent = '';
@@ -649,6 +734,7 @@
     $('js-create-share').addEventListener('click', createShare);
     $('js-copy-token').addEventListener('click', copyToken);
     $('js-dismiss-token').addEventListener('click', dismissToken);
+    $('js-peer-kind').addEventListener('change', showPeerKind);
     $('js-peer-add').addEventListener('click', addPeer);
     $('js-peer-test').addEventListener('click', testNewPeer);
     $('js-sync').addEventListener('click', syncNow);

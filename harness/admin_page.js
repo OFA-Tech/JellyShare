@@ -1,5 +1,6 @@
 // Task 11 harness check: drives the JellyShare admin page in headless Chromium on alice and bob.
 //   node harness/admin_page.js explore     # open the page on alice, print console output, screenshot
+//   node harness/admin_page.js account     # alice adds bob as an account peer (throwaway bob user), edits, removes
 //   node harness/admin_page.js full        # create share on alice, add it on bob, test, sync, error cases
 // Needs playwright-core (the global @playwright/cli ships one); override with PLAYWRIGHT_CORE=<path>.
 // Tokens are written to harness/.secrets (gitignored) and never printed. Screenshots go to harness/screens/.
@@ -65,6 +66,8 @@ async function main() {
       await recheck(browser);
     } else if (mode === 'cleanup') {
       await cleanup(browser);
+    } else if (mode === 'account') {
+      await accountPeer(browser);
     }
   } finally {
     await browser.close();
@@ -310,6 +313,98 @@ async function recheck(browser) {
   await a.click('#js-create-share');
   log('alice 2001 Mbps ->', await message(a));
   log('alice invitations after the two refusals:', await a.locator('#js-shares .js-card').count());
+}
+
+function check(label, ok) {
+  log(`${ok ? 'PASS' : 'FAIL'}: ${label}`);
+  if (!ok) process.exitCode = 1;
+}
+
+// Account peer on the admin page: alice adds bob through a throwaway bob user (created here through bob's admin API
+// and deleted at the end; its password is random and never printed), looks at the list, edits it, removes it.
+//   node harness/admin_page.js account
+async function accountPeer(browser) {
+  const crypto = require('crypto');
+  const bobAdmin = await adminToken('bob');
+  const user = 'jsacct-' + crypto.randomBytes(4).toString('hex');
+  const pw = crypto.randomBytes(12).toString('base64url');
+  const created = await rest('bob', 'POST', '/Users/New', { Name: user, Password: pw }, bobAdmin);
+  const peerName = 'bob account (admin page test)';
+  const a = await (await browser.newContext({ viewport: { width: 1280, height: 1300 } })).newPage();
+  a.on('pageerror', e => log('alice pageerror', e.message.slice(0, 300)));
+  a.on('dialog', d => d.accept());
+  const bodies = [];
+  a.on('request', r => { if (/\/admin\/peers/.test(r.url()) && r.postData()) bodies.push(r.method() + ' ' + r.postData()); });
+  const cardFor = async () => a.locator('#js-peers .js-card').nth(await cardIndex(a, '#js-peers', peerName));
+  try {
+    await login(a, SERVERS.alice.url);
+    await openAdmin(a, SERVERS.alice.url, 'receive');
+    check('add form offers an account kind', await a.locator('#js-peer-kind option[value="Account"]').count() === 1);
+    check('account fields hidden for the default kind', !(await a.locator('#js-peer-username').isVisible()));
+    await a.selectOption('#js-peer-kind', 'Account');
+    check('token field hidden for an account', !(await a.locator('#js-peer-token').isVisible()));
+    await a.fill('#js-peer-name', peerName);
+    await a.fill('#js-peer-url', SERVERS.bob.internal);
+    await a.fill('#js-peer-username', user);
+    await a.fill('#js-peer-password', pw);
+    check('password input is type=password', await a.getAttribute('#js-peer-password', 'type') === 'password');
+    await a.click('#js-peer-test');
+    await a.waitForFunction(() => { const t = document.querySelector('#js-peer-test-result').textContent; return /\S/.test(t) && !/Testing/.test(t); }, null, { timeout: 40000 });
+    const tested = await a.locator('#js-peer-test-result').innerText();
+    check('test connection works for an account: ' + redact(tested).slice(0, 80), /^OK/.test(tested));
+    await a.click('#js-peer-add');
+    await a.waitForFunction(() => /Peer added/.test(document.querySelector('#js-message').textContent), null, { timeout: 40000 });
+    check('password cleared after the add', (await a.inputValue('#js-peer-password')) === '');
+    await a.waitForFunction(n => Array.from(document.querySelectorAll('#js-peers .js-card input[type=text]')).some(i => i.value === n), peerName, { timeout: 20000 });
+    const c = await cardFor();
+    const text = await c.innerText();
+    check('list shows the kind "Jellyfin account"', text.includes('Jellyfin account'));
+    check('list shows the user name', text.includes(user));
+    check('list shows "max 1 stream"', /max 1 stream\b/.test(text));
+    check('no sign-in failed badge', !/Sign-in failed/.test(text));
+    check('the password is not in the page', !(await a.content()).includes(pw));
+    await shot(a, 'account-peer');
+
+    await c.locator('input[type=number]').fill('2');
+    await c.locator('select').selectOption('StopOldest');
+    await c.locator('button:has-text("Save")').click();
+    await a.waitForFunction(() => /^Saved/.test(document.querySelector('#js-message').textContent), null, { timeout: 40000 });
+    await a.waitForFunction(() => /max 2 streams/.test(document.querySelector('#js-peers').innerText), null, { timeout: 20000 });
+    const edited = await (await cardFor()).innerText();
+    check('edit shows "max 2 streams"', /max 2 streams/.test(edited));
+    check('edit keeps the limit action', (await (await cardFor()).locator('select').inputValue()) === 'StopOldest');
+    check('save request carried the password only when typed', bodies.filter(b => b.startsWith('PUT')).every(b => !b.includes(pw)));
+
+    // wrong password on bob -> the next sync marks the peer, the page offers "Sign in again"
+    await rest('bob', 'POST', `/Users/${created.Id}/Password`, { NewPw: pw + 'x', ResetPassword: false }, bobAdmin);
+    await a.click('#js-sync');
+    await a.waitForFunction(() => !document.querySelector('#js-sync').disabled, null, { timeout: 180000 });
+    await reopen(a, SERVERS.alice.url, 'receive');
+    const failed = await (await cardFor()).innerText();
+    check('a changed password shows "Sign-in failed"', /Sign-in failed/.test(failed));
+    check('and a "Sign in again" button', /Sign in again/.test(failed));
+    await shot(a, 'account-peer-failed');
+    await (await cardFor()).locator('input[type=password]').fill(pw + 'x');
+    await (await cardFor()).locator('button:has-text("Sign in again")').click();
+    await a.waitForFunction(() => /Signed in/.test(document.querySelector('#js-message').textContent), null, { timeout: 40000 });
+    // The badge reflects the last sync's error, so it goes away with the next successful sync.
+    await a.click('#js-sync');
+    await a.waitForTimeout(1000);
+    await a.waitForFunction(() => !document.querySelector('#js-sync').disabled, null, { timeout: 180000 });
+    await reopen(a, SERVERS.alice.url, 'receive');
+    check('after signing in again and a sync the badge is gone', !/Sign-in failed/.test(await (await cardFor()).innerText()));
+  } finally {
+    try {
+      await reopen(a, SERVERS.alice.url, 'receive');
+      for (let i = 0; i < 3; i++) {
+        const idx = await cardIndex(a, '#js-peers', peerName);
+        if (idx < 0) break;
+        await a.locator('#js-peers .js-card').nth(idx).locator('button:has-text("Remove")').click();
+        await a.waitForTimeout(2500);
+      }
+    } catch (e) { log('cleanup of the alice peer failed:', e.message); }
+    await rest('bob', 'DELETE', `/Users/${created.Id}`, undefined, bobAdmin).catch(e => log('could not delete the bob user:', e.message));
+  }
 }
 
 // Revokes the test invitation on alice and removes the test peer on bob through the page; syncs bob afterwards.
