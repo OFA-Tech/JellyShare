@@ -1,6 +1,7 @@
 using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
+using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.Domain.Rules;
 
@@ -175,7 +176,7 @@ public static class AdminRules
             peer.Username,
             peer.MaxStreams,
             peer.LimitAction,
-            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith("sign-in failed", StringComparison.Ordinal) == true);
+            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true);
     }
 
     /// <summary>Orders peers by priority, then by their position in the settings.</summary>

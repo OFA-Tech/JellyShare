@@ -114,7 +114,7 @@ public class RelayController : ControllerBase
             HttpResponseMessage response;
             try
             {
-                response = await _client.OpenStreamAsync(source.Peer, source.Item.Id, range, cts.Token).ConfigureAwait(false);
+                response = await _client.OpenStreamAsync(source.Peer, source.Item, range, cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (aborted.IsCancellationRequested)
             {

@@ -14,6 +14,13 @@ public static class ProtocolInfo
     public const string TokenHeader = "X-JellyShare-Token";
 }
 
+/// <summary>Constants of account peers (a friend's plain Jellyfin server reached with a user account).</summary>
+public static class AccountPeerInfo
+{
+    /// <summary>Start of every account sign-in error; the admin page keys on it.</summary>
+    public const string SignInFailedPrefix = "sign-in failed";
+}
+
 /// <summary>
 /// Response of the anonymous <c>GET /JellyShare/v1/ping</c> endpoint.
 /// </summary>

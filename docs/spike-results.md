@@ -491,3 +491,29 @@ From the final whole-branch review (fix wave):
     HttpClient timeout is 150 s). A container bitrate of 0 counts as unknown, so a capped share transcodes it.
 27. **Relay source order.** Peers whose last sync failed are tried last instead of being skipped; disabled or removed
     peers stay excluded. A `RelayBaseOverride` must be a loopback URL, otherwise the sync stops with an error.
+
+## Account peers (2026-11-02)
+
+Checked against harness bob (Jellyfin 12.4.0, `http://127.0.0.1:8102/jellyfin`) with a scratch Python script and a
+scratch console app driving `AccountPeerClient` (both outside the repo; no tokens or passwords recorded).
+
+- **Auth header.** 12.4 accepts `Authorization: MediaBrowser Client="JellyShare", Device="JellyShare",
+  DeviceId="jellyshare-<peer id N>", Version="<assembly version>"` on `POST /Users/AuthenticateByName` and the same
+  header plus `, Token="<access token>"` on every later request. No `X-Emby-*` header is needed.
+- **Sign in.** Body `{"Username":…,"Pw":…}` → 200 with `AccessToken` (32 hex chars), `User.Id`, `ServerId`,
+  `SessionInfo`. A wrong password answers 401. `GET /System/Info/Public` gives `ServerName` (`bob`).
+- **Policy.** `GET /Users/Me` → `Policy.RemoteClientBitrateLimit` (0 on bob).
+- **Catalog.** `GET /Items?userId=…&Recursive=true&IncludeItemTypes=Movie,Episode&Fields=ProviderIds,Overview,MediaSources,DateCreated&EnableImages=true&StartIndex=0&Limit=…`
+  works as in the brief (`TotalRecordCount` 6 on bob). `userId` is optional on 12.4 (same result without it); the
+  client still sends it. Field names match the brief: `ProductionYear`, `ParentIndexNumber`, `IndexNumber`,
+  `LocationType` (`FileSystem` for real files), `ImageTags`, `BackdropImageTags`, `DateCreated`, and per media source
+  `Protocol` (`File`), `Container`, `Bitrate`, `MediaStreams[]` (`Type`, `Codec`, `Language`, `Width`, `Height`,
+  `Channels`, `DisplayTitle`). Episodes carry `SeriesId`; the series query
+  (`IncludeItemTypes=Series&Fields=ProviderIds`) returns `ProviderIds.Tvdb` (`153021`) for it, while the episodes' own
+  `ProviderIds` are empty. All 6 items mapped; a refetch with the returned ETag was `NotModified`.
+- **Stream.** `GET /Videos/{id}/stream?static=true` with `Range: bytes=0-99` → 206 `bytes 0-99/19691603`. The transcode
+  URL (`static=false&container=mkv&videoCodec=h264&audioCodec=aac&videoBitRate=1808000&audioBitRate=192000&deviceId=…`)
+  → 200 `video/x-matroska`.
+- **Image.** `GET /Items/{id}/Images/Primary` → 404 on bob (no artwork in the harness); the client returns `null`.
+- **Sign out.** `POST /Sessions/Logout` → 204. Afterwards every request with that token, including the otherwise
+  anonymous `/System/Info/Public`, answers 401, which the client reports as `sign-in failed: HTTP 401`.

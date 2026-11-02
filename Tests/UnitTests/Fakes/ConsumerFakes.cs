@@ -123,8 +123,13 @@ internal sealed class FakePeerClient : IPeerClient
         }
     }
 
-    public Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, string itemId, string? range, CancellationToken ct)
-        => Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+    public List<Guid> StreamRequests { get; } = new();
+
+    public Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, CatalogItem item, string? range, CancellationToken ct)
+    {
+        StreamRequests.Add(peer.Id);
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
+    }
 
     public static PeerFetchResult Ok(params CatalogItem[] items)
         => new(true, false, new CatalogResponse(ProtocolInfo.Version, "peer", "etag-" + items.Length, items), null);

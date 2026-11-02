@@ -1,5 +1,6 @@
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
+using JellyShare.Domain.Models.Protocol;
 
 namespace JellyShare.Domain.Interfaces.Peers;
 
@@ -29,9 +30,9 @@ public interface IPeerClient
 
     /// <summary>Opens the peer's stream of an item. The caller disposes the response.</summary>
     /// <param name="peer">The peer.</param>
-    /// <param name="itemId">The peer item id.</param>
+    /// <param name="item">The peer's catalog item.</param>
     /// <param name="range">The <c>Range</c> header to forward, if any.</param>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The response, read up to the headers only.</returns>
-    Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, string itemId, string? range, CancellationToken ct);
+    Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, CatalogItem item, string? range, CancellationToken ct);
 }

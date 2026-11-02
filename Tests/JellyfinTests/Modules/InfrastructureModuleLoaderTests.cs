@@ -75,7 +75,7 @@ public sealed class InfrastructureModuleLoaderTests
     }
 
     [Theory]
-    [InlineData(typeof(PeersModule), new[] { typeof(IPeerClient) })]
+    [InlineData(typeof(PeersModule), new[] { typeof(IPeerClient), typeof(IAccountSignIn) })]
     [InlineData(typeof(FilesModule), new[] { typeof(IPeerStateStore), typeof(IMergedIndexStore), typeof(ISyncReportStore), typeof(IPlaceholderLedgerStore), typeof(IPendingScanStore), typeof(IPlaceholderFiles), typeof(IConsumerIndex) })]
     [InlineData(typeof(MediaModule), new[] { typeof(IFfmpegRunner) })]
     public void Module_RegistersItsPortsAsSingletons(Type moduleType, Type[] ports)
