@@ -75,13 +75,20 @@ jobs:
             gh release create "$TAG" "$ZIP" --title "JellyShare $VERSION" --notes-file changelog.txt --verify-tag
           fi
 
-      - name: Update manifest.json on main
+      - name: Update manifest.json on the manifest branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout -B main origin/main
-          python3 build/update_manifest.py \
+          cp build/update_manifest.py "$RUNNER_TEMP/update_manifest.py"
+          if git fetch origin manifest; then
+            git checkout -B manifest origin/manifest
+          else
+            git show "$GITHUB_SHA:manifest.json" > "$RUNNER_TEMP/manifest.json"
+            git checkout --orphan manifest
+            git rm -rfq .
+            cp "$RUNNER_TEMP/manifest.json" manifest.json
+          fi
+          python3 "$RUNNER_TEMP/update_manifest.py" \
             --manifest manifest.json \
             --version "$VERSION" \
             --zip "dist/jellyshare_${VERSION}.zip" \
@@ -92,5 +99,5 @@ jobs:
             echo "manifest.json already up to date"
           else
             git commit -m "chore: manifest for $TAG"
-            git push origin main
+            git push origin manifest
           fi
