@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
@@ -21,6 +22,7 @@ namespace JellyShare.Data.Peers.Clients;
 public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
 {
     private const int PageSize = 500;
+    private const int MaxPages = 1000;
     private const int AudioBitRate = 192000;
     private const int MinVideoBitRate = 64000;
     private const int MaxServerNameLength = 100;
@@ -41,7 +43,8 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     private readonly TimeProvider _clock;
     private readonly TimeSpan _timeout;
     private readonly TimeSpan _catalogTimeout;
-    private readonly ConcurrentDictionary<Guid, (int Limit, DateTimeOffset FetchedAt)> _policies = new();
+    // Keyed by peer, valid only for the token it was read with: a sign-in as another user must not reuse the limit.
+    private readonly ConcurrentDictionary<Guid, (string Token, int Limit, DateTimeOffset FetchedAt)> _policies = new();
 
     /// <summary>Initializes a new instance of the <see cref="AccountPeerClient"/> class.</summary>
     /// <param name="client">Returns the HTTP client to use (the redirect-free <see cref="PeerClient.HttpClientName"/> client).</param>
@@ -57,9 +60,9 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     }
 
     /// <inheritdoc />
-    /// <remarks>Not used: <see cref="PeerClientRouter"/> sends pings to the token client.</remarks>
+    /// <remarks>Plain Jellyfin servers have no JellyShare ping; <see cref="PeerClientRouter"/> sends pings to the token client.</remarks>
     public Task<PeerPingResult> PingAsync(string baseUrl, CancellationToken ct)
-        => throw new NotSupportedException("Pings go to the token peer client.");
+        => Task.FromResult(new PeerPingResult(false, null, null, PingFailure.NotJellyShare, "account peers are not pinged"));
 
     /// <inheritdoc />
     public async Task<AccountSignInResult> SignInAsync(string baseUrl, string username, string password, Guid peerId, CancellationToken ct)
@@ -252,7 +255,9 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     private async Task<int> GetBitrateLimitAsync(RemotePeer peer, CancellationToken ct)
     {
         var now = _clock.GetUtcNow();
-        if (_policies.TryGetValue(peer.Id, out var cached) && now - cached.FetchedAt < _policyLifetime)
+        if (_policies.TryGetValue(peer.Id, out var cached)
+            && string.Equals(cached.Token, peer.Token, StringComparison.Ordinal)
+            && now - cached.FetchedAt < _policyLifetime)
         {
             return cached.Limit;
         }
@@ -273,7 +278,7 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
             }
 
             var limit = Math.Max(me.Policy?.RemoteClientBitrateLimit ?? 0, 0);
-            _policies[peer.Id] = (limit, now);
+            _policies[peer.Id] = (peer.Token, limit, now);
             return limit;
         }
         catch (Exception ex) when (ex is JsonException or HttpRequestException or IOException || (ex is OperationCanceledException && !ct.IsCancellationRequested))
@@ -300,8 +305,8 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     private async Task<string?> PageAsync(RemotePeer peer, string types, string fields, Action<JfItem> add, CancellationToken ct)
     {
         var user = string.IsNullOrEmpty(peer.AccountUserId) ? string.Empty : "userId=" + Uri.EscapeDataString(peer.AccountUserId) + "&";
-        var total = 1;
-        for (var start = 0; start < total; start += PageSize)
+        var start = 0;
+        for (var pages = 0; pages < MaxPages; pages++)
         {
             var uri = PeerUri.Build(
                 peer.BaseUrl,
@@ -318,11 +323,15 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
                 add(item);
             }
 
-            // An empty page ends the loop even if the count says otherwise.
-            total = items.Count == 0 ? 0 : page.TotalRecordCount;
+            // The server may answer fewer items than asked for; an empty page ends paging whatever the count says.
+            start += items.Count;
+            if (items.Count == 0 || start >= page.TotalRecordCount)
+            {
+                return null;
+            }
         }
 
-        return null;
+        return "too many pages";
     }
 
     private async Task<(T? Value, string? Error)> GetJsonAsync<T>(Uri uri, Guid peerId, string? token, TimeSpan timeout, CancellationToken ct)
@@ -333,10 +342,15 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
         using var request = CreateRequest(HttpMethod.Get, uri, peerId, token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         using var response = await _client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            return (null, AccountPeerInfo.SignInFailedPrefix + ": HTTP 401");
+        }
+
         var error = StatusError(response.StatusCode);
         if (error is not null)
         {
-            return (null, error == "HTTP 401" ? AccountPeerInfo.SignInFailedPrefix + ": " + error : error);
+            return (null, error);
         }
 
         var value = await response.Content.ReadFromJsonAsync<T>(_jsonOptions, cts.Token).ConfigureAwait(false);

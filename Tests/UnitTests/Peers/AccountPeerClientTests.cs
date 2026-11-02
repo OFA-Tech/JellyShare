@@ -258,20 +258,73 @@ public sealed class AccountPeerClientTests
         result.Catalog!.Items.Select(i => i.Id).ShouldBe(["ok"]);
     }
 
+    private static int StartIndex(HttpRequestMessage r)
+        => int.Parse(r.RequestUri!.Query.Split('&').Single(p => p.StartsWith("StartIndex=", StringComparison.Ordinal))["StartIndex=".Length..], System.Globalization.CultureInfo.InvariantCulture);
+
+    // A server that answers at most perPage items from StartIndex on, out of total.
+    private static HttpResponseMessage Paged(HttpRequestMessage r, int total, int perPage)
+    {
+        if (!r.RequestUri!.AbsolutePath.EndsWith("/Items", StringComparison.Ordinal) || r.RequestUri.Query.Contains("=Series", StringComparison.Ordinal))
+        {
+            return Server(r);
+        }
+
+        var start = StartIndex(r);
+        var items = Enumerable.Range(start, Math.Max(0, Math.Min(perPage, total - start)))
+            .Select(i => "{\"Id\":\"x" + i + "\",\"Type\":\"Movie\",\"Name\":\"x\",\"MediaSources\":[{\"Protocol\":\"File\"}]}");
+        return Json("{\"Items\":[" + string.Join(",", items) + "],\"TotalRecordCount\":" + total + "}");
+    }
+
     [Fact]
     public async Task Account_PagesItems()
     {
-        var (client, handler) = Create(new FakeHandler(r => Server(r, """{"Items":[],"TotalRecordCount":1200}""".Replace(
-            "[]",
-            "[{\"Id\":\"x\",\"Type\":\"Movie\",\"Name\":\"x\",\"MediaSources\":[{\"Protocol\":\"File\"}]}]",
-            StringComparison.Ordinal))));
+        var (client, handler) = Create(new FakeHandler(r => Paged(r, 1200, 500)));
 
         var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
 
         result.Ok.ShouldBeTrue(result.Error);
-        ItemRequests(handler, "Movie")
-            .Select(r => r.RequestUri!.Query.Split('&').Single(p => p.StartsWith("StartIndex=", StringComparison.Ordinal)))
-            .ShouldBe(["StartIndex=0", "StartIndex=500", "StartIndex=1000"]);
+        result.Catalog!.Items.Count.ShouldBe(1200);
+        ItemRequests(handler, "Movie").Select(StartIndex).ShouldBe([0, 500, 1000]);
+    }
+
+    [Fact]
+    public async Task Account_ShortPages_AdvanceByItemsReceived()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Paged(r, 700, 300)));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        result.Catalog!.Items.Select(i => i.Id).ShouldBe(Enumerable.Range(0, 700).Select(i => "x" + i));
+        ItemRequests(handler, "Movie").Select(StartIndex).ShouldBe([0, 300, 600]);
+    }
+
+    [Fact]
+    public async Task Account_EmptyPage_EndsPaging()
+    {
+        // Claims 1200 items but only ever has 300.
+        var (client, handler) = Create(new FakeHandler(r => Paged(r, 300, 500) is var response && r.RequestUri!.Query.Contains("=Movie", StringComparison.Ordinal)
+            ? Json((response.Content.ReadAsStringAsync().GetAwaiter().GetResult()).Replace("\"TotalRecordCount\":300", "\"TotalRecordCount\":1200", StringComparison.Ordinal))
+            : response));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        result.Catalog!.Items.Count.ShouldBe(300);
+        ItemRequests(handler, "Movie").Select(StartIndex).ShouldBe([0, 300]);
+    }
+
+    [Fact]
+    public async Task Account_EndlessPaging_IsErrorAfterPageCap()
+    {
+        // Every page holds one item and the count never ends.
+        var (client, handler) = Create(new FakeHandler(r => Paged(r, int.MaxValue, 1)));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("too many pages");
+        ItemRequests(handler, "Movie").Count.ShouldBe(1000);
     }
 
     [Fact]
@@ -285,6 +338,23 @@ public sealed class AccountPeerClientTests
         second.NotModified.ShouldBeTrue();
         second.Catalog.ShouldBeNull();
         second.Error.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Account_ChangedContent_HasNewEtag()
+    {
+        var changed = MoviesAndEpisodes.Replace("\"Big Buck Bunny\"", "\"Big Buck Bunny (Director's Cut)\"", StringComparison.Ordinal);
+        var body = MoviesAndEpisodes;
+        var (client, _) = Create(new FakeHandler(r => Server(r, body)));
+
+        var first = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+        body = changed;
+        var second = await client.FetchCatalogAsync(Peer(), first.Catalog!.Etag, CancellationToken.None);
+
+        second.Ok.ShouldBeTrue(second.Error);
+        second.NotModified.ShouldBeFalse();
+        second.Catalog!.Etag.ShouldNotBe(first.Catalog.Etag);
+        second.Catalog.Items[0].Name.ShouldBe("Big Buck Bunny (Director's Cut)");
     }
 
     [Fact]
@@ -386,6 +456,36 @@ public sealed class AccountPeerClientTests
         clock.Advance(TimeSpan.FromMinutes(2));
         (await client.OpenStreamAsync(Peer(), TestItem(8000000), null, CancellationToken.None)).Dispose();
         PolicyCalls().ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Account_Policy_NewToken_DoesNotReuseOldLimit()
+    {
+        // The first user has a 2 Mbit/s limit, the user signed in afterwards has none.
+        var (client, handler) = Create(new FakeHandler(r => Server(
+            r,
+            bitrateLimit: r.Headers.GetValues("Authorization").Single().Contains("Token=\"" + Token + "\"", StringComparison.Ordinal) ? 2000000 : 0)));
+        var peer = Peer();
+
+        (await client.OpenStreamAsync(peer, TestItem(8000000), null, CancellationToken.None)).Dispose();
+        handler.Requests[^1].RequestUri!.Query.ShouldStartWith("?static=false", Case.Sensitive);
+
+        peer.Token = "other-user-token";
+        (await client.OpenStreamAsync(peer, TestItem(8000000), null, CancellationToken.None)).Dispose();
+        handler.Requests[^1].RequestUri!.Query.ShouldBe("?static=true");
+    }
+
+    [Fact]
+    public async Task Account_Ping_IsFailedResultWithoutRequest()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Server(r)));
+
+        var result = await client.PingAsync("https://h/jellyfin", CancellationToken.None);
+
+        result.Ok.ShouldBeFalse();
+        result.Failure.ShouldBe(PingFailure.NotJellyShare);
+        result.Detail.ShouldNotBeNullOrWhiteSpace();
+        handler.Requests.ShouldBeEmpty();
     }
 
     [Fact]
