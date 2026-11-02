@@ -66,40 +66,30 @@ jobs:
           fi
           cat changelog.txt
 
-      - name: GitHub Release
+      - name: manifest.json with every release so far (from the latest release, or the seed on main)
         run: |
-          ZIP="dist/jellyshare_${VERSION}.zip"
+          # A failed download fails the job: falling back to the seed would drop the older versions from the catalog.
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$ZIP" --clobber
+            gh release download "$TAG" --pattern manifest.json --dir dist
+          elif [ -n "$(gh release list --exclude-drafts --exclude-pre-releases --limit 1 --json tagName --jq '.[].tagName')" ]; then
+            gh release download --pattern manifest.json --dir dist
           else
-            gh release create "$TAG" "$ZIP" --title "JellyShare $VERSION" --notes-file changelog.txt --verify-tag
+            cp manifest.json dist/manifest.json
           fi
-
-      - name: Update manifest.json and the catalog image on the manifest branch
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cp build/update_manifest.py "$RUNNER_TEMP/update_manifest.py"
-          if git fetch origin manifest; then
-            git checkout -B manifest origin/manifest
-          else
-            git show "$GITHUB_SHA:manifest.json" > "$RUNNER_TEMP/manifest.json"
-            git checkout --orphan manifest
-            git rm -rfq .
-            cp "$RUNNER_TEMP/manifest.json" manifest.json
-          fi
-          git show "$GITHUB_SHA:assets/jellyshare.png" > jellyshare.png
-          python3 "$RUNNER_TEMP/update_manifest.py" \
-            --manifest manifest.json \
+          python3 build/update_manifest.py \
+            --manifest dist/manifest.json \
             --version "$VERSION" \
             --zip "dist/jellyshare_${VERSION}.zip" \
             --source-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/jellyshare_${VERSION}.zip" \
-            --image-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/manifest/jellyshare.png" \
+            --image-url "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/jellyshare.png" \
             --changelog-file changelog.txt
-          git add manifest.json jellyshare.png
-          if git diff --cached --quiet; then
-            echo "manifest.json already up to date"
+          cp assets/jellyshare.png dist/jellyshare.png
+
+      - name: GitHub Release
+        run: |
+          FILES=("dist/jellyshare_${VERSION}.zip" dist/manifest.json dist/jellyshare.png)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${FILES[@]}" --clobber
           else
-            git commit -m "chore: manifest for $TAG"
-            git push origin manifest
+            gh release create "$TAG" "${FILES[@]}" --title "JellyShare $VERSION" --notes-file changelog.txt --verify-tag
           fi

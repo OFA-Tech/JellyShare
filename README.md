@@ -24,7 +24,7 @@ JellyShare needs Jellyfin 12 (target ABI 12.0.0.0). Install it on every server t
 2. Name: `JellyShare`. URL:
 
    ```text
-   https://raw.githubusercontent.com/OFA-Tech/JellyShare/manifest/manifest.json
+   https://github.com/OFA-Tech/JellyShare/releases/latest/download/manifest.json
    ```
 
 3. **Dashboard → Plugins → Catalog → General → JellyShare → Install** (pick the newest version).
@@ -375,19 +375,19 @@ The workflow (the tagged commit must be on `main`):
 3. zips only the `JellyShare.*.dll` artifacts listed in `build.yaml` (`JellyShare.Jellyfin`, `.Application`, `.Domain`,
    `.Data.Peers`, `.Data.Files`, `.Media`; Jellyfin already ships the rest, and
    writes `meta.json` itself on install) as `jellyshare_<version>.zip`;
-4. creates the GitHub Release `v<version>` with the zip (a re-run replaces the asset);
-5. adds the version to `manifest.json` on the `manifest` branch with `build/update_manifest.py`: version, changelog
-   (commit subjects since the previous tag), `targetAbi` `12.0.0.0`, `sourceUrl` of the release asset, lowercase MD5
-   `checksum` of the zip (what Jellyfin verifies) and a UTC `timestamp`. Re-running for the same version replaces its
-   entry.
+4. takes `manifest.json` from the latest release (the seed on `main` for the very first release) and adds the version
+   with `build/update_manifest.py`: version, changelog (commit subjects since the previous tag), `targetAbi`
+   `12.0.0.0`, `sourceUrl` of the release asset, lowercase MD5 `checksum` of the zip (what Jellyfin verifies) and a UTC
+   `timestamp`. Re-running for the same version replaces its entry;
+5. creates the GitHub Release `v<version>` with the zip, `manifest.json` and the catalog image `jellyshare.png`
+   (a re-run replaces the assets).
 
-The published plugin repository lives on the `manifest` branch, which holds only `manifest.json` and the catalog
-image `jellyshare.png` (copied from `assets/jellyshare.png` of the tagged commit; `assets/jellyshare.svg` is its source).
-Jellyfin downloads the image into the plugin folder once and keeps it while a file of that name exists, so a changed
-icon needs a new file name to reach servers that already have it. `main` is protected
-by a ruleset (changes only through reviewed pull requests), so the workflow can't push there; the `manifest` branch
-must stay outside that ruleset. The `manifest.json` on `main` is only the seed (empty `versions` list) the workflow
-uses if the `manifest` branch doesn't exist yet.
+The plugin repository URL `https://github.com/OFA-Tech/JellyShare/releases/latest/download/manifest.json` always
+redirects to the newest release's manifest, which lists every version. Nothing is pushed to a branch, so the ruleset
+on `main` (changes only through reviewed pull requests) stays untouched. Drafts and pre-releases are never "latest".
+The catalog image comes from `assets/jellyshare.png` (source: `assets/jellyshare.svg`). Jellyfin downloads it into the
+plugin folder once and keeps it while a file of that name exists, so a changed icon needs a new file name to reach
+servers that already have it.
 
 Try the whole pipeline without GitHub: `./build/package.ps1 -Version 0.1.0.1 -BaseUrl http://host.docker.internal:8000`
 builds the zip and a copy of the manifest in `dist/`; serve `dist/` with `python -m http.server` and add that

@@ -134,7 +134,7 @@ class UpdateManifestTests(unittest.TestCase):
             json.dump(base_manifest(), f)
         base = [sys.executable, os.path.join(HERE, "update_manifest.py"),
                 "--manifest", path, "--guid", GUID, "--zip", self.zip_path]
-        image = "https://raw.githubusercontent.com/OFA-Tech/JellyShare/manifest/jellyshare.png"
+        image = "https://github.com/OFA-Tech/JellyShare/releases/latest/download/jellyshare.png"
         subprocess.run(base + ["--version", "0.1.0.0", "--source-url", URL.format(v="0.1.0.0"),
                                "--image-url", image], check=True, capture_output=True)
         subprocess.run(base + ["--version", "0.1.0.1", "--source-url", URL.format(v="0.1.0.1")],
