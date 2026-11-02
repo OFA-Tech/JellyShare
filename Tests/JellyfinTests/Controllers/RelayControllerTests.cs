@@ -419,7 +419,20 @@ public sealed class RelayControllerTests
     }
 
     [Fact]
-    public async Task Relay_ReleasedPlayback_EndsBodyCopy()
+    public async Task Relay_FinishedCopy_ExpiresAfterGrace()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => Video(new byte[] { 1 }));
+
+        await CreateController(Context()).Play(Key);
+        await CreateController(Context("HEAD")).Play(Key);
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Relay_LongBodyCopy_StaysCountedAndEndsOnRelease()
     {
         _config.Current.Peers[0].Kind = PeerKind.Account;
         var upstreamBody = new BlockingStream(new byte[] { 4, 5, 6 });
@@ -430,6 +443,8 @@ public sealed class RelayControllerTests
 
         var play = CreateController(context, idleTimeout: TimeSpan.FromSeconds(30)).Play(Key);
         await upstreamBody.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace * 3);
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
         _sessions.Release(Key);
         await play.WaitAsync(TimeSpan.FromSeconds(5));
 

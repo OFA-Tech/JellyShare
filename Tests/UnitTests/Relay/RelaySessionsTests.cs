@@ -38,27 +38,83 @@ public sealed class RelaySessionsTests
     public void Release_CancelsStopToken_NewClaimGetsFreshToken()
     {
         _sessions.TryReserve("movie:tmdb:1", _a, 1, out _).ShouldBeTrue();
-        var first = _sessions.StopToken("movie:tmdb:1");
-        first.CanBeCanceled.ShouldBeTrue();
+        var first = _sessions.Lease("movie:tmdb:1", _a);
+        first.IsNew.ShouldBeFalse();
+        first.Stop.CanBeCanceled.ShouldBeTrue();
 
         _sessions.Release("movie:tmdb:1");
 
-        first.IsCancellationRequested.ShouldBeTrue();
+        first.Stop.IsCancellationRequested.ShouldBeTrue();
         _sessions.TryReserve("movie:tmdb:1", _a, 1, out _).ShouldBeTrue();
-        var second = _sessions.StopToken("movie:tmdb:1");
-        second.CanBeCanceled.ShouldBeTrue();
-        second.IsCancellationRequested.ShouldBeFalse();
+        var second = _sessions.Lease("movie:tmdb:1", _a);
+        second.Stop.CanBeCanceled.ShouldBeTrue();
+        second.Stop.IsCancellationRequested.ShouldBeFalse();
+        first.Lease.Dispose();
+        second.Lease.Dispose();
     }
 
     [Fact]
-    public void StopToken_SameSessionKeepsToken_UnknownIsNone()
+    public void Lease_LikeTouch_SamePeerKeepsToken_OtherPeerStartsNew()
     {
-        _sessions.Touch("movie:tmdb:1", _a);
-        var token = _sessions.StopToken("movie:tmdb:1");
-        _sessions.Touch("movie:tmdb:1", _a);
+        var first = _sessions.Lease("movie:tmdb:1", _a);
+        var again = _sessions.Lease("movie:tmdb:1", _a);
+        var other = _sessions.Lease("movie:tmdb:1", _b);
 
-        _sessions.StopToken("movie:tmdb:1").ShouldBe(token);
-        _sessions.StopToken("movie:tmdb:2").ShouldBe(CancellationToken.None);
+        first.IsNew.ShouldBeTrue();
+        again.IsNew.ShouldBeFalse();
+        again.Stop.ShouldBe(first.Stop);
+        other.IsNew.ShouldBeTrue();
+        other.Stop.ShouldNotBe(first.Stop);
+        _sessions.ActivePeer("movie:tmdb:1").ShouldBe(_b);
+        first.Lease.Dispose();
+        again.Lease.Dispose();
+        other.Lease.Dispose();
+    }
+
+    [Fact]
+    public void Lease_KeepsEntryPastGrace_ExpiresGraceAfterDispose()
+    {
+        var lease = _sessions.Lease("movie:tmdb:1", _a);
+
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace * 3);
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+
+        lease.Lease.Dispose();
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace).AddSeconds(-1);
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+        _clock.Now = _clock.Now.AddSeconds(1);
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Lease_TwoOpen_EntryStaysUntilBothEnd()
+    {
+        var one = _sessions.Lease("movie:tmdb:1", _a);
+        var two = _sessions.Lease("movie:tmdb:1", _a);
+        one.Lease.Dispose();
+        one.Lease.Dispose();
+
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace * 3);
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+        two.Lease.Dispose();
+    }
+
+    [Fact]
+    public void Release_WithOpenLease_CancelsToken_LateDisposeLeavesNewEntryAlone()
+    {
+        var old = _sessions.Lease("movie:tmdb:1", _a);
+
+        _sessions.Release("movie:tmdb:1");
+        old.Stop.IsCancellationRequested.ShouldBeTrue();
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+
+        _sessions.Touch("movie:tmdb:1", _a);
+        _clock.Now = _clock.Now.AddSeconds(20);
+        old.Lease.Dispose();
+
+        // The old lease neither refreshed nor pinned the new entry: it expires a grace after its own touch.
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace).AddSeconds(-20);
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
     }
 
     [Fact]

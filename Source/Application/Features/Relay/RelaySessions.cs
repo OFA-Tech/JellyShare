@@ -4,7 +4,7 @@ namespace JellyShare.Application.Features.Relay;
 /// Remembers which peer serves a title while it is being played. One playback issues many relay requests
 /// (the PlaybackInfo probe, Range requests, HLS seeks that reopen the URL); they all stay on the serving peer, so
 /// the provider counts one stream slot, and the relay logs one line per playback. A playback ends after
-/// <see cref="Grace"/> without requests.
+/// <see cref="Grace"/> without requests and without a body copy in progress (see <see cref="Lease"/>).
 /// </summary>
 public sealed class RelaySessions
 {
@@ -13,7 +13,7 @@ public sealed class RelaySessions
 
     private readonly TimeProvider _clock;
     private readonly object _lock = new();
-    private readonly Dictionary<string, (Guid Peer, DateTimeOffset Start, DateTimeOffset LastSeen, CancellationTokenSource Stop)> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Session> _sessions = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="RelaySessions"/> class.</summary>
     /// <param name="clock">The clock.</param>
@@ -45,9 +45,7 @@ public sealed class RelaySessions
         lock (_lock)
         {
             Purge(now);
-            var isNew = !_sessions.TryGetValue(key, out var s) || s.Peer != peerId;
-            _sessions[key] = isNew ? (peerId, now, now, new CancellationTokenSource()) : s with { LastSeen = now };
-            return isNew;
+            return Seen(key, peerId, now, out _);
         }
     }
 
@@ -79,7 +77,7 @@ public sealed class RelaySessions
                 return false;
             }
 
-            _sessions[key] = (peerId, now, now, new CancellationTokenSource());
+            _sessions[key] = new Session(peerId, now);
             created = true;
             return true;
         }
@@ -118,16 +116,25 @@ public sealed class RelaySessions
     }
 
     /// <summary>
-    /// Gets a token that is cancelled when the playback of a title is released, so a relay body still being copied
-    /// for it stops pulling from the peer. A new playback of the title gets a fresh token.
+    /// Does what <see cref="Touch"/> does and, in the same step, leases the playback for a relay body copy: while a
+    /// lease is open the playback never expires (the grace counts from when the last lease ends), and the returned
+    /// token is cancelled when the playback is released, so the copy stops pulling from the peer.
     /// </summary>
     /// <param name="key">The canonical key.</param>
-    /// <returns>The token, or <see cref="CancellationToken.None"/> when no playback is active.</returns>
-    public CancellationToken StopToken(string key)
+    /// <param name="peerId">The serving peer.</param>
+    /// <returns>
+    /// Whether this starts a new playback, the stop token, and the lease to dispose when the copy ends. A lease
+    /// disposed after its playback was released or replaced does not affect the new one.
+    /// </returns>
+    public (bool IsNew, CancellationToken Stop, IDisposable Lease) Lease(string key, Guid peerId)
     {
+        var now = _clock.GetUtcNow();
         lock (_lock)
         {
-            return _sessions.TryGetValue(key, out var s) ? s.Stop.Token : CancellationToken.None;
+            Purge(now);
+            var isNew = Seen(key, peerId, now, out var session);
+            session.Leases++;
+            return (isNew, session.Stop.Token, new LeaseHandle(this, session));
         }
     }
 
@@ -145,12 +152,35 @@ public sealed class RelaySessions
         stop?.Cancel();
     }
 
+    private bool Seen(string key, Guid peerId, DateTimeOffset now, out Session session)
+    {
+        if (_sessions.TryGetValue(key, out var existing) && existing.Peer == peerId)
+        {
+            existing.LastSeen = now;
+            session = existing;
+            return false;
+        }
+
+        session = _sessions[key] = new Session(peerId, now);
+        return true;
+    }
+
+    private void EndLease(Session session)
+    {
+        var now = _clock.GetUtcNow();
+        lock (_lock)
+        {
+            session.Leases--;
+            session.LastSeen = now;
+        }
+    }
+
     private void Purge(DateTimeOffset now)
     {
         List<string>? expired = null;
         foreach (var (key, s) in _sessions)
         {
-            if (now - s.LastSeen >= Grace)
+            if (s.Leases == 0 && now - s.LastSeen >= Grace)
             {
                 (expired ??= new()).Add(key);
             }
@@ -164,6 +194,48 @@ public sealed class RelaySessions
         foreach (var key in expired)
         {
             _sessions.Remove(key);
+        }
+    }
+
+    // A replaced or released Session is no longer in the dictionary, so a late lease end only changes the old object.
+    private sealed class Session
+    {
+        public Session(Guid peer, DateTimeOffset now)
+        {
+            Peer = peer;
+            Start = now;
+            LastSeen = now;
+        }
+
+        public Guid Peer { get; }
+
+        public DateTimeOffset Start { get; }
+
+        public DateTimeOffset LastSeen { get; set; }
+
+        public int Leases { get; set; }
+
+        public CancellationTokenSource Stop { get; } = new();
+    }
+
+    private sealed class LeaseHandle : IDisposable
+    {
+        private readonly RelaySessions _owner;
+        private readonly Session _session;
+        private int _disposed;
+
+        public LeaseHandle(RelaySessions owner, Session session)
+        {
+            _owner = owner;
+            _session = session;
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                _owner.EndLease(_session);
+            }
         }
     }
 }

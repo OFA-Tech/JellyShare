@@ -155,17 +155,21 @@ public class RelayController : ControllerBase
 
                 // Committed to this peer: from here on no other peer is tried.
                 cts.CancelAfter(Timeout.InfiniteTimeSpan);
-                if (_sessions.Touch(entry.CanonicalKey, source.Peer.Id) || claimed)
+                // The lease keeps a long copy counted; stop-oldest releases the title and its token ends the copy.
+                var (isNew, stopToken, lease) = _sessions.Lease(entry.CanonicalKey, source.Peer.Id);
+                using (lease)
                 {
-                    _logger.LogInformation("JellyShare relay: playing {Key} from peer {Peer}", entry.CanonicalKey, source.Peer.Name);
-                }
+                    if (isNew || claimed)
+                    {
+                        _logger.LogInformation("JellyShare relay: playing {Key} from peer {Peer}", entry.CanonicalKey, source.Peer.Name);
+                    }
 
-                CopyHeaders(response, Response, status);
-                if (!isHead)
-                {
-                    // Stop-oldest releases the title: the copy must end too, or it keeps pulling from the peer.
-                    using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, _sessions.StopToken(entry.CanonicalKey));
-                    await CopyBodyAsync(response, source, entry.CanonicalKey, stop.Token).ConfigureAwait(false);
+                    CopyHeaders(response, Response, status);
+                    if (!isHead)
+                    {
+                        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, stopToken);
+                        await CopyBodyAsync(response, source, entry.CanonicalKey, stop.Token).ConfigureAwait(false);
+                    }
                 }
 
                 return new EmptyResult();
