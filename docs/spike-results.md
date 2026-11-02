@@ -522,3 +522,21 @@ scratch console app driving `AccountPeerClient` (both outside the repo; no token
   `SendMessageCommand`) and `SendPlaystateCommand`. A `null` controlling session is accepted and skips the remote-control
   permission check, so `JellyfinPlaybackStopper` sends both commands with `null`. An unknown target session id
   throws `ResourceNotFoundException` (logged and skipped). Not yet tried on a live 12.4 server (Task 7 e2e).
+
+### Confirmed by the e2e on the real 12.4 servers (Task 7, `harness/e2e.py` "account peers")
+
+- **`null` controlling session works live.** With a WebSocket client connected to alice and `POST /Sessions/Playing`
+  for title A, stop-oldest delivered `GeneralCommand` `DisplayMessage` (text "Stopped: bob-account allows 1 stream(s)
+  at a time and another viewer started.") and `Playstate` `{"Command":"Stop"}` to that session. No warning in the log.
+- **`RateLimitExceeded` as the API shows it.** `POST /Items/{id}/PlaybackInfo` answers **200** with
+  `"ErrorCode":"RateLimitExceeded"` and an empty `MediaSources` (not an HTTP error status).
+- **Stop cuts the relay copy, but not at once for the reader.** Releasing the session aborts the relay connection;
+  a reader of the relay URL at 250 kB/s kept receiving what the kernel had already buffered (3–4.5 MB, 10–15 s more)
+  and then got a reset (curl exit 56). Through Jellyfin's `/Videos/{id}/stream?static=true` the extra hop buffers the
+  whole 19.7 MB harness clip at once, so with the harness media the relay copy is already finished when a stop comes;
+  only the session (slot) release is observable there. Real titles are far bigger than the buffers.
+- **Changing the friend's password revokes the token.** `POST /Users/{id}/Password` (admin, other user) revoked the
+  account's access token at once: the next sync failed with `sign-in failed: HTTP 401`, `SignInFailed` was set, the
+  placeholders stayed. `PUT admin/peers/{id}` with the new password stored a new token; the next sync cleared the state.
+- **Library access is respected.** A friend user with only bob's Shows library gave a catalog of 3 episodes; bob's
+  Movies (Tears of Steel) got no placeholder on alice.
