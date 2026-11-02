@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <defs>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#C46CDB"/>
+      <stop offset="1" stop-color="#8A4FD8"/>
+    </linearGradient>
+    <linearGradient id="right" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2FB8EA"/>
+      <stop offset="1" stop-color="#0086C8"/>
+    </linearGradient>
+    <linearGradient id="shared" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#AA5CC3"/>
+      <stop offset="1" stop-color="#00A4DC"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="#101014"/>
+  <path d="M520 130 L690 455 L350 455 Z" fill="none" stroke="url(#left)" stroke-width="44" stroke-linejoin="round"/>
+  <path d="M760 130 L930 455 L590 455 Z" fill="none" stroke="url(#right)" stroke-width="44" stroke-linejoin="round"/>
+  <path d="M640 359 L690 455 L590 455 Z" fill="url(#shared)" stroke="url(#shared)" stroke-width="44" stroke-linejoin="round"/>
+  <text x="640" y="590" text-anchor="middle" font-family="'Segoe UI', 'Noto Sans', Arial, sans-serif" font-size="92" font-weight="600" letter-spacing="1" fill="#FFFFFF">JellyShare</text>
+</svg>

@@ -63,6 +63,7 @@ def main(argv=None):
     p.add_argument("--changelog-file", help="text file with the changelog (default: 'Release <version>')")
     p.add_argument("--target-abi", default="12.0.0.0")
     p.add_argument("--timestamp", help="ISO-8601 UTC, default now")
+    p.add_argument("--image-url", help="sets the package imageUrl (the plugin's catalog image)")
     a = p.parse_args(argv)
 
     changelog = "Release " + a.version
@@ -74,6 +75,8 @@ def main(argv=None):
         manifest = json.load(f)
     add_version(manifest, a.guid, a.version, a.zip, a.source_url, changelog, a.target_abi,
                 a.timestamp or utc_now())
+    if a.image_url:
+        next(p for p in manifest if p.get("guid") == a.guid)["imageUrl"] = a.image_url
     with open(a.manifest, "w", encoding="utf-8", newline="\n") as f:
         json.dump(manifest, f, indent=2, ensure_ascii=False)
         f.write("\n")
