@@ -29,24 +29,61 @@ public sealed record CreatedShareResponse(Guid Id, string Name, string Token);
 /// <param name="BaseUrl">The base URL of the remote Jellyfin server.</param>
 /// <param name="Token">The token the remote server gave us.</param>
 /// <param name="Enabled">Whether the peer is used.</param>
-public sealed record AddPeerRequest(string? Name, string? BaseUrl, string? Token, bool? Enabled);
+/// <param name="Kind">How to connect; <c>null</c> means <see cref="PeerKind.Token"/>.</param>
+/// <param name="Username">The user name of an account peer.</param>
+/// <param name="Password">The password of an account peer; used once to sign in and never stored.</param>
+/// <param name="MaxStreams">The concurrent playback limit of an account peer (1 to 20); <c>null</c> means 1.</param>
+/// <param name="LimitAction">What happens at the limit; <c>null</c> means refuse.</param>
+public sealed record AddPeerRequest(
+    string? Name,
+    string? BaseUrl,
+    string? Token,
+    bool? Enabled,
+    PeerKind? Kind = null,
+    string? Username = null,
+    string? Password = null,
+    int? MaxStreams = null,
+    StreamLimitAction? LimitAction = null);
 
-/// <summary>Body of <c>PUT admin/peers/{id}</c>. An empty token keeps the stored one.</summary>
+/// <summary>Body of <c>PUT admin/peers/{id}</c>. An empty token (or password) keeps the stored credentials.</summary>
 /// <param name="Name">The display name.</param>
 /// <param name="BaseUrl">The base URL of the remote Jellyfin server.</param>
 /// <param name="Token">A new token, or empty to keep the stored one.</param>
 /// <param name="Enabled">Whether the peer is used.</param>
-public sealed record UpdatePeerRequest(string? Name, string? BaseUrl, string? Token, bool? Enabled);
+/// <param name="Kind">The peer kind; it cannot change.</param>
+/// <param name="Username">The user name of an account peer.</param>
+/// <param name="Password">A password that signs in again, or empty to keep the session.</param>
+/// <param name="MaxStreams">The concurrent playback limit of an account peer (1 to 20); <c>null</c> keeps it.</param>
+/// <param name="LimitAction">What happens at the limit; <c>null</c> keeps it.</param>
+public sealed record UpdatePeerRequest(
+    string? Name,
+    string? BaseUrl,
+    string? Token,
+    bool? Enabled,
+    PeerKind? Kind = null,
+    string? Username = null,
+    string? Password = null,
+    int? MaxStreams = null,
+    StreamLimitAction? LimitAction = null);
 
 /// <summary>Body of <c>POST admin/peers/order</c>.</summary>
 /// <param name="Ids">The peer ids, most preferred first.</param>
 public sealed record ReorderPeersRequest(List<Guid>? Ids);
 
-/// <summary>Body of <c>POST admin/peers/test</c>. The token is optional when testing a saved peer.</summary>
+/// <summary>Body of <c>POST admin/peers/test</c>. The token (or password) is optional when testing a saved peer.</summary>
 /// <param name="Url">The base URL to test.</param>
 /// <param name="Token">The token to test with.</param>
-/// <param name="PeerId">A saved peer whose stored token is used when <paramref name="Token"/> is empty.</param>
-public sealed record TestPeerRequest(string? Url, string? Token, Guid? PeerId = null);
+/// <param name="PeerId">A saved peer whose stored credentials are used when <paramref name="Token"/> and the password are empty.</param>
+/// <param name="Kind">How to connect; <c>null</c> means the saved peer's kind, or <see cref="PeerKind.Token"/>.</param>
+/// <param name="Username">The user name of an account peer.</param>
+/// <param name="Password">The password of an account peer; used once and never stored.</param>
+public sealed record TestPeerRequest(
+    string? Url,
+    string? Token,
+    Guid? PeerId = null,
+    PeerKind? Kind = null,
+    string? Username = null,
+    string? Password = null);
 
 /// <summary>Result of <c>POST admin/peers/test</c>.</summary>
 /// <param name="Ok">The connection works.</param>

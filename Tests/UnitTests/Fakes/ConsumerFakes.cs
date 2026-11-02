@@ -47,6 +47,28 @@ internal sealed class ConsumerConfig : SnapshotSettings
 {
 }
 
+internal sealed class FakeAccountSignIn : IAccountSignIn
+{
+    public Func<string, string, AccountSignInResult> SignIns { get; set; }
+        = (_, _) => new AccountSignInResult(true, "access-token-1", "uid-9", "Bob's server", null);
+
+    public List<(string BaseUrl, string Username, string Password, Guid PeerId)> SignInCalls { get; } = new();
+
+    public List<(string BaseUrl, string AccessToken, Guid PeerId)> SignOutCalls { get; } = new();
+
+    public Task<AccountSignInResult> SignInAsync(string baseUrl, string username, string password, Guid peerId, CancellationToken ct)
+    {
+        SignInCalls.Add((baseUrl, username, password, peerId));
+        return Task.FromResult(SignIns(username, password));
+    }
+
+    public Task SignOutAsync(string baseUrl, string accessToken, Guid peerId, CancellationToken ct)
+    {
+        SignOutCalls.Add((baseUrl, accessToken, peerId));
+        return Task.CompletedTask;
+    }
+}
+
 internal sealed class FakePeerClient : IPeerClient
 {
     public Dictionary<Guid, Func<string?, PeerFetchResult>> Catalogs { get; } = new();
@@ -56,6 +78,10 @@ internal sealed class FakePeerClient : IPeerClient
     public List<(Guid Peer, string? Etag)> Fetches { get; } = new();
 
     public List<(Guid Peer, string Item, string Type)> ImageRequests { get; } = new();
+
+    public List<RemotePeer> FetchedPeers { get; } = new();
+
+    public Func<string?, PeerFetchResult>? DefaultCatalog { get; set; }
 
     public Func<Task>? BeforeFetch { get; set; }
 
@@ -84,11 +110,12 @@ internal sealed class FakePeerClient : IPeerClient
         lock (Fetches)
         {
             Fetches.Add((peer.Id, etag));
+            FetchedPeers.Add(peer);
         }
 
         return Catalogs.TryGetValue(peer.Id, out var f)
             ? f(etag)
-            : new PeerFetchResult(false, false, null, "HTTP 404");
+            : DefaultCatalog?.Invoke(etag) ?? new PeerFetchResult(false, false, null, "HTTP 404");
     }
 
     public Func<Task>? BeforeImage { get; set; }

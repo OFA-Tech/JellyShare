@@ -65,6 +65,7 @@ public sealed class AdminControllerTests : IDisposable
         services.AddSingleton<IShareTokenService>(_tokens);
         services.AddSingleton(_limiter);
         services.AddSingleton<IPeerClient>(_peers);
+        services.AddSingleton<IAccountSignIn>(new FakeAccountSignIn());
         services.AddSingleton<ISyncRunner>(_sync);
         services.AddSingleton<IConsumerIndex>(_index);
         services.AddSingleton<IAdminLibraries>(_libs);

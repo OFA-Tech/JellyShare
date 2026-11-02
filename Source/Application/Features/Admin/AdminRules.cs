@@ -16,6 +16,12 @@ public static class AdminRules
     /// <summary>Maximum concurrent streams of a share.</summary>
     public const int MaxStreamsLimit = 100;
 
+    /// <summary>Smallest concurrent playback limit of an account peer.</summary>
+    public const int MinAccountStreams = 1;
+
+    /// <summary>Largest concurrent playback limit of an account peer.</summary>
+    public const int MaxAccountStreams = 20;
+
     /// <summary>Maximum length of a peer token.</summary>
     public const int MaxTokenLength = 512;
 
