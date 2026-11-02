@@ -379,13 +379,13 @@ The workflow (the tagged commit must be on `main`):
    with `build/update_manifest.py`: version, changelog (commit subjects since the previous tag), `targetAbi`
    `12.0.0.0`, `sourceUrl` of the release asset, lowercase MD5 `checksum` of the zip (what Jellyfin verifies) and a UTC
    `timestamp`. Re-running for the same version replaces its entry;
-5. creates the GitHub Release `v<version>` with the zip, `manifest.json` and the catalog image `jellyshare.png`
-   (a re-run replaces the assets).
+5. creates the GitHub Release `v<version>` with the zip and `manifest.json` (a re-run replaces the assets).
 
 The plugin repository URL `https://github.com/OFA-Tech/JellyShare/releases/latest/download/manifest.json` always
 redirects to the newest release's manifest, which lists every version. Nothing is pushed to a branch, so the ruleset
 on `main` (changes only through reviewed pull requests) stays untouched. Drafts and pre-releases are never "latest".
-The catalog image comes from `assets/jellyshare.png` (source: `assets/jellyshare.svg`). Jellyfin downloads it into the
+The catalog image is `assets/jellyshare.png` on `main` (source: `assets/jellyshare.svg`), linked by `imageUrl`
+through raw.githubusercontent.com. Jellyfin downloads it into the
 plugin folder once and keeps it while a file of that name exists, so a changed icon needs a new file name to reach
 servers that already have it.
 

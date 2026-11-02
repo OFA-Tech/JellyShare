@@ -81,13 +81,12 @@ jobs:
             --version "$VERSION" \
             --zip "dist/jellyshare_${VERSION}.zip" \
             --source-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/jellyshare_${VERSION}.zip" \
-            --image-url "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/jellyshare.png" \
+            --image-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/assets/jellyshare.png" \
             --changelog-file changelog.txt
-          cp assets/jellyshare.png dist/jellyshare.png
 
       - name: GitHub Release
         run: |
-          FILES=("dist/jellyshare_${VERSION}.zip" dist/manifest.json dist/jellyshare.png)
+          FILES=("dist/jellyshare_${VERSION}.zip" dist/manifest.json)
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "${FILES[@]}" --clobber
           else

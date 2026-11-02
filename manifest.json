@@ -6,7 +6,7 @@
     "overview": "Share movies and shows between Jellyfin servers.",
     "owner": "OFA-TECH",
     "category": "General",
-    "imageUrl": "https://github.com/OFA-Tech/JellyShare/releases/latest/download/jellyshare.png",
+    "imageUrl": "https://raw.githubusercontent.com/OFA-Tech/JellyShare/main/assets/jellyshare.png",
     "versions": []
   }
 ]
