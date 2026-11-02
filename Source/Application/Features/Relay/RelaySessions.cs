@@ -51,6 +51,54 @@ public sealed class RelaySessions
         }
     }
 
+    /// <summary>
+    /// Claims a slot on a peer for a title, atomically with the limit check: two titles asked at once for a peer with
+    /// one slot cannot both get it. The title counts as active on the peer from now on (start = now).
+    /// </summary>
+    /// <param name="key">The canonical key.</param>
+    /// <param name="peerId">The peer to claim on.</param>
+    /// <param name="max">The peer's stream limit.</param>
+    /// <param name="created">
+    /// <c>true</c> when this call made the entry, so only this caller may undo it with <see cref="CancelReservation"/>.
+    /// </param>
+    /// <returns><c>true</c> when the title already plays on the peer, or a slot was free and is now taken.</returns>
+    public bool TryReserve(string key, Guid peerId, int max, out bool created)
+    {
+        var now = _clock.GetUtcNow();
+        lock (_lock)
+        {
+            Purge(now);
+            created = false;
+            if (_sessions.TryGetValue(key, out var s) && s.Peer == peerId)
+            {
+                return true;
+            }
+
+            if (_sessions.Count(e => e.Value.Peer == peerId) >= max)
+            {
+                return false;
+            }
+
+            _sessions[key] = (peerId, now, now);
+            created = true;
+            return true;
+        }
+    }
+
+    /// <summary>Undoes a claim made by <see cref="TryReserve"/>, unless the title has meanwhile moved to another peer.</summary>
+    /// <param name="key">The canonical key.</param>
+    /// <param name="peerId">The peer the claim was made on.</param>
+    public void CancelReservation(string key, Guid peerId)
+    {
+        lock (_lock)
+        {
+            if (_sessions.TryGetValue(key, out var s) && s.Peer == peerId)
+            {
+                _sessions.Remove(key);
+            }
+        }
+    }
+
     /// <summary>Lists the titles playing on a peer, oldest playback first (ties by key).</summary>
     /// <param name="peerId">The serving peer.</param>
     /// <returns>The canonical keys.</returns>

@@ -73,6 +73,74 @@ public sealed class RelaySessionsTests
     }
 
     [Fact]
+    public void TryReserve_Free_ClaimsAndReportsCreated()
+    {
+        _sessions.TryReserve("movie:tmdb:1", _a, 1, out var created).ShouldBeTrue();
+
+        created.ShouldBeTrue();
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+    }
+
+    [Fact]
+    public void TryReserve_Full_IsDeniedAndInsertsNothing()
+    {
+        _sessions.Touch("movie:tmdb:1", _a);
+
+        _sessions.TryReserve("movie:tmdb:2", _a, 1, out var created).ShouldBeFalse();
+
+        created.ShouldBeFalse();
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+    }
+
+    [Fact]
+    public void TryReserve_SameTitleAlreadyActive_IsAllowedButNotCreated()
+    {
+        _sessions.Touch("movie:tmdb:1", _a);
+
+        _sessions.TryReserve("movie:tmdb:1", _a, 1, out var created).ShouldBeTrue();
+
+        created.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void TryReserve_ZeroMax_IsDenied()
+        => _sessions.TryReserve("movie:tmdb:1", _a, 0, out _).ShouldBeFalse();
+
+    [Fact]
+    public void TryReserve_ConcurrentDifferentTitles_OnlyOneWins()
+    {
+        for (var round = 0; round < 200; round++)
+        {
+            var sessions = new RelaySessions(_clock);
+            using var barrier = new Barrier(2);
+            var wins = 0;
+            Parallel.For(0, 2, new ParallelOptions { MaxDegreeOfParallelism = 2 }, i =>
+            {
+                barrier.SignalAndWait();
+                if (sessions.TryReserve("movie:tmdb:" + i, _a, 1, out _))
+                {
+                    Interlocked.Increment(ref wins);
+                }
+            });
+
+            wins.ShouldBe(1);
+            sessions.ActiveTitles(_a).Count.ShouldBe(1);
+        }
+    }
+
+    [Fact]
+    public void CancelReservation_RemovesOnlyWhenStillOnThatPeer()
+    {
+        _sessions.Touch("movie:tmdb:1", _b);
+
+        _sessions.CancelReservation("movie:tmdb:1", _a);
+        _sessions.ActiveTitles(_b).ShouldBe(new[] { "movie:tmdb:1" });
+
+        _sessions.CancelReservation("movie:tmdb:1", _b);
+        _sessions.ActiveTitles(_b).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void ActiveTitles_ExpiredAfterGrace_AreDropped()
     {
         _sessions.Touch("movie:tmdb:1", _a);

@@ -24,6 +24,22 @@ public static class StreamLimitGate
             || sessions.ActiveTitles(peer.Id).Count < peer.MaxStreams;
     }
 
+    /// <summary>
+    /// Claims a slot for a title on a peer, atomically with the limit check. Token peers need no claim.
+    /// </summary>
+    /// <param name="peer">The peer.</param>
+    /// <param name="key">The canonical key of the title.</param>
+    /// <param name="sessions">The active playbacks.</param>
+    /// <param name="created"><c>true</c> when this call took the slot; only then may the caller undo it (<see cref="RelaySessions.CancelReservation"/>).</param>
+    /// <returns><c>true</c> when the peer may serve the title now.</returns>
+    public static bool TryClaim(RemotePeer peer, string key, RelaySessions sessions, out bool created)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        ArgumentNullException.ThrowIfNull(sessions);
+        created = false;
+        return peer.Kind != PeerKind.Account || sessions.TryReserve(key, peer.Id, peer.MaxStreams, out created);
+    }
+
     /// <summary>Decides what a new playback of a title needs, given the sources in play order.</summary>
     /// <param name="ordered">The sources, preferred first.</param>
     /// <param name="key">The canonical key of the title.</param>

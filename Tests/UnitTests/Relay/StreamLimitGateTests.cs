@@ -106,6 +106,44 @@ public sealed class StreamLimitGateTests
     }
 
     [Fact]
+    public void Decide_StopOldest_WithNothingToStop_Refuses()
+    {
+        var alice = Account(_a, "alice", max: 0, action: StreamLimitAction.StopOldest);
+
+        var decision = StreamLimitGate.Decide([Source(alice)], "movie:tmdb:2", _sessions);
+
+        decision.Kind.ShouldBe(StreamDecisionKind.Refuse);
+        decision.Peer.ShouldBe(alice);
+        decision.StopKey.ShouldBeNull();
+    }
+
+    [Fact]
+    public void TryClaim_TokenPeer_AlwaysAllowed_WithoutClaim()
+    {
+        var peer = TokenPeer(_a, "alice");
+        _sessions.Touch("movie:tmdb:1", _a);
+
+        StreamLimitGate.TryClaim(peer, "movie:tmdb:2", _sessions, out var created).ShouldBeTrue();
+
+        created.ShouldBeFalse();
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+    }
+
+    [Fact]
+    public void TryClaim_AccountPeer_ClaimsUntilFull()
+    {
+        var peer = Account(_a, "alice");
+
+        StreamLimitGate.TryClaim(peer, "movie:tmdb:1", _sessions, out var first).ShouldBeTrue();
+        StreamLimitGate.TryClaim(peer, "movie:tmdb:2", _sessions, out var second).ShouldBeFalse();
+        StreamLimitGate.TryClaim(peer, "movie:tmdb:1", _sessions, out var again).ShouldBeTrue();
+
+        first.ShouldBeTrue();
+        second.ShouldBeFalse();
+        again.ShouldBeFalse();
+    }
+
+    [Fact]
     public void Decide_FirstStopOldestSourceWins_OverEarlierRefuseSource()
     {
         var alice = Account(_a, "alice");

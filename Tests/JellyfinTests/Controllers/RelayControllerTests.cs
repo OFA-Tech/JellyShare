@@ -527,6 +527,99 @@ public sealed class RelayControllerTests
     }
 
     [Fact]
+    public async Task Play_AccountPeerServes_KeepsClaimAndLogsStartOnce()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => Video(new byte[] { 1 }));
+
+        await CreateController(Context()).Play(Key);
+        await CreateController(Context(range: "bytes=1-")).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+        _logger.Lines.Where(l => l.StartsWith("Information", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal)).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFails_FreesClaimForNextTitle()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+        StreamLimitGate.HasRoom(_config.Current.Peers[0], "movie:tmdb:other", _sessions).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerTimesOut_FreesClaim()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _hosts["alice"] = async (_, ct) =>
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("unreachable");
+        };
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context(), TimeSpan.FromMilliseconds(200)).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerUnreachable_FreesClaim()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _hosts["alice"] = (_, _) => throw new HttpRequestException("connection refused");
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFails_DoesNotRemoveClaimMadeByAnotherRequest()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.TryReserve(Key, _a, 1, out _).ShouldBeTrue();
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+    }
+
+    [Fact]
+    public async Task Play_SecondTitleWhileFirstAwaitsPeer_IsRefused()
+    {
+        const string key2 = "movie:tmdb:2";
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _index.Entries[key2] = new MergedEntry(key2, new[] { key2 }, new List<(Guid, CatalogItem)> { (_a, TestItems.Movie("CCC", tmdb: "2", id: "alice-item-2")) });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _hosts["alice"] = async (_, _) =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            return Video(new byte[] { 1 });
+        };
+
+        var first = CreateController(Context()).Play(Key);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = await CreateController(Context()).Play(key2);
+
+        ((ObjectResult)second).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("stream limit reached");
+        release.SetResult();
+        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        _upstream.ShouldHaveSingleItem();
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+    }
+
+    [Fact]
     public async Task Play_FullAccountPeerAndFailingPeer_Is503NoPeerAvailable()
     {
         _config.Current.Peers[0].Kind = PeerKind.Account;

@@ -110,7 +110,8 @@ public class RelayController : ControllerBase
         List<RemotePeer>? full = null;
         foreach (var source in sources)
         {
-            if (!StreamLimitGate.HasRoom(source.Peer, entry.CanonicalKey, _sessions))
+            // The slot is taken before the request, so a second title asked meanwhile finds the peer full.
+            if (!StreamLimitGate.TryClaim(source.Peer, entry.CanonicalKey, _sessions, out var claimed))
             {
                 (full ??= new()).Add(source.Peer);
                 continue;
@@ -125,16 +126,19 @@ public class RelayController : ControllerBase
             }
             catch (OperationCanceledException) when (aborted.IsCancellationRequested)
             {
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 return new EmptyResult();
             }
             catch (OperationCanceledException)
             {
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 LogTimedOut(source.Peer, entry.CanonicalKey);
                 continue;
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
             {
                 // PeerClient redacts the token from connection errors.
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 LogPeerFailed(source.Peer, entry.CanonicalKey, ex);
                 continue;
             }
@@ -144,13 +148,14 @@ public class RelayController : ControllerBase
                 var status = (int)response.StatusCode;
                 if (status != StatusCodes.Status200OK && status != StatusCodes.Status206PartialContent)
                 {
+                    Unclaim(claimed, entry.CanonicalKey, source.Peer);
                     _logger.LogDebug("JellyShare relay: peer {Peer} answered {Status} for {Key}", source.Peer.Name, status, entry.CanonicalKey);
                     continue;
                 }
 
                 // Committed to this peer: from here on no other peer is tried.
                 cts.CancelAfter(Timeout.InfiniteTimeSpan);
-                if (_sessions.Touch(entry.CanonicalKey, source.Peer.Id))
+                if (_sessions.Touch(entry.CanonicalKey, source.Peer.Id) || claimed)
                 {
                     _logger.LogInformation("JellyShare relay: playing {Key} from peer {Peer}", entry.CanonicalKey, source.Peer.Name);
                 }
@@ -229,6 +234,15 @@ public class RelayController : ControllerBase
         if (from.Headers.AcceptRanges.Count > 0)
         {
             to.Headers.AcceptRanges = string.Join(",", from.Headers.AcceptRanges);
+        }
+    }
+
+    // Only the request that made the claim undoes it; a claim made by another request for the same title stays.
+    private void Unclaim(bool claimed, string key, RemotePeer peer)
+    {
+        if (claimed)
+        {
+            _sessions.CancelReservation(key, peer.Id);
         }
     }
 
