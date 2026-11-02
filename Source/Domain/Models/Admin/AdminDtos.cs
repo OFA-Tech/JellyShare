@@ -1,3 +1,4 @@
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Sync;
 
 namespace JellyShare.Domain.Models.Admin;
@@ -81,6 +82,11 @@ public sealed record ShareView(Guid Id, string Name, bool Enabled, IReadOnlyList
 /// <param name="FailingSinceUtc">When the current run of failures started.</param>
 /// <param name="LastError">The last error.</param>
 /// <param name="Titles">The titles in the last good catalog, if any.</param>
+/// <param name="Kind">How this server authenticates to the peer.</param>
+/// <param name="Username">The account user name (account peers only).</param>
+/// <param name="MaxStreams">The concurrent stream limit (account peers only).</param>
+/// <param name="LimitAction">What happens when a new stream exceeds the limit.</param>
+/// <param name="SignInFailed">An account peer whose last error is a failed sign-in.</param>
 public sealed record PeerView(
     Guid Id,
     string Name,
@@ -91,7 +97,12 @@ public sealed record PeerView(
     DateTimeOffset? LastSuccessUtc,
     DateTimeOffset? FailingSinceUtc,
     string? LastError,
-    int? Titles);
+    int? Titles,
+    PeerKind Kind,
+    string? Username,
+    int MaxStreams,
+    StreamLimitAction LimitAction,
+    bool SignInFailed);
 
 /// <summary>A placeholder root and where it is attached.</summary>
 /// <param name="Path">The root folder.</param>

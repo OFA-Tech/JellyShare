@@ -96,6 +96,46 @@ public sealed class PeerHandlerTests : IDisposable
         _h.Saver.Saved!.Peers.ShouldHaveSingleItem().Token.ShouldBe("new-token");
     }
 
+    private RemotePeer SeedAccount()
+    {
+        var peer = Seed();
+        peer.Kind = PeerKind.Account;
+        peer.Username = "carol";
+        peer.AccountUserId = "uid-1";
+        peer.MaxStreams = 3;
+        peer.LimitAction = StreamLimitAction.StopOldest;
+        return peer;
+    }
+
+    private static void ShouldBeAccountPeer(RemotePeer saved)
+    {
+        saved.Kind.ShouldBe(PeerKind.Account);
+        saved.Username.ShouldBe("carol");
+        saved.AccountUserId.ShouldBe("uid-1");
+        saved.MaxStreams.ShouldBe(3);
+        saved.LimitAction.ShouldBe(StreamLimitAction.StopOldest);
+    }
+
+    [Fact]
+    public async Task UpdatePeer_KeepsAccountFields()
+    {
+        var peer = SeedAccount();
+
+        await _h.Send(new UpdatePeerCommand(peer.Id, "alice2", "http://alice:8096", null, null));
+
+        ShouldBeAccountPeer(_h.Saver.Saved!.Peers.ShouldHaveSingleItem());
+    }
+
+    [Fact]
+    public async Task ReorderPeers_KeepsAccountFields()
+    {
+        var peer = SeedAccount();
+
+        await _h.Send(new ReorderPeersCommand([peer.Id]));
+
+        ShouldBeAccountPeer(_h.Saver.Saved!.Peers.ShouldHaveSingleItem());
+    }
+
     [Fact]
     public async Task Update_UnknownPeer_IsNotFound_EvenWithInvalidFields()
     {

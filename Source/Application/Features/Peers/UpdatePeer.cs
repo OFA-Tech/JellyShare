@@ -3,7 +3,6 @@ using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Admin;
-using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Requests.Peers;
 using JellyShare.Domain.Results;
 using Microsoft.Extensions.Logging;
@@ -71,15 +70,11 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
             }
 
             // Copy-on-write: a running sync keeps a self-consistent (url, token) pair.
-            var peer = new RemotePeer
-            {
-                Id = current.Id,
-                Name = name,
-                BaseUrl = url,
-                Token = string.IsNullOrEmpty(newToken) ? current.Token : newToken,
-                Enabled = request.Enabled ?? current.Enabled,
-                Priority = current.Priority,
-            };
+            var peer = current.Copy();
+            peer.Name = name;
+            peer.BaseUrl = url;
+            peer.Token = string.IsNullOrEmpty(newToken) ? current.Token : newToken;
+            peer.Enabled = request.Enabled ?? current.Enabled;
             cfg.Peers = cfg.Peers.Select(p => p.Id == request.Id ? peer : p).ToList();
             _store.Save(cfg);
             _logger.LogInformation("JellyShare admin: updated peer {PeerId} (enabled={Enabled})", peer.Id, peer.Enabled);

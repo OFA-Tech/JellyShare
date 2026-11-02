@@ -1,7 +1,6 @@
 using JellyShare.Application.Features.Admin;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Messaging;
-using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Requests.Peers;
 using JellyShare.Domain.Results;
 
@@ -45,14 +44,11 @@ public sealed class ReorderPeersCommandHandler : ICommandHandler<ReorderPeersCom
 
             // Copy-on-write: peers are replaced by copies carrying the new priority.
             cfg.Peers = cfg.Peers
-                .Select(p => new RemotePeer
+                .Select(p =>
                 {
-                    Id = p.Id,
-                    Name = p.Name,
-                    BaseUrl = p.BaseUrl,
-                    Token = p.Token,
-                    Enabled = p.Enabled,
-                    Priority = order.TryGetValue(p.Id, out var priority) ? priority : p.Priority,
+                    var copy = p.Copy();
+                    copy.Priority = order.TryGetValue(p.Id, out var priority) ? priority : p.Priority;
+                    return copy;
                 })
                 .ToList();
             _store.Save(cfg);

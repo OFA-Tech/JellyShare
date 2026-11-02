@@ -1,3 +1,4 @@
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Sync;
@@ -169,7 +170,12 @@ public static class AdminRules
             state?.LastSuccessUtc,
             state?.FailingSinceUtc,
             state?.LastError,
-            state?.LastGoodCatalog?.Items?.Count);
+            state?.LastGoodCatalog?.Items?.Count,
+            peer.Kind,
+            peer.Username,
+            peer.MaxStreams,
+            peer.LimitAction,
+            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith("sign-in failed", StringComparison.Ordinal) == true);
     }
 
     /// <summary>Orders peers by priority, then by their position in the settings.</summary>

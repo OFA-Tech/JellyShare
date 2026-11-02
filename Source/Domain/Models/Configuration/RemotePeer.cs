@@ -1,3 +1,5 @@
+using JellyShare.Domain.Enums;
+
 namespace JellyShare.Domain.Models.Configuration;
 
 /// <summary>A remote peer this server syncs from. Holds that peer's secret token.</summary>
@@ -20,6 +22,25 @@ public class RemotePeer
 
     /// <summary>Gets or sets the priority; lower is preferred.</summary>
     public int Priority { get; set; }
+
+    /// <summary>Gets or sets how this server authenticates to the peer. For an account peer, <see cref="Token"/> is the Jellyfin access token.</summary>
+    public PeerKind Kind { get; set; }
+
+    /// <summary>Gets or sets the peer's user name (account peers only).</summary>
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the user id on the peer's server (account peers only).</summary>
+    public string AccountUserId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the concurrent stream limit (account peers only).</summary>
+    public int MaxStreams { get; set; } = 1;
+
+    /// <summary>Gets or sets what happens when a new stream exceeds <see cref="MaxStreams"/>.</summary>
+    public StreamLimitAction LimitAction { get; set; }
+
+    /// <summary>Creates a shallow copy, for copy-on-write updates.</summary>
+    /// <returns>The copy.</returns>
+    public RemotePeer Copy() => (RemotePeer)MemberwiseClone();
 
     /// <inheritdoc />
     public override string ToString() => $"RemotePeer({Id}, {Name})";
