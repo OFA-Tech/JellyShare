@@ -107,27 +107,38 @@ public class RelayController : ControllerBase
         var aborted = HttpContext.RequestAborted;
         var isHead = HttpMethods.IsHead(Request.Method);
 
+        List<RemotePeer>? full = null;
         foreach (var source in sources)
         {
+            // The slot is taken before the request, so a second title asked meanwhile finds the peer full.
+            if (!StreamLimitGate.TryClaim(source.Peer, entry.CanonicalKey, _sessions, out var claimed))
+            {
+                (full ??= new()).Add(source.Peer);
+                continue;
+            }
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
             cts.CancelAfter(_headerTimeout);
             HttpResponseMessage response;
             try
             {
-                response = await _client.OpenStreamAsync(source.Peer, source.Item.Id, range, cts.Token).ConfigureAwait(false);
+                response = await _client.OpenStreamAsync(source.Peer, source.Item, range, cts.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (aborted.IsCancellationRequested)
             {
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 return new EmptyResult();
             }
             catch (OperationCanceledException)
             {
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 LogTimedOut(source.Peer, entry.CanonicalKey);
                 continue;
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
             {
                 // PeerClient redacts the token from connection errors.
+                Unclaim(claimed, entry.CanonicalKey, source.Peer);
                 LogPeerFailed(source.Peer, entry.CanonicalKey, ex);
                 continue;
             }
@@ -137,21 +148,28 @@ public class RelayController : ControllerBase
                 var status = (int)response.StatusCode;
                 if (status != StatusCodes.Status200OK && status != StatusCodes.Status206PartialContent)
                 {
+                    Unclaim(claimed, entry.CanonicalKey, source.Peer);
                     _logger.LogDebug("JellyShare relay: peer {Peer} answered {Status} for {Key}", source.Peer.Name, status, entry.CanonicalKey);
                     continue;
                 }
 
                 // Committed to this peer: from here on no other peer is tried.
                 cts.CancelAfter(Timeout.InfiniteTimeSpan);
-                if (_sessions.Touch(entry.CanonicalKey, source.Peer.Id))
+                // The lease keeps a long copy counted; stop-oldest releases the title and its token ends the copy.
+                var (isNew, stopToken, lease) = _sessions.Lease(entry.CanonicalKey, source.Peer.Id);
+                using (lease)
                 {
-                    _logger.LogInformation("JellyShare relay: playing {Key} from peer {Peer}", entry.CanonicalKey, source.Peer.Name);
-                }
+                    if (isNew || claimed)
+                    {
+                        _logger.LogInformation("JellyShare relay: playing {Key} from peer {Peer}", entry.CanonicalKey, source.Peer.Name);
+                    }
 
-                CopyHeaders(response, Response, status);
-                if (!isHead)
-                {
-                    await CopyBodyAsync(response, source, entry.CanonicalKey, cts.Token).ConfigureAwait(false);
+                    CopyHeaders(response, Response, status);
+                    if (!isHead)
+                    {
+                        using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, stopToken);
+                        await CopyBodyAsync(response, source, entry.CanonicalKey, stop.Token).ConfigureAwait(false);
+                    }
                 }
 
                 return new EmptyResult();
@@ -161,6 +179,12 @@ public class RelayController : ControllerBase
         if (aborted.IsCancellationRequested)
         {
             return new EmptyResult();
+        }
+
+        if (full?.Count == sources.Count)
+        {
+            _logger.LogInformation("JellyShare relay: stream limit reached for {Key} on peers {Peers}", entry.CanonicalKey, string.Join(", ", full.Select(p => p.Name)));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse("stream limit reached"));
         }
 
         _logger.LogWarning("JellyShare relay: no peer could serve {Key} ({Count} tried)", entry.CanonicalKey, sources.Count);
@@ -219,6 +243,15 @@ public class RelayController : ControllerBase
         }
     }
 
+    // Only the request that made the claim undoes it; a claim made by another request for the same title stays.
+    private void Unclaim(bool claimed, string key, RemotePeer peer)
+    {
+        if (claimed)
+        {
+            _sessions.CancelReservation(key, peer.Id);
+        }
+    }
+
     private IReadOnlyList<RelaySource> PreferActive(string key, IReadOnlyList<RelaySource> ordered)
     {
         var active = _sessions.ActivePeer(key);
@@ -260,6 +293,11 @@ public class RelayController : ControllerBase
             LogStalled(source.Peer, key);
             HttpContext.Abort();
         }
+        catch (OperationCanceledException) when (!aborted.IsCancellationRequested)
+        {
+            LogReleased(source.Peer, key);
+            HttpContext.Abort();
+        }
         catch (OperationCanceledException)
         {
             // The client went away; the linked token already cancelled the upstream read.
@@ -282,6 +320,10 @@ public class RelayController : ControllerBase
     [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
     private void LogStalled(RemotePeer peer, string key)
         => _logger.LogDebug("JellyShare relay: peer {Peer} stalled for {Key}, aborting", peer.Name, key);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogReleased(RemotePeer peer, string key)
+        => _logger.LogDebug("JellyShare relay: playback of {Key} from peer {Peer} was stopped, aborting", key, peer.Name);
 
     private static string Redacted(RemotePeer peer, Exception ex)
         => string.IsNullOrEmpty(peer.Token) ? ex.Message : ex.Message.Replace(peer.Token, "***", StringComparison.Ordinal);

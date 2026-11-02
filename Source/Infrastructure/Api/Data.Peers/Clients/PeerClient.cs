@@ -251,12 +251,23 @@ public sealed class PeerClient : IPeerClient
             return null;
         }
 
+        using var request = CreateRequest(peer, uri);
+        return await DownloadImageAsync(_client(), request, _timeout, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Sends an image request and buffers the body, capped at 32 MiB.</summary>
+    /// <param name="client">The HTTP client.</param>
+    /// <param name="request">The request.</param>
+    /// <param name="timeout">The timeout.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>The image bytes, or <c>null</c> on any failure.</returns>
+    internal static async Task<Stream?> DownloadImageAsync(HttpClient client, HttpRequestMessage request, TimeSpan timeout, CancellationToken ct)
+    {
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(_timeout);
+        cts.CancelAfter(timeout);
         try
         {
-            using var request = CreateRequest(peer, uri);
-            using var response = await _client().SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode || response.Content.Headers.ContentLength > MaxImageBytes)
             {
                 return null;
@@ -297,10 +308,11 @@ public sealed class PeerClient : IPeerClient
     }
 
     /// <inheritdoc />
-    public async Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, string itemId, string? range, CancellationToken ct)
+    public async Task<HttpResponseMessage> OpenStreamAsync(RemotePeer peer, CatalogItem item, string? range, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        var uri = BuildUri(peer.BaseUrl, "JellyShare/v1/stream/" + Uri.EscapeDataString(itemId))
+        ArgumentNullException.ThrowIfNull(item);
+        var uri = BuildUri(peer.BaseUrl, "JellyShare/v1/stream/" + Uri.EscapeDataString(item.Id))
             ?? throw new InvalidOperationException("invalid base url");
         // A GET has no content, so the request message can be disposed as soon as the headers arrived; the
         // response (and its body stream) stays valid until the caller disposes it.
@@ -341,7 +353,11 @@ public sealed class PeerClient : IPeerClient
         return v.Length > 16 ? v[..16] : v;
     }
 
-    private static string Redact(string message, string? token)
+    /// <summary>Replaces a secret in an error message with <c>***</c>.</summary>
+    /// <param name="message">The message.</param>
+    /// <param name="token">The secret, if any.</param>
+    /// <returns>The redacted message.</returns>
+    internal static string Redact(string message, string? token)
         => string.IsNullOrEmpty(token) ? message : message.Replace(token, "***", StringComparison.Ordinal);
 
     private static PeerFetchResult Fail(string error) => new(false, false, null, error);

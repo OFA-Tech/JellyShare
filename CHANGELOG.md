@@ -40,5 +40,13 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- Account peers: receive from a friend's Jellyfin that does not run JellyShare by signing in with a Jellyfin user they
+  made for you (address, username, password). The password is never stored; only the access token is kept, in headers
+  only. Per peer stream limit (`MaxStreams`, default 1) with **Refuse the new viewer** (Jellyfin's
+  `RateLimitExceeded` playback error) or **Stop the oldest viewer** (message + stop command, stream cut). The friend
+  user's remote bitrate limit is respected (titles above it play as a non-seekable transcode). A failed sign-in keeps
+  the titles for 7 days and shows "Sign-in failed" with **Sign in again** on the admin page. Admin API:
+  `kind`, `username`, `password`, `maxStreams`, `limitAction` on `POST`/`PUT admin/peers`. The harness e2e
+  (`harness/e2e.py`) has an "account peers" section.
 - `.github/workflows/ci.yml`: build and tests on every push and pull request to `main`.
 - Architecture tests for layer dependencies, contract locations, handler and request conventions and module setup.

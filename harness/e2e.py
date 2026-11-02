@@ -10,9 +10,11 @@ Prints one PASS/FAIL line per check and `ALL PASS` at the end; exit code 1 when 
 What it does (and undoes): pairs the servers both ways through the plugin's own admin endpoints (an existing
 working pairing is kept, otherwise it is recreated; share tokens only go to harness/.secrets/), runs a sync on
 both, then checks merge/dedupe, the loop guard, Home Video, relay access rules, PlaybackInfo, playback + ffprobe,
-the provider stream limit (429), the provider bitrate cap and the local-file fallback. Everything it changes is put
+the provider stream limit (429), the provider bitrate cap, the local-file fallback and account peers (a plain Jellyfin
+user on bob that alice signs in with: stream limit Refuse/StopOldest, password change). Everything it changes is put
 back afterwards even when a check fails: share limits, the media file it deletes (copied back from
-harness/media/.base.mkv) and the library state (refresh + wait until the placeholder is gone again).
+harness/media/.base.mkv), the library state (refresh + wait until the placeholder is gone again), and the friend user,
+account peer and paused token peer of the account section.
 
 Auth is by header only (Authorization: MediaBrowser ... Token="..."; X-JellyShare-Token). Tokens are never
 printed. Harness admin credentials are the throwaway admin/admin. Timing-sensitive provider checks run from inside
@@ -20,13 +22,16 @@ the Docker network (docker exec curl in the bob container), because Docker Deskt
 buffers responses.
 """
 import argparse
+import base64
 import collections
 import hashlib
 import json
 import os
 import pathlib
 import re
+import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -35,6 +40,7 @@ import traceback
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 
 HERE = pathlib.Path(__file__).resolve().parent
 SECRETS = HERE / ".secrets"
@@ -787,6 +793,324 @@ def single_local_sintel():
     return len(sintel) == 1 and not is_strm(sintel[0])
 
 
+FRIEND = "jellyshare-e2e-friend"
+ACCOUNT_PEER = "bob-account"
+PEERS_API = "/JellyShare/v1/admin/peers"
+PLUGIN_CONFIG = "/config/plugins/configurations/JellyShare.Jellyfin.xml"
+
+
+def peer_view(server, name):
+    return next((p for p in server.status()["Peers"] if p["Name"] == name), None)
+
+
+def put_peer(server, view, **changes):
+    """PUT admin/peers/{id}: the current name, URL and enabled flag, plus `changes`. An empty password/token keeps the credentials."""
+    body = {"Name": view["Name"], "BaseUrl": view["BaseUrl"], "Enabled": view["Enabled"]}
+    body.update(changes)
+    return server.api("PUT", f"{PEERS_API}/{view['Id']}", body)
+
+
+def stored_peer_token(server, peer_id):
+    """The access token the plugin saved for a peer (read from its settings file in the container). Never printed."""
+    res = sh("docker", "exec", server.container, "cat", PLUGIN_CONFIG)
+    for peer in ET.fromstring(res.stdout).iter("RemotePeer"):
+        if (peer.findtext("Id") or "").replace("-", "") == peer_id.replace("-", ""):
+            return peer.findtext("Token") or None
+    return None
+
+
+def grep_in(container, needles, *paths):
+    """Paths under `paths` in `container` that contain any of `needles` (fixed strings, passed on stdin, never on a command line)."""
+    res = sh("docker", "exec", "-i", container, "grep", "-rlF", "-f", "-", *paths, input="\n".join(needles).encode())
+    if res.returncode not in (0, 1):
+        raise ApiError(f"grep in {container} failed: {res.stderr.decode(errors='replace').strip()[:200]}")
+    return res.stdout.decode(errors="replace").split()
+
+
+class SocketListener:
+    """A minimal Jellyfin WebSocket client (header auth) that collects the JSON messages the server sends to our session."""
+
+    def __init__(self, server):
+        u = urllib.parse.urlsplit(server.url)
+        self.sock = socket.create_connection((u.hostname, u.port), timeout=10)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.sock.sendall((f"GET {u.path.rstrip('/')}/socket HTTP/1.1\r\nHost: {u.netloc}\r\nUpgrade: websocket\r\n"
+                           f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
+                           f"Authorization: {server.auth['Authorization']}\r\n\r\n").encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            chunk = self.sock.recv(1)
+            if not chunk:
+                break
+            head += chunk
+        if not head.startswith(b"HTTP/1.1 101"):
+            raise ApiError("websocket upgrade refused: " + head.split(b"\r\n", 1)[0].decode(errors="replace"))
+        self.sock.settimeout(None)
+        self.messages = []
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _exact(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise ConnectionError("closed")
+            buf += chunk
+        return buf
+
+    def _read(self):
+        try:
+            while True:
+                b0, b1 = self._exact(2)
+                size = b1 & 0x7F
+                if size == 126:
+                    size = int.from_bytes(self._exact(2), "big")
+                elif size == 127:
+                    size = int.from_bytes(self._exact(8), "big")
+                payload = self._exact(size)
+                if b0 & 0x0F == 1:
+                    try:
+                        self.messages.append(json.loads(payload))
+                    except ValueError:
+                        pass
+                elif b0 & 0x0F == 8:
+                    return
+        except OSError:
+            return
+
+    def seen(self, message_type, pred=lambda data: True):
+        return [m for m in list(self.messages) if m.get("MessageType") == message_type and pred(m.get("Data") or {})]
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def playback_info(server, item_id):
+    return server.api("POST", f"/Items/{item_id}/PlaybackInfo?userId={server.user}",
+                      {"UserId": server.user, "DeviceProfile": PROFILE, "MaxStreamingBitrate": 120000000})
+
+
+def account_placeholders():
+    """Alice's episode placeholders by (season, episode)."""
+    return {episode_key(e): e for e in ALICE.episodes() if is_strm(e)}
+
+
+HOLD_SECONDS = 75  # at 250 kB/s an uncut read of the 19.7 MB clip is still running then (curl exit 28)
+
+
+def hold_stream(item, out, seconds=HOLD_SECONDS):
+    """Reads a placeholder's relay URL inside alice's container at 250 kB/s, as Jellyfin's ffmpeg does for a viewer who keeps
+    watching; `out` gets (code, size, curl exit) and seconds. Not through /Videos/{id}/stream: that adds a hop whose
+    socket buffers hold the whole 19.7 MB clip, so the relay copy would end at once and there would be nothing to stop.
+    A cut connection still delivers what the kernel had buffered (several MB), so a cut shows as curl exit 18/56, not at once."""
+    tmp = f"/tmp/e2e-hold-{os.getpid()}.bin"
+    out["file"] = tmp
+    url = sh("docker", "exec", ALICE.container, "cat", item["Path"]).stdout.decode().strip()
+    cfg = f'url = "{url}"\n'
+    started = time.time()
+    try:
+        res = subprocess.run(["docker", "exec", "-i", ALICE.container, "curl", "-s", "-K", "-", "-o", tmp,
+                              "--limit-rate", "250k", "-m", str(seconds), "-w", "E2E_CODE=%{http_code} E2E_SIZE=%{size_download}"],
+                             input=cfg, capture_output=True, text=True, timeout=seconds + 30)
+        m = re.search(r"E2E_CODE=(\d+) E2E_SIZE=(\d+)", res.stdout)
+        out["res"] = (int(m.group(1)), int(m.group(2)), res.returncode) if m else None
+    except Exception as exc:  # reported by the checks
+        out["err"] = type(exc).__name__
+    out["seconds"] = time.time() - started
+
+
+def held_bytes(out):
+    res = sh("docker", "exec", ALICE.container, "stat", "-c", "%s", out.get("file", "/nonexistent"))
+    return int(res.stdout.decode().strip() or 0) if res.returncode == 0 else 0
+
+
+def remove_account_leftovers():
+    """Removes the friend user and the account peer of an earlier aborted run; re-enables alice's token peer to bob."""
+    for p in [p for p in ALICE.status()["Peers"] if p["Name"] == ACCOUNT_PEER]:
+        ALICE.api("DELETE", f"{PEERS_API}/{p['Id']}", raw=True)
+        note("removed a leftover account peer from an earlier run")
+    for u in BOB.api("GET", "/Users"):
+        if u["Name"] == FRIEND:
+            BOB.api("DELETE", f"/Users/{u['Id']}", raw=True)
+            note("removed a leftover friend user from an earlier run")
+    token_peer = peer_view(ALICE, "bob")
+    if token_peer and not token_peer["Enabled"]:
+        put_peer(ALICE, token_peer, Enabled=True)
+        note("re-enabled alice's token peer to bob")
+
+
+def check_account_peers():
+    """bob's admin makes a plain Jellyfin user for alice (Shows only); alice adds it as an account peer and plays through it.
+
+    alice's token peer to bob is disabled meanwhile, so the account peer is the only source of bob's titles (otherwise
+    the stream limit would just fall back to the token peer). Everything is undone in the finally block.
+    """
+    print("== account peers (bob shares through a plain Jellyfin user, alice signs in)")
+    password, new_password = secrets.token_urlsafe(18), secrets.token_urlsafe(18)
+    tokens = []
+    friend_id = peer_id = listener = None
+    hold, hold_thread = {}, None
+    remove_account_leftovers()
+    token_peer = peer_view(ALICE, "bob")
+    try:
+        # 1. The friend: a normal user on bob that sees only the Shows library.
+        user = BOB.api("POST", "/Users/New", {"Name": FRIEND, "Password": password})
+        friend_id = user["Id"]
+        policy = user["Policy"]
+        policy.update(EnableAllFolders=False, EnabledFolders=[BOB.libs["Shows"]])
+        BOB.api("POST", f"/Users/{friend_id}/Policy", policy)
+        policy = BOB.api("GET", f"/Users/{friend_id}")["Policy"]
+        check("bob: friend user created with access to the Shows library only",
+              policy["EnableAllFolders"] is False and policy["EnabledFolders"] == [BOB.libs["Shows"]])
+
+        # 2. alice adds the account peer (and pauses her token peer to bob), syncs.
+        put_peer(ALICE, token_peer, Enabled=False)
+        peer = ALICE.api("POST", PEERS_API, {"Name": ACCOUNT_PEER, "BaseUrl": BOB.internal, "Enabled": True, "Kind": "Account",
+                                             "Username": FRIEND, "Password": password, "MaxStreams": 1, "LimitAction": "Refuse"})
+        peer_id = peer["Id"]
+        check("alice: account peer added (kind Account, 1 stream, Refuse, signed in, no token in the response)",
+              (peer["Kind"], peer["MaxStreams"], peer["LimitAction"], peer["HasToken"]) == ("Account", 1, "Refuse", True)
+              and "Token" not in peer and "Password" not in peer, f"{peer['Kind']}, {peer['MaxStreams']}, {peer['LimitAction']}")
+        tokens.append(stored_peer_token(ALICE, peer_id))
+        check("alice stored an access token for the account peer (and no password)", bool(tokens[0]))
+        report = ALICE.sync()
+        check("alice: sync with the account peer finished without peer errors", not report.get("PeerErrors"), str(report.get("PeerErrors") or ""))
+        view = peer_view(ALICE, ACCOUNT_PEER)
+        check("account peer: friend's catalog has the 3 Pioneer One episodes and nothing from bob's Movies",
+              view.get("Titles") == 3 and not view.get("LastError"), f"Titles={view.get('Titles')}, LastError={view.get('LastError')}")
+        ALICE.refresh()
+
+        def visible():
+            eps = account_placeholders()
+            tears = placeholder(ALICE, TEARS)
+            return {(1, 2), (2, 1)} <= set(eps) and tears is None
+        ok = wait_until(visible, 120, 3, tick=ALICE.refresh, tick_every=40)
+        check("alice: bob-only episodes S01E02 + S02E01 have placeholders, Tears of Steel (bob's Movies, not shared) has none",
+              bool(ok), f"episode placeholders {sorted(account_placeholders())}, Tears placeholder {placeholder(ALICE, TEARS) is not None}")
+        eps = account_placeholders()
+        if (1, 2) not in eps or (2, 1) not in eps:
+            return
+        item_a, title_a, title_b = eps[(1, 2)], eps[(1, 2)]["Id"], eps[(2, 1)]["Id"]
+
+        # 3. Neither the access token nor the password is in a placeholder file or a log line.
+        check_account_secrets(tokens, password)
+
+        # 4. Title A plays (a viewer keeps reading), title B is refused with Jellyfin's rate limit error.
+        listener = SocketListener(ALICE)
+        time.sleep(1)
+        info = playback_info(ALICE, title_a)
+        check("account peer: PlaybackInfo of title A (S01E02) is accepted", not info.get("ErrorCode") and bool(info.get("MediaSources")),
+              f"ErrorCode={info.get('ErrorCode')}")
+        ALICE.api("POST", "/Sessions/Playing", {"ItemId": title_a, "PlayMethod": "DirectStream", "PositionTicks": 0, "CanSeek": True}, raw=True)
+        hold_thread = threading.Thread(target=hold_stream, args=(item_a, hold))
+        hold_thread.start()
+        streaming = wait_until(lambda: held_bytes(hold) > 300_000 or "res" in hold, 60, 1)
+        if not check("account peer: title A streams through alice's relay (a viewer is reading)", bool(streaming) and "res" not in hold,
+                     f"{held_bytes(hold)} bytes so far, {hold.get('res') or hold.get('err') or 'still streaming'}"):
+            return
+        info = playback_info(ALICE, title_b)
+        check('MaxStreams=1, Refuse: PlaybackInfo of title B -> ErrorCode "RateLimitExceeded"',
+              info.get("ErrorCode") == "RateLimitExceeded" and not info.get("MediaSources"), f"ErrorCode={info.get('ErrorCode')}")
+        check("Refuse: title A keeps streaming", "res" not in hold)
+
+        # 5. StopOldest: B starts, A gets a message + Stop and its relay session ends.
+        view = put_peer(ALICE, peer_view(ALICE, ACCOUNT_PEER), LimitAction="StopOldest")
+        check("account peer switched to StopOldest", view["LimitAction"] == "StopOldest", view["LimitAction"])
+        info = playback_info(ALICE, title_b)
+        check("StopOldest: PlaybackInfo of title B is accepted", not info.get("ErrorCode") and bool(info.get("MediaSources")),
+              f"ErrorCode={info.get('ErrorCode')}")
+        got = wait_until(lambda: listener.seen("Playstate", lambda d: d.get("Command") == "Stop"), 15, 0.5)
+        check("StopOldest: title A's session got a Playstate Stop over the WebSocket (sent with no controlling session)", bool(got),
+              f"messages seen: {sorted({m.get('MessageType') for m in listener.messages})}")
+        shown = listener.seen("GeneralCommand", lambda d: d.get("Name") == "DisplayMessage")
+        text = ((shown[0].get("Data") or {}).get("Arguments") or {}).get("Text", "") if shown else ""
+        check("StopOldest: the session was shown a message why", ACCOUNT_PEER in text, text)
+        status, _, data = read_n(f"{ALICE.url}/Videos/{title_b}/stream?static=true", {**ALICE.auth, "Range": "bytes=0-1048575"}, 1 << 20)
+        check("StopOldest: title B streams (206, 1 MiB)", status == 206 and len(data) == 1 << 20, f"HTTP {status}, {len(data)} bytes")
+        ALICE.api("POST", "/Sessions/Playing/Stopped", {"ItemId": title_a, "PositionTicks": 0}, raw=True)
+        # A still counted as playing would be let through (seek of a running playback); refused means B holds the slot alone.
+        view = put_peer(ALICE, peer_view(ALICE, ACCOUNT_PEER), LimitAction="Refuse")
+        info = playback_info(ALICE, title_a)
+        check("StopOldest released A's relay session: back on Refuse, PlaybackInfo of A -> RateLimitExceeded (B holds the slot)",
+              view["LimitAction"] == "Refuse" and info.get("ErrorCode") == "RateLimitExceeded", f"ErrorCode={info.get('ErrorCode')}")
+        hold_thread.join(HOLD_SECONDS + 30)
+        res = hold.get("res")
+        check("StopOldest: a direct read of title A's relay URL is cut (broken transfer, not the full clip or its timeout; Jellyfin's own ffmpeg read is not exercised)",
+              res is not None and res[2] in (18, 56) and res[1] < BASE_MKV.stat().st_size,
+              f"HTTP {res[0]}, {res[1]} bytes, curl exit {res[2]}, after {hold['seconds']:.0f} s" if res else hold.get("err", "no result"))
+
+        # 6. The friend changes the password: sign-in fails, titles stay; a new password signs in again.
+        BOB.api("POST", f"/Users/{friend_id}/Password", {"CurrentPw": "", "NewPw": new_password}, raw=True)
+        report = ALICE.sync()
+        view = peer_view(ALICE, ACCOUNT_PEER)
+        check("password changed on bob -> alice's sync marks the peer SignInFailed",
+              view["SignInFailed"] is True and (view.get("LastError") or "").startswith("sign-in failed"), f"{view['SignInFailed']}, {view.get('LastError')}")
+        check("sign-in failed: the titles stay on alice (failure grace)", {(1, 2), (2, 1)} <= set(account_placeholders()))
+        view = put_peer(ALICE, view, Username=FRIEND, Password=new_password)
+        tokens.append(stored_peer_token(ALICE, peer_id))
+        check("PUT admin/peers with the new password signs in again (new access token stored)",
+              view["HasToken"] and bool(tokens[-1]) and tokens[-1] != tokens[0])
+        report = ALICE.sync()
+        view = peer_view(ALICE, ACCOUNT_PEER)
+        check("after signing in again the sync is ok (no peer errors, SignInFailed cleared, 3 titles)",
+              not report.get("PeerErrors") and view["SignInFailed"] is False and not view.get("LastError") and view.get("Titles") == 3,
+              f"{report.get('PeerErrors')}, {view['SignInFailed']}, {view.get('LastError')}, Titles={view.get('Titles')}")
+        check_account_secrets(tokens, password, new_password)
+    finally:
+        print("== account peers: clean up")
+        if listener:
+            listener.close()
+        if hold_thread:
+            hold_thread.join(120)
+            sh("docker", "exec", ALICE.container, "rm", "-f", hold.get("file", "/nonexistent"))
+        # Each undo step has its own try, so one failing step never skips the others.
+        def undo(label, fn):
+            try:
+                fn()
+            except Exception as exc:
+                check(f"cleanup: {label}", False, f"{type(exc).__name__}: {str(exc)[:200]}")
+
+        undo("stop the playback session", lambda: ALICE.api("POST", "/Sessions/Playing/Stopped", {"PositionTicks": 0}, raw=True))
+        # The token peer goes first: deleting the account peer starts a sync, and one that runs while the token peer is
+        # still off would delete all of bob's placeholders (and the sync below would only wait for that one).
+        if token_peer:
+            undo("enable the token peer to bob again", lambda: put_peer(ALICE, token_peer, Enabled=True))
+        if peer_id:
+            undo("delete the account peer", lambda: ALICE.api("DELETE", f"{PEERS_API}/{peer_id}", raw=True))
+        if friend_id:
+            undo("delete the friend user", lambda: BOB.api("DELETE", f"/Users/{friend_id}", raw=True))
+        try:
+            now_token_peer = peer_view(ALICE, "bob")
+            check("cleanup: account peer and friend user removed, token peer to bob enabled again",
+                  peer_view(ALICE, ACCOUNT_PEER) is None and bool(now_token_peer and now_token_peer["Enabled"])
+                  and all(u["Name"] != FRIEND for u in BOB.api("GET", "/Users")))
+            ALICE.sync()
+            ALICE.refresh()
+            ok = wait_until(lambda: not state_problems(ALICE), 120, 3, tick=ALICE.refresh, tick_every=40)
+            check("cleanup: alice is back to the merged state", bool(ok), "; ".join(state_problems(ALICE)))
+        except Exception as exc:
+            check("cleanup: account peers section undone", False, f"{type(exc).__name__}: {str(exc)[:200]}")
+
+
+def check_account_secrets(tokens, *passwords):
+    st = ALICE.status()
+    roots = [st["Movies"]["Path"], st["Shows"]["Path"]]
+    tokens = [t for t in tokens if t]
+    hits = grep_in(ALICE.container, tokens + list(passwords), *roots)
+    check("no file under alice's placeholder roots contains the access token or the password", not hits, f"{len(hits)} file(s)")
+    hits = grep_in(ALICE.container, tokens + list(passwords), "/config/log")
+    check("no alice log file contains the access token or the password", not hits, ", ".join(hits))
+    hits = grep_in(ALICE.container, list(passwords), "/config/plugins", "/config/log")
+    check("the password is nowhere in alice's plugin folder, settings or logs", not hits, f"{len(hits)} file(s)")
+    blob = json.dumps(st)
+    check("alice's admin status never contains the access token or the password",
+          not any(s in blob for s in tokens + list(passwords)))
+
+
 def run():
     ap = argparse.ArgumentParser()
     ap.add_argument("--deploy", action="store_true", help="docker cp the Release JellyShare.*.dll into both containers and restart them first")
@@ -820,7 +1144,7 @@ def run():
               "; ".join(f"{s.name}: {p}" for s in (ALICE, BOB) for p in state_problems(s)))
 
         sections = (check_library_content, check_loop_guard, check_relay_and_playbackinfo, check_playback,
-                    check_limit_429, check_capped_stream, check_fallback)
+                    check_limit_429, check_capped_stream, check_fallback, check_account_peers)
         if not settled:
             note("libraries did not reach the merged state: the content checks would only repeat that failure, skipping them")
             sections = ()

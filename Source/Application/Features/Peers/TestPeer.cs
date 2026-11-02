@@ -21,19 +21,25 @@ public sealed class TestPeerQueryHandler : IQueryHandler<TestPeerQuery, TestPeer
     private const string AddressChangedMessage =
         "The address was changed. Enter the token again to test the new address (the saved token is only used for the saved address).";
 
+    private const string AddressChangedForAccountMessage =
+        "The address was changed. Enter the password again to test the new address (the saved session is only used for the saved address).";
+
     private const string RedirectMessage =
         "The server answered with a redirect, which is refused for security. Use the final address (check http vs https and the path).";
 
     private readonly ISettingsProvider _config;
     private readonly IPeerClient _peers;
+    private readonly IAccountSignIn _accounts;
 
     /// <summary>Initializes a new instance of the <see cref="TestPeerQueryHandler"/> class.</summary>
     /// <param name="config">The settings (saved peers).</param>
     /// <param name="peers">The peer client.</param>
-    public TestPeerQueryHandler(ISettingsProvider config, IPeerClient peers)
+    /// <param name="accounts">Signs in to and out of a friend's server.</param>
+    public TestPeerQueryHandler(ISettingsProvider config, IPeerClient peers, IAccountSignIn accounts)
     {
         _config = config;
         _peers = peers;
+        _accounts = accounts;
     }
 
     /// <inheritdoc />
@@ -44,6 +50,12 @@ public sealed class TestPeerQueryHandler : IQueryHandler<TestPeerQuery, TestPeer
         if (url is null)
         {
             return Fail(AdminRules.InvalidUrlMessage);
+        }
+
+        var savedPeer = request.PeerId is { } id ? _config.Current.Peers.FirstOrDefault(p => p.Id == id) : null;
+        if ((request.Kind ?? savedPeer?.Kind) == PeerKind.Account)
+        {
+            return await TestAccountAsync(request, url, savedPeer, cancellationToken).ConfigureAwait(false);
         }
 
         var token = request.Token?.Trim() ?? string.Empty;
@@ -92,6 +104,70 @@ public sealed class TestPeerQueryHandler : IQueryHandler<TestPeerQuery, TestPeer
         return Result.Success(new TestPeerResponse(
             true,
             string.IsNullOrWhiteSpace(ping.ServerName) ? fetch.Catalog.ServerName : ping.ServerName,
+            fetch.Catalog.ProtocolVersion,
+            fetch.Catalog.Items.Count,
+            null));
+    }
+
+    // With a password: sign in with a fresh id (never a saved peer's device id), fetch, sign out. Without one: the saved session.
+    private async Task<Result<TestPeerResponse>> TestAccountAsync(TestPeerQuery request, string url, RemotePeer? saved, CancellationToken ct)
+    {
+        saved = saved?.Kind == PeerKind.Account ? saved : null;
+        var password = request.Password ?? string.Empty;
+        if (password.Length == 0)
+        {
+            if (saved is null)
+            {
+                return Fail(PeerErrors.MissingPassword.Description);
+            }
+
+            if (!string.Equals(url, AdminRules.NormalizeUrl(saved.BaseUrl), StringComparison.Ordinal))
+            {
+                return Fail(AddressChangedForAccountMessage);
+            }
+
+            return await FetchAsync(saved, null, ct).ConfigureAwait(false);
+        }
+
+        var username = string.IsNullOrWhiteSpace(request.Username) ? saved?.Username : request.Username.Trim();
+        if (string.IsNullOrEmpty(username))
+        {
+            return Fail(PeerErrors.MissingUsername.Description);
+        }
+
+        var id = Guid.NewGuid();
+        var (session, error) = await AccountSignInStep.RunAsync(_accounts, url, username, password, id, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            return Fail(error!);
+        }
+
+        try
+        {
+            var peer = new RemotePeer
+            {
+                Id = id, Name = "test", BaseUrl = url, Kind = PeerKind.Account, Username = username, AccountUserId = session.UserId!, Token = session.AccessToken!,
+            };
+            return await FetchAsync(peer, session.ServerName, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            // Best effort, and not tied to the request: a cancelled test still ends its session.
+            await _accounts.SignOutAsync(url, session.AccessToken!, id, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<Result<TestPeerResponse>> FetchAsync(RemotePeer peer, string? serverName, CancellationToken ct)
+    {
+        var fetch = await _peers.FetchCatalogAsync(peer, null, ct).ConfigureAwait(false);
+        if (!fetch.Ok || fetch.Catalog is null)
+        {
+            return Fail(Redact(CatalogMessage(fetch.Error), peer.Token ?? string.Empty));
+        }
+
+        return Result.Success(new TestPeerResponse(
+            true,
+            string.IsNullOrWhiteSpace(serverName) ? fetch.Catalog.ServerName : serverName,
             fetch.Catalog.ProtocolVersion,
             fetch.Catalog.Items.Count,
             null));

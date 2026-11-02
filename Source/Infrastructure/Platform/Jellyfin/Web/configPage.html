@@ -116,11 +116,40 @@
                             <label for="js-peer-url">Server address</label>
                             <input type="text" id="js-peer-url" placeholder="https://alice.example.com/jellyfin" autocomplete="off">
                         </div>
-                        <div class="js-field grow">
+                        <div class="js-field">
+                            <label for="js-peer-kind">Sign in with</label>
+                            <select id="js-peer-kind">
+                                <option value="Token">Invitation token</option>
+                                <option value="Account">Jellyfin account</option>
+                            </select>
+                        </div>
+                        <div class="js-field grow" id="js-peer-token-field">
                             <label for="js-peer-token">Token</label>
                             <input type="password" id="js-peer-token" autocomplete="new-password">
                         </div>
                     </div>
+                    <div class="js-row js-hidden" id="js-peer-account-fields">
+                        <div class="js-field grow">
+                            <label for="js-peer-username">Username</label>
+                            <input type="text" id="js-peer-username" autocomplete="off">
+                        </div>
+                        <div class="js-field grow">
+                            <label for="js-peer-password">Password</label>
+                            <input type="password" id="js-peer-password" autocomplete="new-password">
+                        </div>
+                        <div class="js-field">
+                            <label for="js-peer-max-streams">Max streams at a time</label>
+                            <input type="number" id="js-peer-max-streams" min="1" max="20" value="1">
+                        </div>
+                        <div class="js-field">
+                            <label for="js-peer-limit-action">When the limit is reached</label>
+                            <select id="js-peer-limit-action">
+                                <option value="Refuse">Refuse the new viewer</option>
+                                <option value="StopOldest">Stop the oldest viewer</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="js-muted js-hidden" id="js-peer-account-note">Use an account made for you on their server. The password is used once to sign in and is not stored; only the sign-in session is kept.</p>
                     <p>
                         <button type="button" class="js-btn" id="js-peer-test">Test connection</button>
                         <button type="button" class="js-btn primary" id="js-peer-add">Add peer</button>

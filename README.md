@@ -69,6 +69,41 @@ Things to know:
   default trigger when the task is first registered). If your own file for a title disappears (deleted, or the drive is offline),
   the peer's copy takes over within a minute or two, and goes away again when your file is back.
 
+## Account peers
+
+A friend can share their Jellyfin with you **without installing JellyShare**: they give you a normal Jellyfin login
+and your server signs in with it.
+
+What the **friend** does (on their Jellyfin, Dashboard → Users):
+
+1. Create a new user just for you (do not hand out their own login). Under **Library access**, tick only the
+   libraries they want to share; parental rating limits work as usual.
+2. Optionally set **Internet streaming bitrate limit** on that user (see below).
+3. Send you their server address (as you would reach it, including a reverse-proxy path, for example
+   `https://bob.example.com/jellyfin`), the user name and the password. Use a private channel.
+
+What **you** enter (**Receive from peers → Add a peer**, Sign in with: **Jellyfin account**): name, server address,
+username, password, **Max streams at a time** (default 1) and **When the limit is reached**. Press **Test connection**,
+then **Add peer** and **Sync now**, as in [Pairing two servers](#pairing-two-servers). The friend's titles appear next
+to yours through the same placeholders; your own copy still wins, and the Peers list order decides between peers.
+
+- **Password:** used once to sign in and never stored. JellyShare keeps only Jellyfin's access token for that login.
+- **Stream limit:** Jellyfin cannot limit how many streams one login plays at once, so JellyShare does it on your side.
+  A stream is one title playing from that peer (two of your users watching the same title count once; seeks and range
+  requests of a playing title never count again). It stays counted while data flows and for 30 s after. When a new
+  title would go over the limit, another peer with the same title is used first; otherwise:
+  - **Refuse the new viewer** (default): the viewer gets Jellyfin's "rate limit exceeded" playback error.
+  - **Stop the oldest viewer:** the oldest playback from that peer gets a short message and a stop command, its
+    stream is cut, and the new one starts. Some apps ask for playback info as soon as you open a title, so with this
+    choice just opening another title from that friend can stop the oldest stream.
+- **Bitrate limit:** JellyShare respects the friend user's internet streaming bitrate limit. Titles above it are fetched
+  as a transcoded stream from the friend's server; **such streams cannot seek** (shortcut: a seek waits or restarts,
+  like a capped title, see "Seeking a capped title" below).
+- **Sign-in failed** (the friend changed the password or removed the user): titles stay for 7 days but do not play
+  (another peer with the same title still does). The admin page shows "Sign-in failed"; type the current password and
+  press **Sign in again**. The message clears after the next sync.
+- Watched status stays on your server; nothing is written back to the friend's server.
+
 ## Stream limits and the bitrate cap
 
 - **Streams at once (per share):** a stream is one (share, title) session. It stays counted while any response for it
@@ -143,6 +178,11 @@ Things to know:
   administrators, including the peer tokens you received and the hashes of the invitations you created. The JellyShare
   admin page never receives them (its own `/JellyShare/v1/admin/...` endpoints are admin-only and return neither), but
   anyone with an administrator login or API key on your server can read them through the standard API.
+- **Account peers:** the stored access token is a full Jellyfin login for the friend's account, not a limited
+  share token: whoever has it can do anything that user can (browse, play, change its own settings). It is kept like
+  the peer tokens above (same plugin configuration, sent only in the `Authorization` header, never in a URL, `.strm`
+  file, log line or admin response). The friend should therefore give a **dedicated user** that sees only the libraries
+  they want to share, never their own or an admin login. Changing that user's password on their side revokes the token.
 - The relay answers only requests from loopback that carry **no** proxy header (`X-Forwarded-For`, `X-Forwarded-Host`,
   `X-Forwarded-Proto`, `X-Forwarded-Port`, `X-Real-IP`, `Forwarded`, `Via`, `X-Original-*`, `CF-Connecting-IP`,
   `True-Client-IP`); everything else gets 403. Jellyfin also hides the relay URL from clients.

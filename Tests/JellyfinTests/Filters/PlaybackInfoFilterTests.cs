@@ -2,7 +2,14 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net.Http.Json;
 using System.Text.Json;
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
+using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
+using JellyShare.Domain.Interfaces.Sync;
+using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Configuration;
+using JellyShare.Domain.Models.Protocol;
+using JellyShare.Domain.Models.Sync;
 using JellyShare.Jellyfin.Adapters;
 using JellyShare.Jellyfin.Filters;
 using JellyShare.UnitTests.Fakes;
@@ -39,14 +46,27 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
+    private const string Key = "movie:tmdb:10378";
+    private const string OtherKey = "movie:tmdb:other";
+
     private readonly FakePlaceholders _placeholders = new();
     private readonly FakeAuthorization _auth = new();
+    private readonly ConsumerConfig _config = new();
+    private readonly FakeIndex _index = new();
+    private readonly RelaySessions _sessions = new(new MutableClock());
+    private readonly FakeStopper _stopper = new();
+    private readonly LevelLogger<PlaybackInfoFilter> _filterLog = new();
     private WebApplication _app = null!;
     private HttpClient _client = null!;
 
     public async Task InitializeAsync()
     {
-        _placeholders.Items[Placeholder] = new PlaceholderMedia("movie:tmdb:10378", 1_312_543);
+        _placeholders.Items[Placeholder] = new PlaceholderMedia(Key, 1_312_543);
+        _config.Settings.Peers.Add(new RemotePeer { Id = TestItems.PeerA, Name = "alice", BaseUrl = "http://alice:8096", Token = "t", Kind = PeerKind.Account, MaxStreams = 1 });
+        _index.Entries[Key] = new MergedEntry(
+            Key,
+            new[] { Key },
+            new List<(Guid, CatalogItem)> { (TestItems.PeerA, TestItems.Movie("Sintel", tmdb: "10378", id: "alice-item")) });
 
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls("http://127.0.0.1:0");
@@ -56,6 +76,11 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
         builder.Services.AddSingleton<IPlaceholderLookup>(_placeholders);
         builder.Services.AddSingleton<IAuthorizationContext>(_auth);
         builder.Services.AddSingleton<IRelayBase>(new FixedRelay());
+        builder.Services.AddSingleton<ISettingsProvider>(_config);
+        builder.Services.AddSingleton<IConsumerIndex>(_index);
+        builder.Services.AddSingleton(_sessions);
+        builder.Services.AddSingleton<IPlaybackStopper>(_stopper);
+        builder.Services.AddSingleton<ILogger<PlaybackInfoFilter>>(_filterLog);
         PlaybackInfoFilter.Register(builder.Services);
         _app = builder.Build();
         _app.MapControllers();
@@ -276,6 +301,98 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         result.Items.Select(i => i.MediaSources.Single().Path).ShouldBe(new[] { string.Empty, LocalPath, OtherHttp });
         list.Select(i => i.MediaSources.Single().Path).ShouldBe(new[] { string.Empty, LocalPath, OtherHttp });
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_LimitReached_Refuse_ReturnsRateLimitExceeded()
+    {
+        _sessions.Touch(OtherKey, TestItems.PeerA);
+
+        var info = await Post(Placeholder, Body());
+
+        info.ErrorCode.ShouldBe(PlaybackErrorCode.RateLimitExceeded);
+        info.MediaSources.ShouldBeEmpty();
+        _stopper.Calls.ShouldBeEmpty();
+        _filterLog.Entries.ShouldContain(e => e.Level == LogLevel.Information && e.Message == "JellyShare: refused " + Key + ": peer alice allows 1 stream(s)");
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_LimitReached_StopOldest_StopsAndContinues()
+    {
+        _config.Settings.Peers[0].LimitAction = StreamLimitAction.StopOldest;
+        _sessions.Touch(OtherKey, TestItems.PeerA);
+
+        var info = await Post(Placeholder, Body());
+
+        info.ErrorCode.ShouldBeNull();
+        info.MediaSources.ShouldHaveSingleItem().Path.ShouldBe(string.Empty);
+        _stopper.Calls.ShouldBe(new[] { (OtherKey, "Stopped: alice allows 1 stream(s) at a time and another viewer started.") });
+        _sessions.ActiveTitles(TestItems.PeerA).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task StopOldest_ReleasesSlotEvenIfStopFails()
+    {
+        _config.Settings.Peers[0].LimitAction = StreamLimitAction.StopOldest;
+        _sessions.Touch(OtherKey, TestItems.PeerA);
+        _stopper.Fail = true;
+
+        var info = await Post(Placeholder, Body());
+
+        info.ErrorCode.ShouldBeNull();
+        info.MediaSources.ShouldHaveSingleItem();
+        _stopper.Calls.ShouldHaveSingleItem();
+        _sessions.ActiveTitles(TestItems.PeerA).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_TokenPeer_Unaffected()
+    {
+        _config.Settings.Peers[0].Kind = PeerKind.Token;
+        _sessions.Touch(OtherKey, TestItems.PeerA);
+
+        var info = await Post(Placeholder, Body());
+
+        info.ErrorCode.ShouldBeNull();
+        info.MediaSources.ShouldHaveSingleItem();
+        _stopper.Calls.ShouldBeEmpty();
+        _sessions.ActiveTitles(TestItems.PeerA).ShouldBe(new[] { OtherKey });
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_NotPlaceholder_Unaffected()
+    {
+        _config.Settings.Peers[0].LimitAction = StreamLimitAction.StopOldest;
+        _sessions.Touch(OtherKey, TestItems.PeerA);
+
+        var info = await Post(Local, Body());
+
+        info.ErrorCode.ShouldBeNull();
+        info.MediaSources.ShouldHaveSingleItem().Path.ShouldBe(LocalPath);
+        _stopper.Calls.ShouldBeEmpty();
+        _sessions.ActiveTitles(TestItems.PeerA).ShouldBe(new[] { OtherKey });
+    }
+
+    private sealed class FakeIndex : IConsumerIndex
+    {
+        public Dictionary<string, MergedEntry> Entries { get; } = new();
+
+        public MergedEntry? Find(string canonicalKey) => Entries.GetValueOrDefault(canonicalKey);
+
+        public IReadOnlyDictionary<Guid, PeerState> PeerStates() => new Dictionary<Guid, PeerState>();
+    }
+
+    private sealed class FakeStopper : IPlaybackStopper
+    {
+        public bool Fail { get; set; }
+
+        public List<(string Key, string Message)> Calls { get; } = new();
+
+        public Task<int> StopTitleAsync(string canonicalKey, string message, CancellationToken ct)
+        {
+            Calls.Add((canonicalKey, message));
+            return Fail ? Task.FromException<int>(new InvalidOperationException("client gone")) : Task.FromResult(0);
+        }
     }
 
     private sealed class FakePlaceholders : IPlaceholderLookup

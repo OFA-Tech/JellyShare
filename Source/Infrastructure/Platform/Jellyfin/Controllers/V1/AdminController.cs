@@ -96,7 +96,9 @@ public class AdminController : JellyShareControllerBase
             return BadRequestError(MissingBody);
         }
 
-        return ToActionResult(await Sender.Send(new AddPeerCommand(request.Name, request.BaseUrl, request.Token, request.Enabled), ct).ConfigureAwait(false));
+        return ToActionResult(await Sender.Send(
+            new AddPeerCommand(request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction),
+            ct).ConfigureAwait(false));
     }
 
     /// <summary>Updates a peer.</summary>
@@ -112,7 +114,9 @@ public class AdminController : JellyShareControllerBase
             return BadRequestError(MissingBody);
         }
 
-        return ToActionResult(await Sender.Send(new UpdatePeerCommand(id, request.Name, request.BaseUrl, request.Token, request.Enabled), ct).ConfigureAwait(false));
+        return ToActionResult(await Sender.Send(
+            new UpdatePeerCommand(id, request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction),
+            ct).ConfigureAwait(false));
     }
 
     /// <summary>Removes a peer.</summary>
@@ -150,7 +154,9 @@ public class AdminController : JellyShareControllerBase
             return BadRequestError(MissingBody);
         }
 
-        return ToActionResult(await Sender.Send(new TestPeerQuery(request.Url, request.Token, request.PeerId), ct).ConfigureAwait(false));
+        return ToActionResult(await Sender.Send(
+            new TestPeerQuery(request.Url, request.Token, request.PeerId, request.Kind, request.Username, request.Password),
+            ct).ConfigureAwait(false));
     }
 
     /// <summary>

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using JellyShare.Data.Peers.Clients;
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
@@ -418,6 +419,43 @@ public sealed class RelayControllerTests
     }
 
     [Fact]
+    public async Task Relay_FinishedCopy_ExpiresAfterGrace()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => Video(new byte[] { 1 }));
+
+        await CreateController(Context()).Play(Key);
+        await CreateController(Context("HEAD")).Play(Key);
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Relay_LongBodyCopy_StaysCountedAndEndsOnRelease()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        var upstreamBody = new BlockingStream(new byte[] { 4, 5, 6 });
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(upstreamBody) });
+        var context = Context();
+        var lifetime = new RecordingLifetime();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+
+        var play = CreateController(context, idleTimeout: TimeSpan.FromSeconds(30)).Play(Key);
+        await upstreamBody.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _clock.Now = _clock.Now.Add(RelaySessions.Grace * 3);
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+        _sessions.Release(Key);
+        await play.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Body(context).ShouldBe(new byte[] { 4, 5, 6 });
+        upstreamBody.ReadCancelled.ShouldBeTrue();
+        lifetime.Aborted.ShouldBeTrue();
+        _logger.Lines.ShouldNotContain(l => l.Contains("broke", StringComparison.Ordinal) || l.Contains("stalled", StringComparison.Ordinal));
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Relay_ClientGoneDuringWrite_IsNotLoggedAsPeerFailure()
     {
         Host("alice", _ => Video(new byte[100]));
@@ -471,6 +509,164 @@ public sealed class RelayControllerTests
         await CreateController(later).Play(Key);
 
         Body(later).ShouldBe(new byte[] { 1 });
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFull_SkipsToNextSource()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch("movie:tmdb:other", _a);
+        Host("alice", _ => Video(new byte[] { 1 }));
+        Host("bob", _ => Video(new byte[] { 2 }));
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 2 });
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("bob");
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFull_SameTitleSeek_IsServed()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch(Key, _a);
+        Host("alice", _ => Video(new byte[] { 1 }, HttpStatusCode.PartialContent, "bytes 5-5/6"));
+        Host("bob", _ => Video(new byte[] { 2 }));
+        var context = Context(range: "bytes=5-");
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(206);
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("alice");
+    }
+
+    [Fact]
+    public async Task Play_AllFull_Is503StreamLimit()
+    {
+        foreach (var peer in _config.Current.Peers)
+        {
+            peer.Kind = PeerKind.Account;
+            _sessions.Touch("movie:tmdb:" + peer.Name, peer.Id);
+        }
+
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(503);
+        ((ObjectResult)result).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("stream limit reached");
+        _upstream.ShouldBeEmpty();
+        _logger.Lines.Where(l => l.StartsWith("Information", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal) && l.Contains("bob", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+        _logger.Lines.ShouldNotContain(l => l.Contains(TokenA, StringComparison.Ordinal) || l.Contains(TokenB, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerServes_KeepsClaimAndLogsStartOnce()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => Video(new byte[] { 1 }));
+
+        await CreateController(Context()).Play(Key);
+        await CreateController(Context(range: "bytes=1-")).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+        _logger.Lines.Where(l => l.StartsWith("Information", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal)).ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFails_FreesClaimForNextTitle()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+        StreamLimitGate.HasRoom(_config.Current.Peers[0], "movie:tmdb:other", _sessions).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerTimesOut_FreesClaim()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _hosts["alice"] = async (_, ct) =>
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            throw new InvalidOperationException("unreachable");
+        };
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context(), TimeSpan.FromMilliseconds(200)).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerUnreachable_FreesClaim()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _hosts["alice"] = (_, _) => throw new HttpRequestException("connection refused");
+        Host("bob", _ => Video(new byte[] { 2 }));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFails_DoesNotRemoveClaimMadeByAnotherRequest()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.TryReserve(Key, _a, 1, out _).ShouldBeTrue();
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+
+        await CreateController(Context()).Play(Key);
+
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+    }
+
+    [Fact]
+    public async Task Play_SecondTitleWhileFirstAwaitsPeer_IsRefused()
+    {
+        const string key2 = "movie:tmdb:2";
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _index.Entries[key2] = new MergedEntry(key2, new[] { key2 }, new List<(Guid, CatalogItem)> { (_a, TestItems.Movie("CCC", tmdb: "2", id: "alice-item-2")) });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _hosts["alice"] = async (_, _) =>
+        {
+            started.TrySetResult();
+            await release.Task;
+            return Video(new byte[] { 1 });
+        };
+
+        var first = CreateController(Context()).Play(Key);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var second = await CreateController(Context()).Play(key2);
+
+        ((ObjectResult)second).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("stream limit reached");
+        release.SetResult();
+        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        _upstream.ShouldHaveSingleItem();
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { Key });
+    }
+
+    [Fact]
+    public async Task Play_FullAccountPeerAndFailingPeer_Is503NoPeerAvailable()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch("movie:tmdb:other", _a);
+        Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        ((ObjectResult)result).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("no peer available");
     }
 
     private sealed class FakeConsumerIndex : IConsumerIndex

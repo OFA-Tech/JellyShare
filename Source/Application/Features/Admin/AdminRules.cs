@@ -1,5 +1,7 @@
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
+using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Sync;
 using JellyShare.Domain.Rules;
 
@@ -13,6 +15,12 @@ public static class AdminRules
 
     /// <summary>Maximum concurrent streams of a share.</summary>
     public const int MaxStreamsLimit = 100;
+
+    /// <summary>Smallest concurrent playback limit of an account peer.</summary>
+    public const int MinAccountStreams = 1;
+
+    /// <summary>Largest concurrent playback limit of an account peer.</summary>
+    public const int MaxAccountStreams = 20;
 
     /// <summary>Maximum length of a peer token.</summary>
     public const int MaxTokenLength = 512;
@@ -169,7 +177,12 @@ public static class AdminRules
             state?.LastSuccessUtc,
             state?.FailingSinceUtc,
             state?.LastError,
-            state?.LastGoodCatalog?.Items?.Count);
+            state?.LastGoodCatalog?.Items?.Count,
+            peer.Kind,
+            peer.Username,
+            peer.MaxStreams,
+            peer.LimitAction,
+            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true);
     }
 
     /// <summary>Orders peers by priority, then by their position in the settings.</summary>

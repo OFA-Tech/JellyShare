@@ -62,7 +62,7 @@ public sealed class PeerClientTests
         var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
         await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
         await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
-        using var _ = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
+        using var _ = await client.OpenStreamAsync(Peer(), TestItems.Movie("x", id: "abc"), null, CancellationToken.None);
 
         handler.Requests.Count.ShouldBe(3);
         foreach (var r in handler.Requests)
@@ -180,7 +180,7 @@ public sealed class PeerClientTests
         await client.PingAsync("https://h/jellyfin", CancellationToken.None);
         await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
         await client.GetImageAsync(Peer(), "abc", "Primary", CancellationToken.None);
-        using var _ = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
+        using var _ = await client.OpenStreamAsync(Peer(), TestItems.Movie("x", id: "abc"), null, CancellationToken.None);
 
         var version = typeof(PeerClient).Assembly.GetName().Version!.ToString();
         handler.Requests.Count.ShouldBe(4);
@@ -194,7 +194,7 @@ public sealed class PeerClientTests
     public async Task PeerClient_OpenStream_DisposesRequestMessage()
     {
         var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)));
-        using var response = await client.OpenStreamAsync(Peer(), "abc", null, CancellationToken.None);
+        using var response = await client.OpenStreamAsync(Peer(), TestItems.Movie("x", id: "abc"), null, CancellationToken.None);
 
         // A disposed request message refuses new content.
         ShouldExactly.Throw<ObjectDisposedException>(() => handler.Requests.Single().Content = new StringContent("x"));
@@ -296,7 +296,7 @@ public sealed class PeerClientTests
     public async Task PeerClient_OpenStream_ForwardsRange()
     {
         var (client, handler) = Create(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.PartialContent)));
-        using var response = await client.OpenStreamAsync(Peer(), "abc", "bytes=100-", CancellationToken.None);
+        using var response = await client.OpenStreamAsync(Peer(), TestItems.Movie("x", id: "abc"), "bytes=100-", CancellationToken.None);
         response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
         handler.Requests.Single().Headers.Range!.ToString().ShouldBe("bytes=100-");
     }
@@ -324,7 +324,7 @@ public sealed class PeerClientTests
 
         var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
         await client.GetImageAsync(peer, "abc", "Primary", CancellationToken.None);
-        using var stream = await client.OpenStreamAsync(peer, "abc", null, CancellationToken.None);
+        using var stream = await client.OpenStreamAsync(peer, TestItems.Movie("x", id: "abc"), null, CancellationToken.None);
 
         result.Ok.ShouldBeFalse();
         result.Error.ShouldStartWith("HTTP 30", Case.Sensitive);

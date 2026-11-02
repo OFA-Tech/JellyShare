@@ -491,3 +491,56 @@ From the final whole-branch review (fix wave):
     HttpClient timeout is 150 s). A container bitrate of 0 counts as unknown, so a capped share transcodes it.
 27. **Relay source order.** Peers whose last sync failed are tried last instead of being skipped; disabled or removed
     peers stay excluded. A `RelayBaseOverride` must be a loopback URL, otherwise the sync stops with an error.
+
+## Account peers (2026-11-02)
+
+Checked against harness bob (Jellyfin 12.4.0, `http://127.0.0.1:8102/jellyfin`) with a scratch Python script and a
+scratch console app driving `AccountPeerClient` (both outside the repo; no tokens or passwords recorded).
+
+- **Auth header.** 12.4 accepts `Authorization: MediaBrowser Client="JellyShare", Device="JellyShare",
+  DeviceId="jellyshare-<peer id N>", Version="<assembly version>"` on `POST /Users/AuthenticateByName` and the same
+  header plus `, Token="<access token>"` on every later request. No `X-Emby-*` header is needed.
+- **Sign in.** Body `{"Username":…,"Pw":…}` → 200 with `AccessToken` (32 hex chars), `User.Id`, `ServerId`,
+  `SessionInfo`. A wrong password answers 401. `GET /System/Info/Public` gives `ServerName` (`bob`).
+- **Policy.** `GET /Users/Me` → `Policy.RemoteClientBitrateLimit` (0 on bob).
+- **Catalog.** `GET /Items?userId=…&Recursive=true&IncludeItemTypes=Movie,Episode&Fields=ProviderIds,Overview,MediaSources,DateCreated&EnableImages=true&StartIndex=0&Limit=…`
+  works as in the brief (`TotalRecordCount` 6 on bob). `userId` is optional on 12.4 (same result without it); the
+  client still sends it. Field names match the brief: `ProductionYear`, `ParentIndexNumber`, `IndexNumber`,
+  `LocationType` (`FileSystem` for real files), `ImageTags`, `BackdropImageTags`, `DateCreated`, and per media source
+  `Protocol` (`File`), `Container`, `Bitrate`, `MediaStreams[]` (`Type`, `Codec`, `Language`, `Width`, `Height`,
+  `Channels`, `DisplayTitle`). Episodes carry `SeriesId`; the series query
+  (`IncludeItemTypes=Series&Fields=ProviderIds`) returns `ProviderIds.Tvdb` (`153021`) for it, while the episodes' own
+  `ProviderIds` are empty. All 6 items mapped; a refetch with the returned ETag was `NotModified`.
+- **Stream.** `GET /Videos/{id}/stream?static=true` with `Range: bytes=0-99` → 206 `bytes 0-99/19691603`. The transcode
+  URL (`static=false&container=mkv&videoCodec=h264&audioCodec=aac&videoBitRate=1808000&audioBitRate=192000&deviceId=…`)
+  → 200 `video/x-matroska`.
+- **Image.** `GET /Items/{id}/Images/Primary` → 404 on bob (no artwork in the harness); the client returns `null`.
+- **Sign out.** `POST /Sessions/Logout` → 204. Afterwards every request with that token, including the otherwise
+  anonymous `/System/Info/Public`, answers 401, which the client reports as `sign-in failed: HTTP 401`.
+- **Stop a playback from the server.** Jellyfin's `SessionManager` (master, read 2026-11-02) only checks
+  `AssertCanControl` when `controllingSessionId` is not null or empty, in `SendGeneralCommand` (used by
+  `SendMessageCommand`) and `SendPlaystateCommand`. A `null` controlling session is accepted and skips the remote-control
+  permission check, so `JellyfinPlaybackStopper` sends both commands with `null`. An unknown target session id
+  throws `ResourceNotFoundException` (logged and skipped). Not yet tried on a live 12.4 server (Task 7 e2e).
+
+### Confirmed by the e2e on the real 12.4 servers (Task 7, `harness/e2e.py` "account peers")
+
+- **`null` controlling session works live.** With a WebSocket client connected to alice and `POST /Sessions/Playing`
+  for title A, stop-oldest delivered `GeneralCommand` `DisplayMessage` (text "Stopped: bob-account allows 1 stream(s)
+  at a time and another viewer started.") and `Playstate` `{"Command":"Stop"}` to that session. No warning in the log.
+- **`RateLimitExceeded` as the API shows it.** `POST /Items/{id}/PlaybackInfo` answers **200** with
+  `"ErrorCode":"RateLimitExceeded"` and an empty `MediaSources` (not an HTTP error status).
+- **Stop releases the slot; the relay cut is seen only on a direct read.** Releasing the session aborts the relay
+  connection: a curl reading the relay URL (from the `.strm`) directly at 250 kB/s kept receiving what the kernel had
+  already buffered (3–4.5 MB, 10–15 s more) and then got a reset (curl exit 56). Jellyfin's own ffmpeg-to-relay read
+  (what a real client triggers) was **not exercised**: through `/Videos/{id}/stream?static=true` the extra hop buffers
+  the whole 19.7 MB harness clip at once, so the relay copy is already finished when a stop comes and only the
+  session (slot) release is observable there.
+- **Not verified on live servers: the friend's bitrate limit.** bob's `RemoteClientBitrateLimit` is 0 in the harness,
+  so the path where a title above the account's limit is fetched as a transcoded progressive stream (non-seekable) was
+  never run against a real server. It is covered by unit tests only (`AccountPeerClientTests`, transcode URL choice).
+- **Changing the friend's password revokes the token.** `POST /Users/{id}/Password` (admin, other user) revoked the
+  account's access token at once: the next sync failed with `sign-in failed: HTTP 401`, `SignInFailed` was set, the
+  placeholders stayed. `PUT admin/peers/{id}` with the new password stored a new token; the next sync cleared the state.
+- **Library access is respected.** A friend user with only bob's Shows library gave a catalog of 3 episodes; bob's
+  Movies (Tears of Steel) got no placeholder on alice.

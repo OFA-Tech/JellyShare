@@ -36,6 +36,7 @@ internal sealed class AdminHarness : IDisposable
         services.AddSingleton<IShareTokenService>(Tokens);
         services.AddSingleton(Limiter);
         services.AddSingleton<IPeerClient>(Peers);
+        services.AddSingleton<IAccountSignIn>(Accounts);
         services.AddSingleton<ISyncRunner>(Sync);
         services.AddSingleton<IConsumerIndex>(Index);
         services.AddSingleton<IAdminLibraries>(Libraries);
@@ -56,6 +57,8 @@ internal sealed class AdminHarness : IDisposable
     public StreamLimiter Limiter { get; } = new(TimeProvider.System);
 
     public FakePeerClient Peers { get; } = new();
+
+    public FakeAccountSignIn Accounts { get; } = new();
 
     public FakeSync Sync { get; } = new();
 
