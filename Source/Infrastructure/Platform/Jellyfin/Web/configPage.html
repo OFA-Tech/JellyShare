@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>JellyShare</title>
+</head>
+<body>
+<div id="JellySharePage" data-role="page" class="page type-interior pluginConfigurationPage"
+     data-require="emby-input,emby-button,emby-select,emby-checkbox">
+    <style>
+        #JellySharePage .js-tabs { display: flex; gap: .5em; margin: 1em 0; border-bottom: 1px solid rgba(128,128,128,.4); }
+        #JellySharePage .js-tab { background: none; border: 0; border-bottom: 3px solid transparent; color: inherit; cursor: pointer; font-size: 1.1em; padding: .6em 1em; opacity: .7; }
+        #JellySharePage .js-tab.active { border-bottom-color: #00a4dc; opacity: 1; }
+        #JellySharePage .js-card { background: rgba(128,128,128,.12); border-radius: .4em; margin: 0 0 1em; padding: 1em; }
+        #JellySharePage .js-card h3, #JellySharePage .js-card h4 { margin-top: 0; }
+        #JellySharePage .js-row { align-items: end; display: flex; flex-wrap: wrap; gap: 1em; margin-bottom: .8em; }
+        #JellySharePage .js-field { display: flex; flex-direction: column; gap: .25em; min-width: 8em; }
+        #JellySharePage .js-field.grow { flex: 1 1 14em; }
+        #JellySharePage .js-field input[type=text], #JellySharePage .js-field input[type=password], #JellySharePage .js-field input[type=number], #JellySharePage .js-field select {
+            background: rgba(0,0,0,.3); border: 1px solid rgba(128,128,128,.5); border-radius: .25em; color: inherit; font: inherit; padding: .5em .6em; }
+        #JellySharePage label.js-check { align-items: center; display: inline-flex; gap: .4em; margin-right: 1em; }
+        #JellySharePage .js-btn { background: rgba(128,128,128,.3); border: 0; border-radius: .25em; color: inherit; cursor: pointer; font: inherit; padding: .55em 1em; }
+        #JellySharePage .js-btn.primary { background: #00a4dc; color: #fff; }
+        #JellySharePage .js-btn.danger { background: #b3261e; color: #fff; }
+        #JellySharePage .js-btn[disabled] { cursor: default; opacity: .5; }
+        #JellySharePage .js-msg { border-radius: .25em; margin: 0 0 1em; padding: .7em 1em; }
+        #JellySharePage .js-msg.error { background: rgba(179,38,30,.35); }
+        #JellySharePage .js-msg.ok { background: rgba(46,125,50,.35); }
+        #JellySharePage .js-msg.warn { background: rgba(237,137,6,.3); }
+        #JellySharePage .js-token { display: flex; gap: .5em; }
+        #JellySharePage .js-token input { flex: 1; font-family: monospace; }
+        #JellySharePage .js-muted { opacity: .7; }
+        #JellySharePage code { background: rgba(0,0,0,.3); border-radius: .2em; padding: .1em .35em; word-break: break-all; }
+        #JellySharePage .js-stats span { display: inline-block; margin-right: 1.2em; }
+        #JellySharePage .js-hidden { display: none !important; }
+    </style>
+
+    <div data-role="content">
+        <div class="content-primary">
+            <h2 class="sectionTitle">JellyShare</h2>
+            <p class="js-muted">Share movies and shows with friends' Jellyfin servers, and receive theirs. <span id="js-server"></span></p>
+            <div id="js-message" class="js-msg js-hidden" role="status"></div>
+
+            <div class="js-tabs" role="tablist">
+                <button type="button" class="js-tab active" data-tab="share" role="tab">Share with peers</button>
+                <button type="button" class="js-tab" data-tab="receive" role="tab">Receive from peers</button>
+            </div>
+
+            <div id="js-tab-share">
+                <div id="js-created" class="js-card js-hidden">
+                    <h3>Invitation created: <span id="js-created-name"></span></h3>
+                    <div class="js-msg warn">Copy this token now. <strong>You will not see it again.</strong> Send it to the owner of the other server together with the address of this server. If it is lost, revoke the invitation and create a new one.</div>
+                    <div class="js-token">
+                        <input type="text" id="js-created-token" readonly aria-label="Invitation token" autocomplete="off">
+                        <button type="button" class="js-btn primary" id="js-copy-token">Copy</button>
+                        <button type="button" class="js-btn" id="js-dismiss-token">I have copied it</button>
+                    </div>
+                </div>
+
+                <div class="js-card">
+                    <h3>New invitation</h3>
+                    <div class="js-row">
+                        <div class="js-field grow">
+                            <label for="js-new-name">Name (who is it for?)</label>
+                            <input type="text" id="js-new-name" maxlength="100" placeholder="Bob's server" autocomplete="off">
+                        </div>
+                        <div class="js-field">
+                            <label for="js-new-streams">Max streams</label>
+                            <input type="number" id="js-new-streams" min="1" max="100" value="2">
+                        </div>
+                        <div class="js-field">
+                            <label for="js-new-mbps">Max bitrate (Mbps)</label>
+                            <input type="number" id="js-new-mbps" min="0.1" step="0.1" placeholder="no limit">
+                        </div>
+                    </div>
+                    <div class="js-field">
+                        <span>Libraries they may see</span>
+                        <div id="js-new-libs"></div>
+                    </div>
+                    <p><button type="button" class="js-btn primary" id="js-create-share">Create invitation</button></p>
+                </div>
+
+                <h3>Invitations</h3>
+                <div id="js-shares"></div>
+            </div>
+
+            <div id="js-tab-receive" class="js-hidden">
+                <div class="js-card" id="js-setup">
+                    <h3>Setup</h3>
+                    <p>JellyShare puts the peers' titles into two folders it owns. Add each folder to your existing library of the same kind, so they appear next to your own movies and shows.</p>
+                    <div id="js-roots"></div>
+                    <div id="js-grouping-warning" class="js-msg warn js-hidden"></div>
+                    <div class="js-msg warn">
+                        <strong>Reverse proxy on the same machine as Jellyfin?</strong> Make sure it sends an <code>X-Forwarded-For</code> header (nginx: <code>proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</code>). The playback relay answers only loopback requests without proxy headers; a proxy that forwards requests without that header would make it reachable from outside.
+                    </div>
+                </div>
+
+                <div class="js-card">
+                    <h3>Sync</h3>
+                    <p><button type="button" class="js-btn primary" id="js-sync">Sync now</button> <span id="js-sync-state" class="js-muted"></span></p>
+                    <div id="js-report"></div>
+                </div>
+
+                <h3>Peers</h3>
+                <p class="js-muted">Titles come from the first peer in this list that has them; use the arrows to change the order.</p>
+                <div id="js-peers"></div>
+
+                <div class="js-card">
+                    <h3>Add a peer</h3>
+                    <div class="js-row">
+                        <div class="js-field grow">
+                            <label for="js-peer-name">Name</label>
+                            <input type="text" id="js-peer-name" maxlength="100" placeholder="Alice's server" autocomplete="off">
+                        </div>
+                        <div class="js-field grow">
+                            <label for="js-peer-url">Server address</label>
+                            <input type="text" id="js-peer-url" placeholder="https://alice.example.com/jellyfin" autocomplete="off">
+                        </div>
+                        <div class="js-field grow">
+                            <label for="js-peer-token">Token</label>
+                            <input type="password" id="js-peer-token" autocomplete="new-password">
+                        </div>
+                    </div>
+                    <p>
+                        <button type="button" class="js-btn" id="js-peer-test">Test connection</button>
+                        <button type="button" class="js-btn primary" id="js-peer-add">Add peer</button>
+                        <span id="js-peer-test-result" class="js-muted"></span>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script type="text/javascript" src="configurationpage?name=JellyShareScript"></script>
+</div>
+</body>
+</html>

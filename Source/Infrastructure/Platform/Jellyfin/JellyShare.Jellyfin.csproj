@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>JellyShare.Jellyfin</AssemblyName>
+    <RootNamespace>JellyShare.Jellyfin</RootNamespace>
+    <AssemblyVersion>0.0.0.1</AssemblyVersion>
+    <FileVersion>0.0.0.1</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="JellyShare.JellyfinTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Web\configPage.html" />
+    <EmbeddedResource Include="Web\configPage.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Domain\JellyShare.Domain.csproj" />
+    <ProjectReference Include="..\..\..\Application\JellyShare.Application.csproj" />
+    <ProjectReference Include="..\..\Api\Data.Peers\JellyShare.Data.Peers.csproj" />
+    <ProjectReference Include="..\..\Data\Data.Files\JellyShare.Data.Files.csproj" />
+    <ProjectReference Include="..\Media\JellyShare.Media.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,7 @@
+# Spike Step 5 only: simulate alice's media drive being offline (empty dir mounted at /media).
+#   docker compose -f docker-compose.yml -f spike/docker-compose.spike.yml -f spike/docker-compose.offline.yml up -d alice
+# Restore by running the same command without this file.
+services:
+  alice:
+    volumes:
+      - ./media/empty-alice:/media

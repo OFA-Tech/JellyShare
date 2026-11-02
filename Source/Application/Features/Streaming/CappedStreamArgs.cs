@@ -1,0 +1,118 @@
+using System.Globalization;
+using JellyShare.Domain.Enums;
+
+namespace JellyShare.Application.Features.Streaming;
+
+/// <summary>Builds the ffmpeg argument list of a capped stream (MPEG-TS, H.264 at cap − audio, AAC stereo).</summary>
+public static class CappedStreamArgs
+{
+    /// <summary>Audio bitrate of a capped stream (AAC stereo).</summary>
+    public const long AudioBitrate = 192_000;
+
+    /// <summary>Smallest video bitrate worth transcoding to.</summary>
+    public const long MinimumVideoBitrate = 100_000;
+
+    /// <summary>Upper bound for <c>start</c> (seconds) when the runtime is unknown: 7 days.</summary>
+    public const double MaxStartWithoutRuntime = 7 * 24 * 3600;
+
+    private static readonly string[] _nvencArgs = ["-c:v", "h264_nvenc", "-preset", "p4"];
+    private static readonly string[] _qsvArgs = ["-c:v", "h264_qsv", "-preset", "veryfast"];
+    private static readonly string[] _vaapiArgs = ["-vf", "format=nv12,hwupload", "-c:v", "h264_vaapi"];
+    private static readonly string[] _videoToolboxArgs = ["-c:v", "h264_videotoolbox"];
+    private static readonly string[] _amfArgs = ["-c:v", "h264_amf"];
+    private static readonly string[] _softwareArgs = ["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"];
+
+    /// <summary>
+    /// Whether a file must be transcoded to respect a share's bitrate cap. An unknown (missing or non-positive)
+    /// bitrate cannot be shown to be within the cap, so it counts as over.
+    /// </summary>
+    /// <param name="cap">The share's cap in bits per second, or <c>null</c> for no cap.</param>
+    /// <param name="bitrate">The file's total bitrate in bits per second, when known.</param>
+    /// <returns><c>true</c> when a cap applies and the file is not known to be within it.</returns>
+    public static bool IsOverCap(int? cap, long? bitrate)
+        => cap is { } c && (bitrate is not { } b || b <= 0 || b > c);
+
+    /// <summary>Whether a cap leaves room for video after audio.</summary>
+    /// <param name="cap">The cap in bits per second.</param>
+    /// <returns><c>true</c> when a transcode can fit.</returns>
+    public static bool CanCap(long cap) => cap - AudioBitrate >= MinimumVideoBitrate;
+
+    /// <summary>Builds the argument list (one element per argument, never passed through a shell).</summary>
+    /// <param name="inputPath">The input file.</param>
+    /// <param name="cap">The total cap in bits per second.</param>
+    /// <param name="startSeconds">Start offset, or <c>null</c>.</param>
+    /// <param name="hardware">The video encoder.</param>
+    /// <param name="vaapiDevice">The VA-API device.</param>
+    /// <returns>The arguments.</returns>
+    public static IReadOnlyList<string> Build(string inputPath, long cap, double? startSeconds, HardwareEncoder hardware, string? vaapiDevice)
+    {
+        var video = Math.Max(cap - AudioBitrate, MinimumVideoBitrate);
+        var videoText = video.ToString(CultureInfo.InvariantCulture);
+        var args = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "error" };
+        if (hardware == HardwareEncoder.Vaapi)
+        {
+            args.Add("-vaapi_device");
+            args.Add(string.IsNullOrEmpty(vaapiDevice) ? "/dev/dri/renderD128" : vaapiDevice);
+        }
+
+        if (startSeconds is { } start && start > 0)
+        {
+            args.Add("-ss");
+            args.Add(start.ToString("0.###", CultureInfo.InvariantCulture));
+        }
+
+        // "file:" keeps a path from being read as an option ("-…") or another protocol ("concat:…", "http:…").
+        args.AddRange(new[] { "-i", "file:" + inputPath, "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn" });
+        args.AddRange(hardware switch
+        {
+            HardwareEncoder.Nvenc => _nvencArgs,
+            HardwareEncoder.Qsv => _qsvArgs,
+            HardwareEncoder.Vaapi => _vaapiArgs,
+            HardwareEncoder.VideoToolbox => _videoToolboxArgs,
+            HardwareEncoder.Amf => _amfArgs,
+            _ => _softwareArgs,
+        });
+
+        args.AddRange(new[]
+        {
+            "-b:v", videoText,
+            "-maxrate", videoText,
+            "-bufsize", (video * 2).ToString(CultureInfo.InvariantCulture),
+            "-g", "48",
+            "-c:a", "aac",
+            "-ac", "2",
+            "-b:a", AudioBitrate.ToString(CultureInfo.InvariantCulture),
+            "-max_muxing_queue_size", "1024",
+            "-f", "mpegts",
+            "pipe:1",
+        });
+        return args;
+    }
+
+    /// <summary>Parses the <c>start</c> query value.</summary>
+    /// <param name="raw">The raw value.</param>
+    /// <param name="runTimeTicks">The item runtime, used as the upper bound.</param>
+    /// <param name="seconds">The parsed offset, <c>null</c> when absent.</param>
+    /// <returns><c>false</c> when the value is not a non-negative finite number.</returns>
+    public static bool TryParseStart(string? raw, long? runTimeTicks, out double? seconds)
+    {
+        seconds = null;
+        if (string.IsNullOrEmpty(raw))
+        {
+            return true;
+        }
+
+        if (!double.TryParse(raw, NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out var value)
+            || !double.IsFinite(value)
+            || value < 0)
+        {
+            return false;
+        }
+
+        var limit = runTimeTicks is { } ticks && ticks > 0 ? TimeSpan.FromTicks(ticks).TotalSeconds : MaxStartWithoutRuntime;
+        value = Math.Min(value, limit);
+
+        seconds = value;
+        return true;
+    }
+}

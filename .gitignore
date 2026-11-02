@@ -1,0 +1,12 @@
+bin/
+obj/
+.superpowers/
+.vs/
+*.user
+harness/media/
+harness/config/
+__pycache__/
+harness/.secrets/
+harness/screens/
+.playwright-cli/
+dist/

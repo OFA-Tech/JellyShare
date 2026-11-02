@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "8a55d113-5072-47cf-9827-f3c49f1c3971",
+    "name": "JellyShare",
+    "description": "JellyShare lets several Jellyfin servers share their movie and show libraries with each other. Titles from a peer server appear in your own Jellyfin and play directly from the peer.",
+    "overview": "Share movies and shows between Jellyfin servers.",
+    "owner": "OFA-TECH",
+    "category": "General",
+    "versions": []
+  }
+]

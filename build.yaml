@@ -1,0 +1,20 @@
+name: "JellyShare"
+guid: "8a55d113-5072-47cf-9827-f3c49f1c3971"
+version: "0.1.0.0"
+targetAbi: "12.0.0.0"
+framework: "net10.0"
+overview: "Share movies and shows between Jellyfin servers."
+description: >
+  JellyShare lets several Jellyfin servers share their movie and show libraries with each other.
+  Titles from a peer server appear in your own Jellyfin and play directly from the peer.
+category: "General"
+owner: "OFA-TECH"
+artifacts:
+  - "JellyShare.Jellyfin.dll"
+  - "JellyShare.Application.dll"
+  - "JellyShare.Domain.dll"
+  - "JellyShare.Data.Peers.dll"
+  - "JellyShare.Data.Files.dll"
+  - "JellyShare.Media.dll"
+changelog: >
+  First release.

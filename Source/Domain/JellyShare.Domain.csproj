@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>JellyShare.Domain</AssemblyName>
+    <RootNamespace>JellyShare.Domain</RootNamespace>
+    <AssemblyVersion>0.0.0.1</AssemblyVersion>
+    <FileVersion>0.0.0.1</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="JellyShare.Application" />
+    <InternalsVisibleTo Include="JellyShare.Jellyfin" />
+    <InternalsVisibleTo Include="JellyShare.UnitTests" />
+    <InternalsVisibleTo Include="JellyShare.JellyfinTests" />
+  </ItemGroup>
+
+  <!-- Jellyfin's host provides Microsoft.Extensions.*: compile against them, never ship or flow them. -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" ExcludeAssets="runtime" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

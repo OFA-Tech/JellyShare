@@ -1,0 +1,38 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="build.yaml" />
+    <File Path="Directory.Build.props" />
+    <File Path="Directory.Packages.props" />
+    <File Path="global.json" />
+    <File Path="manifest.json" />
+    <File Path="Nuget.config" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/Solution Items/.github/" />
+  <Folder Name="/Solution Items/.github/workflows/">
+    <File Path=".github/workflows/release.yml" />
+  </Folder>
+  <Folder Name="/Source/">
+    <Project Path="Source/Domain/JellyShare.Domain.csproj" />
+    <Project Path="Source/Application/JellyShare.Application.csproj" />
+  </Folder>
+  <Folder Name="/Source/Infrastructure/" />
+  <Folder Name="/Source/Infrastructure/Api/">
+    <Project Path="Source/Infrastructure/Api/Data.Peers/JellyShare.Data.Peers.csproj" />
+  </Folder>
+  <Folder Name="/Source/Infrastructure/Data/">
+    <Project Path="Source/Infrastructure/Data/Data.Files/JellyShare.Data.Files.csproj" />
+  </Folder>
+  <Folder Name="/Source/Infrastructure/Platform/">
+    <Project Path="Source/Infrastructure/Platform/Jellyfin/JellyShare.Jellyfin.csproj" />
+    <Project Path="Source/Infrastructure/Platform/Media/JellyShare.Media.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="Tests/ArchitectureTests/JellyShare.ArchitectureTests.csproj" />
+    <Project Path="Tests/JellyfinTests/JellyShare.JellyfinTests.csproj" />
+    <Project Path="Tests/UnitTests/JellyShare.UnitTests.csproj" />
+  </Folder>
+</Solution>
