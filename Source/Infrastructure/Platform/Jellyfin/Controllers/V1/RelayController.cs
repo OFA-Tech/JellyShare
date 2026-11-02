@@ -107,8 +107,15 @@ public class RelayController : ControllerBase
         var aborted = HttpContext.RequestAborted;
         var isHead = HttpMethods.IsHead(Request.Method);
 
+        List<RemotePeer>? full = null;
         foreach (var source in sources)
         {
+            if (!StreamLimitGate.HasRoom(source.Peer, entry.CanonicalKey, _sessions))
+            {
+                (full ??= new()).Add(source.Peer);
+                continue;
+            }
+
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(aborted);
             cts.CancelAfter(_headerTimeout);
             HttpResponseMessage response;
@@ -161,6 +168,12 @@ public class RelayController : ControllerBase
         if (aborted.IsCancellationRequested)
         {
             return new EmptyResult();
+        }
+
+        if (full?.Count == sources.Count)
+        {
+            _logger.LogInformation("JellyShare relay: stream limit reached for {Key} on peers {Peers}", entry.CanonicalKey, string.Join(", ", full.Select(p => p.Name)));
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new ErrorResponse("stream limit reached"));
         }
 
         _logger.LogWarning("JellyShare relay: no peer could serve {Key} ({Count} tried)", entry.CanonicalKey, sources.Count);

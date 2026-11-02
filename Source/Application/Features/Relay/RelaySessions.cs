@@ -13,7 +13,7 @@ public sealed class RelaySessions
 
     private readonly TimeProvider _clock;
     private readonly object _lock = new();
-    private readonly Dictionary<string, (Guid Peer, DateTimeOffset LastSeen)> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (Guid Peer, DateTimeOffset Start, DateTimeOffset LastSeen)> _sessions = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="RelaySessions"/> class.</summary>
     /// <param name="clock">The clock.</param>
@@ -46,8 +46,36 @@ public sealed class RelaySessions
         {
             Purge(now);
             var isNew = !_sessions.TryGetValue(key, out var s) || s.Peer != peerId;
-            _sessions[key] = (peerId, now);
+            _sessions[key] = (peerId, isNew ? now : s.Start, now);
             return isNew;
+        }
+    }
+
+    /// <summary>Lists the titles playing on a peer, oldest playback first (ties by key).</summary>
+    /// <param name="peerId">The serving peer.</param>
+    /// <returns>The canonical keys.</returns>
+    public IReadOnlyList<string> ActiveTitles(Guid peerId)
+    {
+        var now = _clock.GetUtcNow();
+        lock (_lock)
+        {
+            Purge(now);
+            return _sessions
+                .Where(e => e.Value.Peer == peerId)
+                .OrderBy(e => e.Value.Start)
+                .ThenBy(e => e.Key, StringComparer.Ordinal)
+                .Select(e => e.Key)
+                .ToList();
+        }
+    }
+
+    /// <summary>Ends the playback of a title at once, freeing its peer slot.</summary>
+    /// <param name="key">The canonical key.</param>
+    public void Release(string key)
+    {
+        lock (_lock)
+        {
+            _sessions.Remove(key);
         }
     }
 

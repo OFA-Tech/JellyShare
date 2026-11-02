@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using JellyShare.Data.Peers.Clients;
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
@@ -471,6 +472,71 @@ public sealed class RelayControllerTests
         await CreateController(later).Play(Key);
 
         Body(later).ShouldBe(new byte[] { 1 });
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFull_SkipsToNextSource()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch("movie:tmdb:other", _a);
+        Host("alice", _ => Video(new byte[] { 1 }));
+        Host("bob", _ => Video(new byte[] { 2 }));
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(200);
+        Body(context).ShouldBe(new byte[] { 2 });
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("bob");
+    }
+
+    [Fact]
+    public async Task Play_AccountPeerFull_SameTitleSeek_IsServed()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch(Key, _a);
+        Host("alice", _ => Video(new byte[] { 1 }, HttpStatusCode.PartialContent, "bytes 5-5/6"));
+        Host("bob", _ => Video(new byte[] { 2 }));
+        var context = Context(range: "bytes=5-");
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(206);
+        _upstream.ShouldHaveSingleItem().RequestUri!.Host.ShouldBe("alice");
+    }
+
+    [Fact]
+    public async Task Play_AllFull_Is503StreamLimit()
+    {
+        foreach (var peer in _config.Current.Peers)
+        {
+            peer.Kind = PeerKind.Account;
+            _sessions.Touch("movie:tmdb:" + peer.Name, peer.Id);
+        }
+
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        StatusOf(result, context).ShouldBe(503);
+        ((ObjectResult)result).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("stream limit reached");
+        _upstream.ShouldBeEmpty();
+        _logger.Lines.Where(l => l.StartsWith("Information", StringComparison.Ordinal) && l.Contains("alice", StringComparison.Ordinal) && l.Contains("bob", StringComparison.Ordinal))
+            .ShouldHaveSingleItem();
+        _logger.Lines.ShouldNotContain(l => l.Contains(TokenA, StringComparison.Ordinal) || l.Contains(TokenB, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Play_FullAccountPeerAndFailingPeer_Is503NoPeerAvailable()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        _sessions.Touch("movie:tmdb:other", _a);
+        Host("bob", _ => new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+        var context = Context();
+
+        var result = await CreateController(context).Play(Key);
+
+        ((ObjectResult)result).Value.ShouldBeOfType<ErrorResponse>().Error.ShouldBe("no peer available");
     }
 
     private sealed class FakeConsumerIndex : IConsumerIndex
