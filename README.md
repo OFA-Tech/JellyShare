@@ -381,7 +381,10 @@ The workflow (the tagged commit must be on `main`):
    `checksum` of the zip (what Jellyfin verifies) and a UTC `timestamp`. Re-running for the same version replaces its
    entry.
 
-The published plugin repository lives on the `manifest` branch, which holds only `manifest.json`. `main` is protected
+The published plugin repository lives on the `manifest` branch, which holds only `manifest.json` and the catalog
+image `jellyshare.png` (copied from `assets/jellyshare.png` of the tagged commit; `assets/jellyshare.svg` is its source).
+Jellyfin downloads the image into the plugin folder once and keeps it while a file of that name exists, so a changed
+icon needs a new file name to reach servers that already have it. `main` is protected
 by a ruleset (changes only through reviewed pull requests), so the workflow can't push there; the `manifest` branch
 must stay outside that ruleset. The `manifest.json` on `main` is only the seed (empty `versions` list) the workflow
 uses if the `manifest` branch doesn't exist yet.

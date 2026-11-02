@@ -75,7 +75,7 @@ jobs:
             gh release create "$TAG" "$ZIP" --title "JellyShare $VERSION" --notes-file changelog.txt --verify-tag
           fi
 
-      - name: Update manifest.json on the manifest branch
+      - name: Update manifest.json and the catalog image on the manifest branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -88,13 +88,15 @@ jobs:
             git rm -rfq .
             cp "$RUNNER_TEMP/manifest.json" manifest.json
           fi
+          git show "$GITHUB_SHA:assets/jellyshare.png" > jellyshare.png
           python3 "$RUNNER_TEMP/update_manifest.py" \
             --manifest manifest.json \
             --version "$VERSION" \
             --zip "dist/jellyshare_${VERSION}.zip" \
             --source-url "https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/jellyshare_${VERSION}.zip" \
+            --image-url "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/manifest/jellyshare.png" \
             --changelog-file changelog.txt
-          git add manifest.json
+          git add manifest.json jellyshare.png
           if git diff --cached --quiet; then
             echo "manifest.json already up to date"
           else
