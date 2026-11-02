@@ -230,7 +230,7 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
         var query = transcode
             ? string.Create(
                 CultureInfo.InvariantCulture,
-                $"static=false&container=mkv&videoCodec=h264&audioCodec=aac&videoBitRate={Math.Max(limit - AudioBitRate, MinVideoBitRate)}&audioBitRate={AudioBitRate}&deviceId={DeviceId(peer.Id)}")
+                $"static=false&container=mkv&videoCodec=h264&audioCodec=aac&videoBitRate={Math.Max(limit - AudioBitRate, MinVideoBitRate)}&audioBitRate={AudioBitRate}&deviceId={DeviceId(peer.Id)}&playSessionId={Guid.NewGuid():N}")
             : "static=true";
         var uri = PeerUri.Build(peer.BaseUrl, "Videos/" + Uri.EscapeDataString(item.Id) + "/stream?" + query)
             ?? throw new InvalidOperationException("invalid base url");
@@ -306,6 +306,7 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     {
         var user = string.IsNullOrEmpty(peer.AccountUserId) ? string.Empty : "userId=" + Uri.EscapeDataString(peer.AccountUserId) + "&";
         var start = 0;
+        string? previousFirst = null;
         for (var pages = 0; pages < MaxPages; pages++)
         {
             var uri = PeerUri.Build(
@@ -318,6 +319,14 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
             }
 
             var items = page.Items ?? [];
+            var first = items.OfType<JfItem>().FirstOrDefault()?.Id;
+            if (first is not null && first == previousFirst)
+            {
+                // A server that ignores StartIndex would answer the same page until the page cap.
+                return "server repeats pages";
+            }
+
+            previousFirst = first;
             foreach (var item in items.OfType<JfItem>())
             {
                 add(item);

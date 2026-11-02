@@ -43,7 +43,12 @@ public sealed record AddPeerRequest(
     string? Username = null,
     string? Password = null,
     int? MaxStreams = null,
-    StreamLimitAction? LimitAction = null);
+    StreamLimitAction? LimitAction = null)
+{
+    /// <inheritdoc />
+    public override string ToString()
+        => $"AddPeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction} }}";
+}
 
 /// <summary>Body of <c>PUT admin/peers/{id}</c>. An empty token (or password) keeps the stored credentials.</summary>
 /// <param name="Name">The display name.</param>
@@ -64,7 +69,12 @@ public sealed record UpdatePeerRequest(
     string? Username = null,
     string? Password = null,
     int? MaxStreams = null,
-    StreamLimitAction? LimitAction = null);
+    StreamLimitAction? LimitAction = null)
+{
+    /// <inheritdoc />
+    public override string ToString()
+        => $"UpdatePeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction} }}";
+}
 
 /// <summary>Body of <c>POST admin/peers/order</c>.</summary>
 /// <param name="Ids">The peer ids, most preferred first.</param>
@@ -83,7 +93,12 @@ public sealed record TestPeerRequest(
     Guid? PeerId = null,
     PeerKind? Kind = null,
     string? Username = null,
-    string? Password = null);
+    string? Password = null)
+{
+    /// <inheritdoc />
+    public override string ToString()
+        => $"TestPeerRequest {{ Url = {Url}, Token = ***, PeerId = {PeerId}, Kind = {Kind}, Username = {Username}, Secret = *** }}";
+}
 
 /// <summary>Result of <c>POST admin/peers/test</c>.</summary>
 /// <param name="Ok">The connection works.</param>

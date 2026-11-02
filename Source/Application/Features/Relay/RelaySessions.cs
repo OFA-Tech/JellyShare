@@ -83,14 +83,15 @@ public sealed class RelaySessions
         }
     }
 
-    /// <summary>Undoes a claim made by <see cref="TryReserve"/>, unless the title has meanwhile moved to another peer.</summary>
+    /// <summary>Undoes a claim made by <see cref="TryReserve"/>, unless the title has meanwhile moved to another peer or a body copy holds a lease on it.</summary>
     /// <param name="key">The canonical key.</param>
     /// <param name="peerId">The peer the claim was made on.</param>
     public void CancelReservation(string key, Guid peerId)
     {
         lock (_lock)
         {
-            if (_sessions.TryGetValue(key, out var s) && s.Peer == peerId)
+            // A lease means another request of this title is copying a body: that playback must stay counted.
+            if (_sessions.TryGetValue(key, out var s) && s.Peer == peerId && s.Leases == 0)
             {
                 _sessions.Remove(key);
             }

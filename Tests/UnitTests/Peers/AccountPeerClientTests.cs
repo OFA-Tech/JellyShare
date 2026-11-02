@@ -328,6 +328,21 @@ public sealed class AccountPeerClientTests
     }
 
     [Fact]
+    public async Task Account_ServerIgnoringStartIndex_IsErrorAtTheSecondPage()
+    {
+        // Always answers the first page, whatever StartIndex says.
+        var (client, handler) = Create(new FakeHandler(r => Paged(r, 1200, 500) is var response && r.RequestUri!.Query.Contains("=Movie", StringComparison.Ordinal)
+            ? Paged(new HttpRequestMessage(HttpMethod.Get, "https://h/Items?IncludeItemTypes=Movie&StartIndex=0"), 1200, 500)
+            : response));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldBe("server repeats pages");
+        ItemRequests(handler, "Movie").Count.ShouldBe(2);
+    }
+
+    [Fact]
     public async Task Account_SameContent_IsNotModified()
     {
         var (client, _) = Create(new FakeHandler(r => Server(r)));
@@ -425,10 +440,28 @@ public sealed class AccountPeerClientTests
         using var response = await client.OpenStreamAsync(Peer(), TestItem(8000000), "bytes=100-", CancellationToken.None);
 
         var r = handler.Requests.Single(x => x.RequestUri!.AbsolutePath.Contains("/Videos/", StringComparison.Ordinal));
-        r.RequestUri!.ToString().ShouldBe(
+        r.RequestUri!.ToString().ShouldStartWith(
             "https://h/jellyfin/Videos/m1/stream?static=false&container=mkv&videoCodec=h264&audioCodec=aac"
-            + "&videoBitRate=1808000&audioBitRate=192000&deviceId=jellyshare-0123456789abcdef0123456789abcdef");
+            + "&videoBitRate=1808000&audioBitRate=192000&deviceId=jellyshare-0123456789abcdef0123456789abcdef&playSessionId=",
+            Case.Sensitive);
         r.Headers.Range.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Account_Stream_EachTranscodeGetsItsOwnPlaySessionId()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Server(r, bitrateLimit: 2000000)));
+
+        (await client.OpenStreamAsync(Peer(), TestItem(8000000), null, CancellationToken.None)).Dispose();
+        (await client.OpenStreamAsync(Peer(), TestItem(8000000), null, CancellationToken.None)).Dispose();
+
+        var ids = handler.Requests
+            .Where(x => x.RequestUri!.AbsolutePath.Contains("/Videos/", StringComparison.Ordinal))
+            .Select(x => System.Text.RegularExpressions.Regex.Match(x.RequestUri!.Query, "playSessionId=([0-9a-f]{32})$").Groups[1].Value)
+            .ToList();
+        ids.Count.ShouldBe(2);
+        ids.ShouldAllBe(i => i.Length == 32);
+        ids[0].ShouldNotBe(ids[1]);
     }
 
     [Fact]

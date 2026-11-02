@@ -94,7 +94,8 @@ to yours through the same placeholders; your own copy still wins, and the Peers 
   title would go over the limit, another peer with the same title is used first; otherwise:
   - **Refuse the new viewer** (default): the viewer gets Jellyfin's "rate limit exceeded" playback error.
   - **Stop the oldest viewer:** the oldest playback from that peer gets a short message and a stop command, its
-    stream is cut, and the new one starts.
+    stream is cut, and the new one starts. Some apps ask for playback info as soon as you open a title, so with this
+    choice just opening another title from that friend can stop the oldest stream.
 - **Bitrate limit:** JellyShare respects the friend user's internet streaming bitrate limit. Titles above it are fetched
   as a transcoded stream from the friend's server; **such streams cannot seek** (shortcut: a seek waits or restarts,
   like a capped title, see "Seeking a capped title" below).

@@ -224,6 +224,21 @@ public sealed class RelaySessionsTests
     }
 
     [Fact]
+    public void CancelReservation_KeepsTheEntryWhileAnotherRequestHoldsALease()
+    {
+        _sessions.TryReserve("movie:tmdb:1", _a, 1, out var created).ShouldBeTrue();
+        created.ShouldBeTrue();
+        var (_, stop, lease) = _sessions.Lease("movie:tmdb:1", _a);
+
+        _sessions.CancelReservation("movie:tmdb:1", _a);
+
+        _sessions.ActiveTitles(_a).ShouldBe(new[] { "movie:tmdb:1" });
+        _sessions.Release("movie:tmdb:1");
+        stop.IsCancellationRequested.ShouldBeTrue();
+        lease.Dispose();
+    }
+
+    [Fact]
     public void ActiveTitles_ExpiredAfterGrace_AreDropped()
     {
         _sessions.Touch("movie:tmdb:1", _a);

@@ -1,5 +1,6 @@
 using JellyShare.Application.Features.Peers;
 using JellyShare.Domain.Enums;
+using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Requests.Peers;
@@ -410,6 +411,41 @@ public sealed class PeerHandlerTests : IDisposable
         result.IsSuccess.ShouldBeTrue();
         _h.Saver.Saved!.Peers.ShouldBeEmpty();
         _h.Sync.LastQueueIfRunning.ShouldBe(true);
+    }
+
+    [Fact]
+    public async Task Delete_AccountPeer_SignsOutOnTheFriendsServer()
+    {
+        var peer = SeedAccount();
+
+        var result = await _h.Send(new DeletePeerCommand(peer.Id));
+
+        result.IsSuccess.ShouldBeTrue();
+        _h.Accounts.SignOutCalls.ShouldHaveSingleItem().ShouldBe((peer.BaseUrl, Token, peer.Id));
+    }
+
+    [Fact]
+    public async Task Delete_TokenPeer_DoesNotSignOut()
+    {
+        var peer = Seed();
+
+        await _h.Send(new DeletePeerCommand(peer.Id));
+
+        _h.Accounts.SignOutCalls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Requests_NeverPrintThePasswordOrToken()
+    {
+        var add = new AddPeerRequest("bob", "http://bob", Token, true, PeerKind.Account, "carol", Password).ToString();
+        var update = new UpdatePeerRequest("bob", "http://bob", Token, true, PeerKind.Account, "carol", Password).ToString();
+        var test = new TestPeerRequest("http://bob", Token, null, PeerKind.Account, "carol", Password).ToString();
+
+        foreach (var text in new[] { add, update, test })
+        {
+            text.ShouldNotContain(Password, Case.Sensitive);
+            text.ShouldNotContain(Token, Case.Sensitive);
+        }
     }
 
     [Fact]
