@@ -35,6 +35,7 @@ public static class JellyfinSetup
 
         services.AddSingleton<IPlaceholderLookup, JellyfinPlaceholderLookup>();
         services.AddSingleton<IAdminLibraries, JellyfinAdminLibraries>();
+        services.AddSingleton<IPlaybackStopper, JellyfinPlaybackStopper>();
         PlaybackInfoFilter.Register(services);
         return services;
     }

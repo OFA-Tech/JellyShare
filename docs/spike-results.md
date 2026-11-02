@@ -517,3 +517,8 @@ scratch console app driving `AccountPeerClient` (both outside the repo; no token
 - **Image.** `GET /Items/{id}/Images/Primary` → 404 on bob (no artwork in the harness); the client returns `null`.
 - **Sign out.** `POST /Sessions/Logout` → 204. Afterwards every request with that token, including the otherwise
   anonymous `/System/Info/Public`, answers 401, which the client reports as `sign-in failed: HTTP 401`.
+- **Stop a playback from the server.** Jellyfin's `SessionManager` (master, read 2026-11-02) only checks
+  `AssertCanControl` when `controllingSessionId` is not null or empty, in `SendGeneralCommand` (used by
+  `SendMessageCommand`) and `SendPlaystateCommand`. A `null` controlling session is accepted and skips the remote-control
+  permission check, so `JellyfinPlaybackStopper` sends both commands with `null`. An unknown target session id
+  throws `ResourceNotFoundException` (logged and skipped). Not yet tried on a live 12.4 server (Task 7 e2e).

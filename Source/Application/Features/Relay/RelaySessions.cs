@@ -13,7 +13,7 @@ public sealed class RelaySessions
 
     private readonly TimeProvider _clock;
     private readonly object _lock = new();
-    private readonly Dictionary<string, (Guid Peer, DateTimeOffset Start, DateTimeOffset LastSeen)> _sessions = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (Guid Peer, DateTimeOffset Start, DateTimeOffset LastSeen, CancellationTokenSource Stop)> _sessions = new(StringComparer.Ordinal);
 
     /// <summary>Initializes a new instance of the <see cref="RelaySessions"/> class.</summary>
     /// <param name="clock">The clock.</param>
@@ -46,7 +46,7 @@ public sealed class RelaySessions
         {
             Purge(now);
             var isNew = !_sessions.TryGetValue(key, out var s) || s.Peer != peerId;
-            _sessions[key] = (peerId, isNew ? now : s.Start, now);
+            _sessions[key] = isNew ? (peerId, now, now, new CancellationTokenSource()) : s with { LastSeen = now };
             return isNew;
         }
     }
@@ -79,7 +79,7 @@ public sealed class RelaySessions
                 return false;
             }
 
-            _sessions[key] = (peerId, now, now);
+            _sessions[key] = (peerId, now, now, new CancellationTokenSource());
             created = true;
             return true;
         }
@@ -117,14 +117,32 @@ public sealed class RelaySessions
         }
     }
 
-    /// <summary>Ends the playback of a title at once, freeing its peer slot.</summary>
+    /// <summary>
+    /// Gets a token that is cancelled when the playback of a title is released, so a relay body still being copied
+    /// for it stops pulling from the peer. A new playback of the title gets a fresh token.
+    /// </summary>
     /// <param name="key">The canonical key.</param>
-    public void Release(string key)
+    /// <returns>The token, or <see cref="CancellationToken.None"/> when no playback is active.</returns>
+    public CancellationToken StopToken(string key)
     {
         lock (_lock)
         {
-            _sessions.Remove(key);
+            return _sessions.TryGetValue(key, out var s) ? s.Stop.Token : CancellationToken.None;
         }
+    }
+
+    /// <summary>Ends the playback of a title at once, freeing its peer slot and ending its relay body copies.</summary>
+    /// <param name="key">The canonical key.</param>
+    public void Release(string key)
+    {
+        CancellationTokenSource? stop;
+        lock (_lock)
+        {
+            stop = _sessions.Remove(key, out var s) ? s.Stop : null;
+        }
+
+        // Outside the lock: cancellation runs the relay's callbacks synchronously.
+        stop?.Cancel();
     }
 
     private void Purge(DateTimeOffset now)

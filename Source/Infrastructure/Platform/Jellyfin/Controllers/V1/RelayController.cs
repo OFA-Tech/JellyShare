@@ -163,7 +163,9 @@ public class RelayController : ControllerBase
                 CopyHeaders(response, Response, status);
                 if (!isHead)
                 {
-                    await CopyBodyAsync(response, source, entry.CanonicalKey, cts.Token).ConfigureAwait(false);
+                    // Stop-oldest releases the title: the copy must end too, or it keeps pulling from the peer.
+                    using var stop = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, _sessions.StopToken(entry.CanonicalKey));
+                    await CopyBodyAsync(response, source, entry.CanonicalKey, stop.Token).ConfigureAwait(false);
                 }
 
                 return new EmptyResult();
@@ -287,6 +289,11 @@ public class RelayController : ControllerBase
             LogStalled(source.Peer, key);
             HttpContext.Abort();
         }
+        catch (OperationCanceledException) when (!aborted.IsCancellationRequested)
+        {
+            LogReleased(source.Peer, key);
+            HttpContext.Abort();
+        }
         catch (OperationCanceledException)
         {
             // The client went away; the linked token already cancelled the upstream read.
@@ -309,6 +316,10 @@ public class RelayController : ControllerBase
     [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
     private void LogStalled(RemotePeer peer, string key)
         => _logger.LogDebug("JellyShare relay: peer {Peer} stalled for {Key}, aborting", peer.Name, key);
+
+    [SuppressMessage("Major Code Smell", "S6667:Logging in a catch clause should pass the caught exception as a parameter.", Justification = ExpectedCancellation)]
+    private void LogReleased(RemotePeer peer, string key)
+        => _logger.LogDebug("JellyShare relay: playback of {Key} from peer {Peer} was stopped, aborting", key, peer.Name);
 
     private static string Redacted(RemotePeer peer, Exception ex)
         => string.IsNullOrEmpty(peer.Token) ? ex.Message : ex.Message.Replace(peer.Token, "***", StringComparison.Ordinal);

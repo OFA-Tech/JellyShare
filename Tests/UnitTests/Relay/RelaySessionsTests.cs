@@ -35,6 +35,33 @@ public sealed class RelaySessionsTests
     }
 
     [Fact]
+    public void Release_CancelsStopToken_NewClaimGetsFreshToken()
+    {
+        _sessions.TryReserve("movie:tmdb:1", _a, 1, out _).ShouldBeTrue();
+        var first = _sessions.StopToken("movie:tmdb:1");
+        first.CanBeCanceled.ShouldBeTrue();
+
+        _sessions.Release("movie:tmdb:1");
+
+        first.IsCancellationRequested.ShouldBeTrue();
+        _sessions.TryReserve("movie:tmdb:1", _a, 1, out _).ShouldBeTrue();
+        var second = _sessions.StopToken("movie:tmdb:1");
+        second.CanBeCanceled.ShouldBeTrue();
+        second.IsCancellationRequested.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void StopToken_SameSessionKeepsToken_UnknownIsNone()
+    {
+        _sessions.Touch("movie:tmdb:1", _a);
+        var token = _sessions.StopToken("movie:tmdb:1");
+        _sessions.Touch("movie:tmdb:1", _a);
+
+        _sessions.StopToken("movie:tmdb:1").ShouldBe(token);
+        _sessions.StopToken("movie:tmdb:2").ShouldBe(CancellationToken.None);
+    }
+
+    [Fact]
     public void Release_FreesSlot()
     {
         _sessions.Touch("movie:tmdb:1", _a);

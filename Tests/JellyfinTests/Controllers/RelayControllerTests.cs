@@ -419,6 +419,28 @@ public sealed class RelayControllerTests
     }
 
     [Fact]
+    public async Task Relay_ReleasedPlayback_EndsBodyCopy()
+    {
+        _config.Current.Peers[0].Kind = PeerKind.Account;
+        var upstreamBody = new BlockingStream(new byte[] { 4, 5, 6 });
+        Host("alice", _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(upstreamBody) });
+        var context = Context();
+        var lifetime = new RecordingLifetime();
+        context.Features.Set<IHttpRequestLifetimeFeature>(lifetime);
+
+        var play = CreateController(context, idleTimeout: TimeSpan.FromSeconds(30)).Play(Key);
+        await upstreamBody.ReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        _sessions.Release(Key);
+        await play.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Body(context).ShouldBe(new byte[] { 4, 5, 6 });
+        upstreamBody.ReadCancelled.ShouldBeTrue();
+        lifetime.Aborted.ShouldBeTrue();
+        _logger.Lines.ShouldNotContain(l => l.Contains("broke", StringComparison.Ordinal) || l.Contains("stalled", StringComparison.Ordinal));
+        _sessions.ActiveTitles(_a).ShouldBeEmpty();
+    }
+
+    [Fact]
     public async Task Relay_ClientGoneDuringWrite_IsNotLoggedAsPeerFailure()
     {
         Host("alice", _ => Video(new byte[100]));

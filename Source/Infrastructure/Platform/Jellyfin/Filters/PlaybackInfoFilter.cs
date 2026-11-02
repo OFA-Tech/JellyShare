@@ -1,5 +1,8 @@
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
+using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
+using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Jellyfin.Adapters;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Dto;
@@ -36,18 +39,38 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
     private readonly IPlaceholderLookup _lookup;
     private readonly JellyfinCallerResolver _callers;
     private readonly IRelayBase _relayBase;
+    private readonly IConsumerIndex _index;
+    private readonly ISettingsProvider _config;
+    private readonly RelaySessions _sessions;
+    private readonly IPlaybackStopper _stopper;
     private readonly ILogger<PlaybackInfoFilter> _logger;
 
     /// <summary>Initializes a new instance of the <see cref="PlaybackInfoFilter"/> class.</summary>
     /// <param name="lookup">The placeholder lookup.</param>
     /// <param name="callers">Resolves the caller of a request.</param>
     /// <param name="relayBase">The relay base URL.</param>
+    /// <param name="index">The merged index and peer states.</param>
+    /// <param name="config">The plugin configuration (peers).</param>
+    /// <param name="sessions">The active playbacks.</param>
+    /// <param name="stopper">Stops the playbacks of a title.</param>
     /// <param name="logger">The logger.</param>
-    public PlaybackInfoFilter(IPlaceholderLookup lookup, JellyfinCallerResolver callers, IRelayBase relayBase, ILogger<PlaybackInfoFilter> logger)
+    public PlaybackInfoFilter(
+        IPlaceholderLookup lookup,
+        JellyfinCallerResolver callers,
+        IRelayBase relayBase,
+        IConsumerIndex index,
+        ISettingsProvider config,
+        RelaySessions sessions,
+        IPlaybackStopper stopper,
+        ILogger<PlaybackInfoFilter> logger)
     {
         _lookup = lookup;
         _callers = callers;
         _relayBase = relayBase;
+        _index = index;
+        _config = config;
+        _sessions = sessions;
+        _stopper = stopper;
         _logger = logger;
     }
 
@@ -97,6 +120,11 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        if (IsPlaybackInfo(context) && !await ApplyStreamLimitAsync(context).ConfigureAwait(false))
+        {
+            return;
+        }
+
         if (IsPlaybackInfo(context) && DeclaresParameter(context, EnableDirectStream))
         {
             await ApplyBitrateRuleAsync(context).ConfigureAwait(false);
@@ -219,6 +247,49 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
         if (prop is not null && prop.CanWrite && (prop.PropertyType == typeof(bool?) || prop.PropertyType == typeof(bool)))
         {
             prop.SetValue(body, false);
+        }
+    }
+
+    // Returns false when the playback is refused (context.Result is set and the action must not run).
+    private async Task<bool> ApplyStreamLimitAsync(ActionExecutingContext context)
+    {
+        if (!context.ActionArguments.TryGetValue("itemId", out var id) || id is not Guid itemId
+            || _lookup.Find(itemId) is not { } placeholder
+            || _index.Find(placeholder.CanonicalKey) is not { } entry)
+        {
+            return true;
+        }
+
+        var key = entry.CanonicalKey;
+        var sources = SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates());
+        var decision = StreamLimitGate.Decide(sources, key, _sessions);
+        switch (decision.Kind)
+        {
+            case StreamDecisionKind.Refuse:
+                _logger.LogInformation("JellyShare: refused {Key}: peer {Peer} allows {Max} stream(s)", key, decision.Peer?.Name, decision.Peer?.MaxStreams);
+                context.Result = new OkObjectResult(new PlaybackInfoResponse { ErrorCode = PlaybackErrorCode.RateLimitExceeded });
+                return false;
+            case StreamDecisionKind.StopOldest when decision is { Peer: { } peer, StopKey: { } stopKey }:
+                try
+                {
+                    await _stopper.StopTitleAsync(
+                        stopKey,
+                        $"Stopped: {peer.Name} allows {peer.MaxStreams} stream(s) at a time and another viewer started.",
+                        context.HttpContext.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(ex, "JellyShare: could not stop {Key} on peer {Peer}", stopKey, peer.Name);
+                }
+                finally
+                {
+                    // A client that cannot be reached must not keep the slot: the new viewer plays regardless.
+                    _sessions.Release(stopKey);
+                }
+
+                return true;
+            default:
+                return true;
         }
     }
 
