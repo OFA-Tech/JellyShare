@@ -38,11 +38,20 @@ All notable changes to this project are documented here. The format is based on
   create and update).
 - A share saved by 0.2.0.0 keeps offering exactly Movies and/or Shows, derived from the kinds of the libraries it
   listed (a mixed library counts as both); music or books libraries in it are **not** shared until you tick Music or
-  Audiobooks for that invitation. Editing only its name or limits keeps that; choosing types makes it Use the default
-  or Custom. New invitations use the default sharing (all types at first).
+  Audiobooks for that invitation. Editing only its name or limits keeps that (the admin page only sends the types when
+  you change them); choosing types makes it Use the default or Custom. New invitations use the default sharing (all
+  types at first). **A script that creates a share with only `libraryIds` now gets a "Use the default" share** (the
+  library list is ignored); send `useDefaultTypes: false` with `types` for a fixed list.
+- A list of media types (Custom share types, Custom default sharing, a peer's Only: list) must contain at least one
+  supported type ("Pick at least one supported media type.").
 - Peers saved by 0.2.0.0 accept everything. The first sync after the upgrade fetches each peer's full catalog once (the
   catalog ETag now includes the media types). A 0.2.0.0 receiver, which sends no `types`, still gets only movies and
   episodes.
+
+### Known limitations
+
+- A friend's audiobook or podcast folder is skipped when you own any file of it (books group per folder, so a partial
+  folder would show twice): once you own one episode of a podcast, the friend's newer episodes of it don't appear.
 
 ## [0.2.0.0] - 2026-11-02
 

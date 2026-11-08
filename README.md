@@ -208,8 +208,12 @@ to yours through the same placeholders; your own copy still wins, and the Peers 
   audiobooks are always sent as the original file.
 - **An album counts as one stream** (an audiobook: the book), on the provider's share limit and on an account peer's
   limit, so playing an album track after track never hits the limit; a second album or book does.
+- **Audiobooks and podcasts are grouped per folder, so a partial folder is skipped.** Like albums, a friend's book or
+  podcast folder is skipped completely when you own any file of it (a partial folder would show up twice). So once you
+  own one episode of a podcast, the friend's newer episodes of it do not appear either.
 - **Account peers' audiobooks:** the friend's server is asked for each book's folder names on every catalog fetch
-  (one extra request per book folder).
+  (one extra request per book folder). When that lookup fails for a book, the book is listed without its folder (a
+  warning is logged) instead of failing the whole catalog. A peer's folder path is cut to its first 6 folders.
 - **Audio playback relies on Jellyfin internals** (a media source provider plus a filter on Jellyfin's audio stream
   routes, see `docs/spike-results.md`, "Audio playback spike"). A Jellyfin update can break it; JellyShare checks at
   startup that the routes and parameters it hooks still exist and logs a warning when they don't.
