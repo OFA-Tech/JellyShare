@@ -643,3 +643,113 @@ Neither type can play from a link file on stock 12.4, and music gets no artists 
 Scratch paths removed from alice's Music/Audiobooks (`Locations` back to `/media/Music`,
 `/media/Audiobooks`), scratch folders deleted, `jellyshare-spike-http` removed. The audio clips and
 the two new libraries stay (for the e2e).
+
+## Audio playback spike (A′) (2026-11-08)
+
+Branch `spike/audio-playback` (commit `bb18855`, not merged). Run against the harness (alice 12.4).
+Scripts: `harness/spike/audio_relay.py` (setup/play/teardown), `meta_seq.py`, `artist_check.py`,
+`hls_check.py`, `web_play_audio.js` (all on the spike branch). Placeholders were `.strm` files holding a
+**real relay URL** (`http://127.0.0.1:8096/JellyShare/v1/play/spike~bob~Music~...`); the spike branch's
+relay serves keys starting `spike~` from the spike file server (`rangeserver.py` in alice's network
+namespace) instead of a peer, so no index entry, peer or token was involved. Layout as in the media types
+spike: `Artist A/Album One/03`, `Artist B/Album Two/01 (mp3), 02 (flac)` in Music; `Author X/Book Y/01, 02`
+in Audiobooks.
+
+### Playback: **works** (Audio and AudioBook) with two plugin hooks
+
+1. **`IMediaSourceProvider`** (`MediaBrowser.Controller.Library.IMediaSourceProvider`, a *public* class in
+   the plugin assembly; Jellyfin finds it itself through `ApplicationHost.GetExports<IMediaSourceProvider>()`
+   → `MediaSourceManager.AddParts`, no registration). `GetMediaSources(BaseItem item, ct)` returns, for a
+   placeholder `Audio` (AudioBook derives from it) whose `.strm` holds a relay URL, one extra
+   `MediaSourceInfo`: `Id` = a stable id derived from the item id (not the item id), `Path` = relay URL,
+   `Protocol = Http`, `IsRemote = true`, `Container`, `RunTimeTicks`, `Bitrate`, `MediaStreams` =
+   `IMediaSourceManager.GetMediaStreams(item.Id)`, `SupportsDirectPlay/DirectStream/Transcoding = true`.
+   `OpenMediaSource` is never called (`RequiresOpening = false`).
+2. **The existing global MVC filter** (`PlaybackInfoFilter.OnActionExecutionAsync`): for any action with an
+   `itemId` argument of a placeholder audio item and a declared `mediaSourceId` parameter, set
+   `ActionArguments["mediaSourceId"]` to the relay source id when it is empty or equals the item id, and
+   set `enableRedirection = false` where declared. One rule covers `Items/{itemId}/PlaybackInfo`,
+   `Audio/{itemId}/stream`, `Audio/{itemId}/stream.{container}`, `Audio/{itemId}/universal`,
+   `Audio/{itemId}/main.m3u8` and `Audio/{itemId}/hls1/...`.
+
+Why both: `MediaSourceManager.GetPlaybackMediaSources` appends provider sources **after** the static
+source and `SortMediaSources` keeps the item's own source (the `.strm` file) first, and
+`StreamingHelpers.GetStreamingState` plays `mediaSources[0]` when no `mediaSourceId` is given (what
+`universal` and music apps send). With the forced id: static → `AudioHelper` →
+`FileStreamResponseHelpers.GetStaticRemoteStreamResult` (Jellyfin proxies the relay, Range forwarded);
+transcode/HLS → ffmpeg `-i http://127.0.0.1:8096/JellyShare/v1/play/...`. `UniversalAudioController`
+would `Redirect(mediaSource.Path)` (the relay URL!) for a direct-playable remote source when the client
+sends `EnableRemoteMedia=true`; `enableRedirection = false` stops that. The existing result filter
+(`HideRelaySources`) still blanks `Path` and clears `SupportsDirectPlay` in PlaybackInfo.
+
+| Request (header auth); "cold" = item never played | Music mp3 | Music flac | AudioBook mp3 |
+| --- | --- | --- | --- |
+| `GET Audio/{id}/stream?static=true` cold, no PlaybackInfo, no `mediaSourceId` | 206, file bytes, ffprobe mp3 20 s | 206, ffprobe flac | 206, ffprobe mp3 |
+| `GET Audio/{id}/universal` cold (Container list incl. the codec) | 200 static | 200 static flac | 200 static |
+| `POST Items/{id}/PlaybackInfo` | 1 source: `Http`, `IsRemote`, `Path ""`, `SupportsDirectPlay false`, `SupportsDirectStream true`, streams `[Audio mp3]`, no relay/loopback text | same (flac) | same |
+| `stream?static=true` with and without the returned `mediaSourceId` | 206 audio | 206 audio | 206 audio |
+| `universal` (`Container=mp3`, http) | 200 mp3 | 200 mp3 transcode | 200 mp3 |
+| `stream.mp3?audioCodec=mp3` (transcode) | 200 mp3 | 200 mp3 | 200 mp3 |
+| `universal` HLS (`Container=opus`, `TranscodingProtocol=hls`) | m3u8 → ffprobe aac 20 s | – | m3u8 → aac 20 s (needs `RunTimeTicks`, below) |
+| jellyfin-web (headless Chromium), cold items | plays (`currentTime` 7.7 s of 20, no error) | plays | plays |
+
+No response body or header (incl. `Location`) contained `JellyShare/v1/play`, `:8096`, `127.0.0.1` or the
+key. jellyfin-web plays audio through `Audio/{id}/universal` directly (HEAD + GET), **without PlaybackInfo**,
+so the filter on the stream routes is required, not optional. The item DTO's `MediaSources` keep the
+`.strm` `File` source (server path, no URL); a client that sends that id gets remapped.
+
+Two Jellyfin gaps the plugin must fill from its catalog entry (the spike faked them):
+
+- **Multi-file AudioBook folders are resolved without `IsShortcut`** (`AudioResolver.ResolveMultipleAudio`
+  creates `AudioBook` without it), so every probe reads the `.strm` text (`ffprobe failed`, logged as an
+  error on each PlaybackInfo) and no streams/runtime are saved. With no audio stream
+  `StreamBuilder.GetOptimalAudioStream` throws (`ArgumentNullException audioStream` → PlaybackInfo and
+  universal 400). The provider must add an audio `MediaStream` (codec, channels, bitrate from the catalog)
+  when none is stored. The placeholder lookup can't use `ShortcutPath` for these items either (never set):
+  read the `.strm`/ledger instead.
+- **No `RunTimeTicks` → HLS master points at `Audio/{id}/live.m3u8`, a route Jellyfin does not have (404).**
+  The provider must set `RunTimeTicks` (catalog `runTimeTicks`) when the item has none.
+
+### Metadata: **persists** (lock `Name` to keep the plugin's title)
+
+Plugin code (spike endpoint calling `BaseItem` setters + `UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit)`,
+then `MusicAlbum.RefreshMetadata(FullRefresh)` on the parent album) set `Name`, `Artists`, `AlbumArtists`,
+`Album`, `IndexNumber`, `ParentIndexNumber`. Sequence: write → library scan → item refresh FullRefresh
+(default) → item refresh "Replace all metadata" → library-wide "Replace all metadata" → PlaybackInfo (which
+runs a remote-content-probe FullRefresh on every `.strm`) → server restart. To see overwrites, one run used
+values that differ from the real files' tags (`Artist B P`, track 11…):
+
+| Lock | Survives everything | Changed |
+| --- | --- | --- |
+| none | Artists, AlbumArtists, Album, track, disc, the album's album artist | **`Name` → the file's title tag** on the PlaybackInfo probe (`AudioFileProber`: `audio.Name = trackTitle` unless `MetadataField.Name` is locked) |
+| `LockedFields = [Name, Cast]` | **all fields**, incl. after restart | nothing |
+
+`Replace all metadata` does not touch them because for a `.strm` the probe only runs with
+`EnableRemoteContentProbe` (PlaybackInfo, never replace-all), and `AudioFileProber.FetchDataFromTags`
+reads artists with ATL from the `.strm` file (empty) and only fills empty fields when not replace-all.
+`MetadataField.Cast` also keeps `UpdatePeople` from replacing the track's people with the empty tag result.
+No re-apply on `ItemUpdated` was needed. (`IsLocked` on the whole item was not tested; field locks suffice.)
+
+With the real values (lock `Name, Cast`): `/Artists` = **Artist A (one item: owner's 2 tracks + friend's
+`Song Three`) + Artist B**; Artist B → **one album `Album Two`, tracks First Light, Second Wind in order**;
+`Album One` still shows twice (partial album, as before: write only albums the owner lacks).
+A brand-new artist name only appears in `/Artists` after the next library scan (the scan's artist
+validator creates the `MusicArtist` item); the plugin already scans after writing placeholders, so write
+metadata before that scan (or create the artist through `ILibraryManager`).
+
+### Risks on Jellyfin updates
+
+- The `mediaSourceId` remap relies on parameter names (`itemId`, `mediaSourceId`, `enableRedirection`) of
+  Jellyfin's controllers; add them to the startup target check like `PlaybackInfoTemplate`.
+- A Jellyfin that applies the video `ShortcutPath` swap to audio (`BaseItem.GetVersionInfo`) would make
+  the provider source a duplicate; harmless, and the remap could then be dropped.
+- `GetStaticRemoteStreamResult`, `GetExports<IMediaSourceProvider>` discovery and the probe/merge rules
+  above are internal behaviour, not API; recheck on each Jellyfin minor.
+- Every PlaybackInfo of a multi-file audiobook placeholder logs an ffprobe error (Jellyfin probes the
+  `.strm` text); cosmetic.
+
+### Harness state after the audio playback spike
+
+Scratch paths removed (alice Music/Audiobooks `Locations` = `/media/Music`, `/media/Audiobooks`), scratch
+folders deleted, rescanned (no spike items, `/Artists` = Artist A), `jellyshare-spike-http` removed, both
+servers back on a `feat/media-types` Release build.
