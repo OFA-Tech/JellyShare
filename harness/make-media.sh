@@ -25,6 +25,8 @@ fi
 
 put() {
   local target="${MEDIA}/$1"
+  # An identical copy stays untouched, so a re-run (harness/e2e.py restoring a missing file) does not make Jellyfin re-probe.
+  if cmp -s "${BASE}" "${target}"; then return 0; fi
   mkdir -p "$(dirname "${target}")"
   cp -f "${BASE}" "${target}"
 }
