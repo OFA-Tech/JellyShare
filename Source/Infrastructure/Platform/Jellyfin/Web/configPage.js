@@ -266,13 +266,19 @@
     }
 
     // A select (everything / a list) with the ticks of the list; the ticks are locked while "everything" is chosen.
-    // `list` remembers the last list so switching back and forth does not lose it.
+    // `list` remembers the last list so switching back and forth does not lose it. A stored list is shown as it is
+    // (even empty), so nothing is widened; only a choice starting on "everything" prefills the list with all types.
+    // `changed` tells whether the admin touched the choice: saving anything else must not rewrite it.
     function typeChoice(labelText, allText, listText, startAll, stored, shownWhenAll) {
         var list = supportedOnly(stored);
-        if (!list.length) {
+        if (startAll && !list.length) {
             list = supportedTypes().slice();
         }
+        var dirty = false;
         var picker = typePicker();
+        picker.node.addEventListener('change', function () {
+            dirty = true;
+        });
         var select = el('select', {}, [el('option', { value: 'all', text: allText }), el('option', { value: 'list', text: listText })]);
         select.value = startAll ? 'all' : 'list';
         var apply = function () {
@@ -284,6 +290,7 @@
         };
         var current = select.value;
         select.addEventListener('change', function () {
+            dirty = true;
             if (current === 'list') {
                 list = picker.types();
             }
@@ -293,6 +300,9 @@
         apply();
         return {
             node: el('div', { class: 'js-row' }, [field(labelText, select), picker.node]),
+            changed: function () {
+                return dirty;
+            },
             isAll: function () {
                 return select.value === 'all';
             },
@@ -327,7 +337,7 @@
         var picker = typePicker();
         var all = el('input', { type: 'checkbox', checked: d.all });
         var list = supportedOnly(d.types);
-        if (!list.length) {
+        if (d.all && !list.length) {
             list = supportedTypes().slice();
         }
         var apply = function () {
@@ -407,13 +417,16 @@
                     name: name.value,
                     maxStreams: count,
                     maxBitrate: bps,
-                    enabled: enabled.checked,
-                    useDefaultTypes: types.isAll()
+                    enabled: enabled.checked
                 };
-                if (!types.isAll()) {
-                    body.types = types.types();
-                    if (!body.types.length) {
-                        return showMessage('error', SHARE_TYPES_ERROR);
+                // Untouched types are left out, so a share saved before media types existed keeps resolving as before.
+                if (types.changed()) {
+                    body.useDefaultTypes = types.isAll();
+                    if (!types.isAll()) {
+                        body.types = types.types();
+                        if (!body.types.length) {
+                            return showMessage('error', SHARE_TYPES_ERROR);
+                        }
                     }
                 }
                 busy(save, api('PUT', 'shares/' + encodeURIComponent(s.id), body)).then(function () {
@@ -669,11 +682,14 @@
                 });
             });
             var submit = function (button, okText) {
-                var body = { name: name.value, baseUrl: url.value, enabled: enabled.checked, acceptAllTypes: accept.isAll() };
-                if (!accept.isAll()) {
-                    body.acceptTypes = accept.types();
-                    if (!body.acceptTypes.length) {
-                        return showMessage('error', RECEIVE_TYPES_ERROR);
+                var body = { name: name.value, baseUrl: url.value, enabled: enabled.checked };
+                if (accept.changed()) {
+                    body.acceptAllTypes = accept.isAll();
+                    if (!accept.isAll()) {
+                        body.acceptTypes = accept.types();
+                        if (!body.acceptTypes.length) {
+                            return showMessage('error', RECEIVE_TYPES_ERROR);
+                        }
                     }
                 }
                 if (account) {

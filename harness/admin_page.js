@@ -425,6 +425,7 @@ async function typesCheck(browser) {
   const tick = (scope, type) => scope.locator(`input[data-type="${type}"]`);
   const flags = async (scope, types) => Promise.all(types.map(async t => `${t}:${await tick(scope, t).isChecked() ? 'on' : 'off'}${await tick(scope, t).isDisabled() ? '/locked' : ''}`));
   const setup = async tab => { await reopen(a, SERVERS.alice.url, tab); await a.waitForTimeout(500); };
+  let attachedFolders = false;
   try {
     await login(a, SERVERS.alice.url);
     await openAdmin(a, SERVERS.alice.url, 'share');
@@ -487,6 +488,7 @@ async function typesCheck(browser) {
     check('a custom share shows Custom with Shows only', (await cCustom.locator('select').inputValue()) === 'list' && (await flags(cCustom, ['Movies', 'Shows'])).join() === 'Movies:off,Shows:on');
     const cLegacy = await cardOf('#js-shares', 'bob');
     check('the legacy share shows Custom with Movies and Shows ticked', (await cLegacy.locator('select').inputValue()) === 'list' && (await flags(cLegacy, ['Movies', 'Shows'])).join() === 'Movies:on,Shows:on');
+    await legacyEditCheck(a, admin, configUrl, cardOf, flags, setup, toast, supported);
 
     await cCustom.locator('select').selectOption('all');
     await cCustom.locator('button:has-text("Save")').click();
@@ -522,9 +524,17 @@ async function typesCheck(browser) {
     const p = ((await status()).peers ?? (await status()).Peers)[0];
     log('peer acceptAllTypes =', JSON.stringify(p.acceptAllTypes ?? p.AcceptAllTypes), '; acceptTypes =', JSON.stringify(p.acceptTypes ?? p.AcceptTypes));
     const roots = a.locator('#js-roots');
-    for (const label of ['Music', 'Audiobooks & podcasts']) {
+    const st2 = await status();
+    for (const [label, key] of [['Music', 'Music'], ['Audiobooks & podcasts', 'Audiobooks']]) {
       const card = roots.locator('.js-card', { hasText: label + ' placeholder folder' });
-      check(`Setup shows the ${label} folder with "Add to library"`, await card.count() === 1 && await card.locator('button:has-text("Add to library")').count() === 1);
+      // harness/e2e.py leaves alice's folders attached; the button only shows on a fresh alice.
+      const attached = (st2[key] ?? st2[key.toLowerCase()] ?? {}).Attached ?? (st2[key] ?? st2[key.toLowerCase()] ?? {}).attached;
+      if (attached) {
+        attachedFolders = true;
+        check(`Setup shows the ${label} folder (already in a library)`, await card.count() === 1);
+      } else {
+        check(`Setup shows the ${label} folder with "Add to library"`, await card.count() === 1 && await card.locator('button:has-text("Add to library")').count() === 1);
+      }
     }
     await shot(a, 'media-types-setup');
     await a.click('#JellySharePage .js-tab[data-tab="share"]');
@@ -532,7 +542,42 @@ async function typesCheck(browser) {
   } finally {
     await rest('alice', 'POST', configUrl, snapshot, admin).then(() => log('alice configuration restored'), e => log('RESTORE FAILED:', e.message));
   }
-  await skippedNoteCheck(a, admin, status);
+  if (attachedFolders) {
+    log('skipped the "set up the folder first" check: alice\'s Music/Audiobooks folders are in a library (run on a fresh alice)');
+  } else {
+    await skippedNoteCheck(a, admin, status);
+  }
+}
+
+// A share saved before media types existed must keep resolving as before when only its name is edited: one whose
+// libraries are gone (it resolves to no types) shows an empty Custom list, and saving the name keeps UseDefaultTypes
+// unset in the stored configuration instead of widening it to every type. Runs inside typesCheck (restored after).
+async function legacyEditCheck(a, admin, configUrl, cardOf, flags, setup, toast, supported) {
+  const pick = (o, k) => o[k] ?? o[k[0].toLowerCase() + k.slice(1)];
+  const sameId = (x, y) => String(x).replace(/-/g, '').toLowerCase() === String(y).replace(/-/g, '').toLowerCase();
+  const cfg = await rest('alice', 'GET', configUrl, undefined, admin);
+  const shares = pick(cfg, 'Shares');
+  const legacyId = '0d0d0d0d-0000-4000-8000-000000000001';
+  shares.push({ Id: legacyId, Name: 'legacy nothing', TokenHash: 'x', Enabled: true, LibraryIds: ['0d0d0d0d-0000-4000-8000-0000000000ff'], MaxStreams: 1, MaxBitrate: null, UseDefaultTypes: null, Types: [] });
+  await rest('alice', 'POST', configUrl, cfg, admin);
+  await setup('share');
+  const card = await cardOf('#js-shares', 'legacy nothing');
+  check('a legacy share that resolves to no types shows an empty Custom list',
+    (await card.locator('select').inputValue()) === 'list' && (await flags(card, supported)).every(f => f.endsWith(':off')));
+  await card.locator('input[type=text]').fill('legacy nothing renamed');
+  await card.locator('button:has-text("Save")').click();
+  await toast(/^Saved/);
+  const stored = pick(await rest('alice', 'GET', configUrl, undefined, admin), 'Shares').find(s => sameId(pick(s, 'Id'), legacyId));
+  log('legacy share after a name edit:', JSON.stringify({ name: pick(stored, 'Name'), useDefaultTypes: pick(stored, 'UseDefaultTypes'), types: pick(stored, 'Types') }));
+  check('editing only the name keeps UseDefaultTypes unset and no types', pick(stored, 'Name') === 'legacy nothing renamed' && pick(stored, 'UseDefaultTypes') == null && pick(stored, 'Types').length === 0);
+  const bobShare = pick(await rest('alice', 'GET', configUrl, undefined, admin), 'Shares').find(s => pick(s, 'Name') === 'bob');
+  check('the existing legacy share "bob" is still unset', bobShare && pick(bobShare, 'UseDefaultTypes') == null);
+  await setup('share');
+  const again = await cardOf('#js-shares', 'legacy nothing renamed');
+  await again.locator('button:has-text("Save")').click();
+  await toast(/^Saved/);
+  check('saving it again untouched still stores nothing new', pick(pick(await rest('alice', 'GET', configUrl, undefined, admin), 'Shares').find(s => sameId(pick(s, 'Id'), legacyId)), 'UseDefaultTypes') == null);
+  await setup('share');
 }
 
 // bob's share for alice is widened to every type for one alice sync: alice's Music and Audiobooks folders are not in a
