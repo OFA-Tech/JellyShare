@@ -43,12 +43,24 @@ public static class KeyText
         return sb.ToString();
     }
 
-    /// <summary>Hashes normalized fields: the first 16 lowercase hex digits of SHA-256 over the <c>|</c>-joined fields.</summary>
-    /// <param name="fields">The raw fields; each is normalized here.</param>
+    /// <summary>
+    /// Gets the text a name is keyed on: <see cref="Normalize"/>, or, for a name of only symbols (an album called
+    /// "÷", a band called "!!!"), the trimmed, lowercased raw text, so it still has a key of its own.
+    /// </summary>
+    /// <param name="text">The raw text.</param>
+    /// <returns>The key text, empty only for missing or blank text.</returns>
+    public static string KeyOf(string? text)
+    {
+        var normalized = Normalize(text);
+        return normalized.Length > 0 ? normalized : text?.Trim().ToLowerInvariant() ?? string.Empty;
+    }
+
+    /// <summary>Hashes keyed fields: the first 16 lowercase hex digits of SHA-256 over the <c>|</c>-joined fields.</summary>
+    /// <param name="fields">The raw fields; each goes through <see cref="KeyOf"/> here.</param>
     /// <returns>The 16-character hash.</returns>
     public static string Hash(params string?[] fields)
     {
-        var joined = string.Join('|', fields.Select(Normalize));
+        var joined = string.Join('|', fields.Select(KeyOf));
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(joined)))[..16];
     }
 }

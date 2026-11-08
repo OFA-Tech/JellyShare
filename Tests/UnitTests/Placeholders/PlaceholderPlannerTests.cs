@@ -149,6 +149,21 @@ public sealed class PlaceholderPlannerTests
     }
 
     [Fact]
+    public void Planner_OwnerHasAnyTrackOfSymbolOnlyAlbum_SkipsWholeAlbum()
+    {
+        var owned = TestItems.Track("Eraser", albumArtist: "Ed Sheeran", album: "÷", track: 1);
+        var local = new HashSet<string>(MediaKey.For(owned)) { TitleKey.For(Entry(owned)) };
+        var wanted = new[]
+        {
+            Entry(TestItems.Track("Perfect", albumArtist: "Ed Sheeran", album: "÷", track: 5, id: "5")),
+            Entry(TestItems.Track("Sing", albumArtist: "Ed Sheeran", album: "×", track: 1, id: "6")),
+        };
+        var diff = PlaceholderPlanner.Plan(wanted, local, _noExisting, Relay);
+
+        diff.Writes.Select(w => w.RelativePath).ShouldBe(["Ed Sheeran/×/01 Sing.strm"]);
+    }
+
+    [Fact]
     public void Planner_OwnerHasAnyFileOfBook_SkipsWholeBook()
     {
         var owned = TestItems.Book("Part 1");

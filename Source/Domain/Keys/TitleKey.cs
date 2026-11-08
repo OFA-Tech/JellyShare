@@ -29,7 +29,7 @@ public static class TitleKey
     {
         ArgumentNullException.ThrowIfNull(item);
         if (string.Equals(item.Type, "Audio", StringComparison.Ordinal)
-            && KeyText.Normalize(item.Album).Length > 0)
+            && KeyText.KeyOf(item.Album).Length > 0)
         {
             return $"album:name:{KeyText.Hash(AlbumArtistOf(item), item.Album)}";
         }
@@ -44,16 +44,16 @@ public static class TitleKey
     }
 
     /// <summary>
-    /// Gets the album artist of a track: its own, else its first artist; a name without letters or digits counts as
-    /// missing. Keys, folder names and written metadata all use this one rule.
+    /// Gets the album artist of a track: its own, else its first artist; a blank name counts as missing. Keys, folder
+    /// names and written metadata all use this one rule.
     /// </summary>
     /// <param name="item">The item.</param>
     /// <returns>The name, or <c>null</c> when the item names none.</returns>
     public static string? AlbumArtistOf(CatalogItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        return KeyText.Normalize(item.AlbumArtist).Length > 0
+        return KeyText.KeyOf(item.AlbumArtist).Length > 0
             ? item.AlbumArtist
-            : item.Artists?.FirstOrDefault(a => KeyText.Normalize(a).Length > 0);
+            : item.Artists?.FirstOrDefault(a => KeyText.KeyOf(a).Length > 0);
     }
 }

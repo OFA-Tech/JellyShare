@@ -30,7 +30,7 @@ public static class MediaKey
             var suffix = string.Create(CultureInfo.InvariantCulture, $":s{season}e{episode}");
             AddKeys(keys, item.SeriesProviderIds, _episodeKinds, "ep", suffix);
         }
-        else if (string.Equals(item.Type, "Audio", StringComparison.Ordinal) && KeyText.Normalize(item.Name).Length > 0)
+        else if (string.Equals(item.Type, "Audio", StringComparison.Ordinal) && KeyText.KeyOf(item.Name).Length > 0)
         {
             if (item.ProviderIds is not null && Lookup(item.ProviderIds, "MusicBrainzRecording") is { } mb)
             {

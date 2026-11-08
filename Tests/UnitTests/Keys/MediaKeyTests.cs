@@ -156,8 +156,14 @@ public sealed class MediaKeyTests
     }
 
     [Fact]
-    public void For_Audio_TitleOfOnlySymbols_HasNoKey()
-        => MediaKey.For(Track("?!…", mbid: Mbid)).ShouldBeEmpty();
+    public void For_Audio_TitleOfOnlySymbols_KeysOnItsRawText()
+    {
+        var keys = MediaKey.For(Track("?!…", mbid: Mbid));
+
+        keys.Count.ShouldBe(2);
+        keys.ShouldNotBe(MediaKey.For(Track("?", mbid: Mbid)));
+        MediaKey.For(Track(" ÷ ")).ShouldBe(MediaKey.For(Track("÷")));
+    }
 
     [Fact]
     public void For_AudioBook_NameOfOnlySymbols_HasNoKey()

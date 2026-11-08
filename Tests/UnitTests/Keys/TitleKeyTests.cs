@@ -33,6 +33,26 @@ public sealed class TitleKeyTests
     }
 
     [Fact]
+    public void TitleKey_SymbolOnlyAlbum_TracksShareOneKey_OtherSymbolAlbumDiffers()
+    {
+        var one = TitleKey.ForAudio(Track("Eraser", track: 1, albumArtist: "Ed Sheeran", album: "÷"));
+        var two = TitleKey.ForAudio(Track("Castle on the Hill", track: 2, albumArtist: "ed sheeran", album: " ÷ "));
+
+        one.ShouldNotBeNull().ShouldStartWith("album:name:");
+        two.ShouldBe(one);
+        TitleKey.ForAudio(Track("Eraser", albumArtist: "Ed Sheeran", album: "×")).ShouldNotBe(one);
+    }
+
+    [Fact]
+    public void TitleKey_SymbolOnlyAlbumArtist_IsTheAlbumArtist()
+    {
+        var item = Track("Heart of Hearts", albumArtist: "!!!", album: "Thr!!!er");
+
+        TitleKey.AlbumArtistOf(item).ShouldBe("!!!");
+        TitleKey.ForAudio(item).ShouldNotBe(TitleKey.ForAudio(item with { AlbumArtist = "  " }));
+    }
+
+    [Fact]
     public void TitleKey_FilesOfOneAudioBook_AreOneTitle()
     {
         var one = EntryOf(Book("Part 1"));
