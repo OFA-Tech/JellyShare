@@ -36,6 +36,20 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
 
     private const string EnableDirectPlay = "enableDirectPlay";
     private const string EnableDirectStream = "enableDirectStream";
+    private const string ItemId = "itemId";
+    private const string MediaSourceId = "mediaSourceId";
+    private const string EnableRedirection = "enableRedirection";
+
+    // The audio actions the relay source rule must reach, with the parameters it reads or sets.
+    private static readonly (string Template, string[] Parameters)[] _audioTargets =
+    [
+        (PlaybackInfoTemplate, [ItemId, MediaSourceId]),
+        ("Audio/{itemId}/stream", [ItemId, MediaSourceId]),
+        ("Audio/{itemId}/stream.{container}", [ItemId, MediaSourceId]),
+        ("Audio/{itemId}/universal", [ItemId, MediaSourceId, EnableRedirection]),
+        ("Audio/{itemId}/main.m3u8", [ItemId, MediaSourceId]),
+        ("Audio/{itemId}/master.m3u8", [ItemId, MediaSourceId]),
+    ];
 
     private readonly IPlaceholderLookup _lookup;
     private readonly JellyfinCallerResolver _callers;
@@ -87,15 +101,16 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
 
     /// <summary>
     /// Checks that Jellyfin still has the action the bitrate rule hooks into: a <see cref="PlaybackInfoTemplate"/> route
-    /// declaring <c>itemId</c> and <c>enableDirectStream</c>. A future Jellyfin that renames them would silently turn the
-    /// rule off, so this is logged as a warning at startup.
+    /// declaring <c>itemId</c> and <c>enableDirectStream</c>, and the audio actions the relay source rule rewrites. A future
+    /// Jellyfin that renames them would silently turn the rules off, so this is logged as a warning at startup.
     /// </summary>
     /// <param name="actions">The registered MVC actions.</param>
     /// <returns>A warning, or <c>null</c> when the target is found.</returns>
     public static string? TargetWarning(IEnumerable<Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor> actions)
     {
         ArgumentNullException.ThrowIfNull(actions);
-        var routes = actions
+        var all = actions.ToList();
+        var routes = all
             .Where(a => string.Equals(a.AttributeRouteInfo?.Template, PlaybackInfoTemplate, StringComparison.OrdinalIgnoreCase))
             .ToList();
         if (routes.Count == 0)
@@ -107,13 +122,21 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
         static bool Declares(Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor a, string name)
             => a.Parameters.Any(p => string.Equals(p.Name, name, StringComparison.Ordinal));
 
-        if (!routes.Any(a => Declares(a, "itemId") && Declares(a, EnableDirectStream)))
+        if (!routes.Any(a => Declares(a, ItemId) && Declares(a, EnableDirectStream)))
         {
             return "JellyShare: Jellyfin's PlaybackInfo action no longer declares itemId/" + EnableDirectStream + ". Placeholders "
                 + "may play above a client's bitrate limit. Check for a JellyShare update.";
         }
 
-        return null;
+        var missing = _audioTargets
+            .Where(t => !all.Any(a => string.Equals(a.AttributeRouteInfo?.Template, t.Template, StringComparison.OrdinalIgnoreCase)
+                && t.Parameters.All(p => Declares(a, p))))
+            .Select(t => t.Template + " (" + string.Join(", ", t.Parameters) + ")")
+            .ToList();
+        return missing.Count == 0
+            ? null
+            : "JellyShare: Jellyfin's audio stream actions changed: " + string.Join("; ", missing) + " not found. Shared music and "
+                + "audiobooks may not play. Check for a JellyShare update.";
     }
 
     /// <inheritdoc />
@@ -121,6 +144,7 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
     {
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(next);
+        UseAudioRelaySource(context);
         if (IsPlaybackInfo(context) && !await ApplyStreamLimitAsync(context).ConfigureAwait(false))
         {
             return;
@@ -248,6 +272,31 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
         if (prop is not null && prop.CanWrite && (prop.PropertyType == typeof(bool?) || prop.PropertyType == typeof(bool)))
         {
             prop.SetValue(body, false);
+        }
+    }
+
+    // Jellyfin plays mediaSources[0] (the .strm file) when no mediaSourceId is given, which is what universal and music
+    // apps send, so every action on an audio placeholder (PlaybackInfo, Audio/{itemId}/stream[.ext], universal, HLS) is
+    // pointed at the relay source of AudioRelaySourceProvider.
+    private void UseAudioRelaySource(ActionExecutingContext context)
+    {
+        if (!context.ActionArguments.TryGetValue(ItemId, out var id) || id is not Guid itemId
+            || !DeclaresParameter(context, MediaSourceId)
+            || _lookup.Find(itemId) is not { IsAudio: true })
+        {
+            return;
+        }
+
+        context.ActionArguments.TryGetValue(MediaSourceId, out var current);
+        if (current is not string s || string.IsNullOrEmpty(s) || (Guid.TryParse(s, out var g) && g == itemId))
+        {
+            context.ActionArguments[MediaSourceId] = AudioRelaySourceProvider.SourceId(itemId);
+        }
+
+        // universal would redirect a client that may direct-play a remote source to its path, the relay URL.
+        if (DeclaresParameter(context, EnableRedirection))
+        {
+            context.ActionArguments[EnableRedirection] = false;
         }
     }
 

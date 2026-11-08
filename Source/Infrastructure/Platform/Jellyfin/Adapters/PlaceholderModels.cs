@@ -1,4 +1,6 @@
 using System.Net;
+using JellyShare.Domain.Models.Configuration;
+using JellyShare.Domain.Models.Protocol;
 
 namespace JellyShare.Jellyfin.Adapters;
 
@@ -6,10 +8,14 @@ namespace JellyShare.Jellyfin.Adapters;
 /// <param name="CanonicalKey">The merged-index key from its <c>.strm</c> URL.</param>
 /// <param name="SourceBitrate">The source bitrate in bit/s (stored media info, else the peer's catalog), if known.</param>
 /// <param name="TitleKey">The key its stream is counted under (the album for a track); the canonical key when <c>null</c>.</param>
-internal sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate, string? TitleKey = null)
+/// <param name="Item">The peer's catalog item of the entry, when the entry is in the merged index.</param>
+internal sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate, string? TitleKey = null, CatalogItem? Item = null)
 {
     /// <summary>Gets the key its stream is counted under.</summary>
     public string StreamKey => TitleKey ?? CanonicalKey;
+
+    /// <summary>Gets a value indicating whether it is a music track or an audiobook.</summary>
+    public bool IsAudio => MediaTypes.IsAudio(Item?.Type);
 }
 
 /// <summary>Bitrate limits of a caller that Jellyfin applies besides the request values.</summary>
