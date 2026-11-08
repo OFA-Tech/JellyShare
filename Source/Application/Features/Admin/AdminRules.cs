@@ -120,7 +120,7 @@ public static class AdminRules
         return null;
     }
 
-    /// <summary>Checks a chosen set of media types: at least one, each known, none twice.</summary>
+    /// <summary>Checks a chosen set of media types: at least one, each known, none twice, at least one supported.</summary>
     /// <param name="types">The media types as sent.</param>
     /// <param name="chosen">The media types, in the order sent.</param>
     /// <returns>The problem, or <c>null</c>.</returns>
@@ -132,9 +132,12 @@ public static class AdminRules
             return "Pick at least one media type to share.";
         }
 
-        return chosen.Any(t => !Enum.IsDefined(t)) || chosen.Distinct().Count() != chosen.Count
-            ? "The media types are not valid. Pick each type at most once."
-            : null;
+        if (chosen.Any(t => !Enum.IsDefined(t)) || chosen.Distinct().Count() != chosen.Count)
+        {
+            return "The media types are not valid. Pick each type at most once.";
+        }
+
+        return chosen.Any(MediaTypes.Supported.Contains) ? null : "Pick at least one supported media type.";
     }
 
     /// <summary>Compares two library folder paths the way Jellyfin stores them (slashes, trailing separator, OS case rules).</summary>

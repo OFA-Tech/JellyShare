@@ -77,6 +77,7 @@ public sealed class ShareHandlerTests : IDisposable
     [InlineData(new MediaType[0], "Pick at least one media type to share.")]
     [InlineData(new[] { MediaType.Movies, MediaType.Movies }, "The media types are not valid. Pick each type at most once.")]
     [InlineData(new[] { (MediaType)99 }, "The media types are not valid. Pick each type at most once.")]
+    [InlineData(new[] { MediaType.Ebooks, MediaType.LiveTv }, "Pick at least one supported media type.")]
     public async Task CreateShare_CustomWithBadTypes_FailsValidation(MediaType[] types, string message)
     {
         var result = await _h.Send(new CreateShareCommand("bob", null, 2, null, false, types));
@@ -118,6 +119,15 @@ public sealed class ShareHandlerTests : IDisposable
         var result = await _h.Send(new UpdateDefaultSharingCommand(all, []));
 
         result.Error.Type.ShouldBe(ErrorType.Validation);
+        _h.Saver.Saves.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task UpdateDefaultSharing_OnlyUnsupportedTypes_Rejected()
+    {
+        var result = await _h.Send(new UpdateDefaultSharingCommand(false, [MediaType.Collections]));
+
+        result.Error.Description.ShouldBe("Pick at least one supported media type.");
         _h.Saver.Saves.ShouldBe(0);
     }
 

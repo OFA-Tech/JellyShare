@@ -164,6 +164,17 @@ public sealed class PeerHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdatePeer_OnlyUnsupportedTypes_FailsValidationAndSavesNothing()
+    {
+        var peer = Seed();
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", null, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Ebooks]));
+
+        result.Error.Description.ShouldBe("Pick at least one supported media type.");
+        _h.Saver.Saves.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task UpdatePeer_UnreadablePeerState_StillSaves()
     {
         var peer = Seed();
