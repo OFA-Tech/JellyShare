@@ -85,6 +85,17 @@ public sealed class AudioRelaySourceProviderTests
     }
 
     [Fact]
+    public void Source_NoContainerAnywhere_UsesTheAudioCodec()
+    {
+        // Jellyfin stores no container for audiobooks of a multi-file folder; without one, universal transcodes to HLS.
+        var book = Track() with { Media = new Domain.Models.Protocol.MediaInfo(null, null, null, null, 64_000, [new AudioTrack(null, "mp3", 1, null)], []) };
+
+        var source = AudioRelaySourceProvider.Source(Item(), new PlaceholderMedia(Key, 64_000, null, book), "http://127.0.0.1:8096", []);
+
+        source.Container.ShouldBe("mp3");
+    }
+
+    [Fact]
     public async Task OwnItem_NoSources()
     {
         (await Provider().GetMediaSources(Item(), CancellationToken.None)).ShouldBeEmpty();

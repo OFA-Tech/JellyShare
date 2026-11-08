@@ -62,6 +62,10 @@ public sealed class AudioRelaySourceProvider : IMediaSourceProvider
         var container = string.IsNullOrEmpty(item.Container) || string.Equals(item.Container, "strm", StringComparison.OrdinalIgnoreCase)
             ? media?.Container
             : item.Container;
+        // Jellyfin stores no container for audiobooks of a multi-file folder, on either server; without one, universal
+        // matches no direct-play profile and sends the client to HLS.
+        // shortcut: the codec name stands in for the container (exact for mp3 and flac, "aac" for an m4b), until providers send the file extension.
+        container ??= stored.FirstOrDefault(s => s.Type == MediaStreamType.Audio)?.Codec ?? media?.Audio.FirstOrDefault()?.Codec;
         var streams = stored.ToList();
         if (!streams.Any(s => s.Type == MediaStreamType.Audio))
         {
