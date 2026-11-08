@@ -201,8 +201,10 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
         }
     }
 
-    // The next sync must fetch the catalog in full. If the state file cannot be read or written this is skipped: the
-    // sync filters by the accept list itself, and the provider's ETag (or the account hash) covers the requested types.
+    // The next sync must fetch the catalog in full, so newly accepted types appear. If the state file cannot be read or
+    // written this is skipped: the receiver still filters by the accept list at sync time, so nothing unwanted is
+    // placed, but a newly accepted type may only appear once the catalog changes (a 0.2.0.0 provider's ETag does not
+    // cover the requested types).
     private void ForgetEtagIfAcceptChanged(RemotePeer before, RemotePeer after)
     {
         if (MediaTypes.Accepted(before).SetEquals(MediaTypes.Accepted(after)))
