@@ -205,7 +205,42 @@ public static class AdminRules
             peer.Username,
             peer.MaxStreams,
             peer.LimitAction,
-            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true);
+            peer.Kind == PeerKind.Account && state?.LastError?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true,
+            peer.AcceptAllTypes,
+            MediaTypes.Accepted(peer).Order().ToList());
+    }
+
+    /// <summary>
+    /// Applies a requested accept list to a peer: <paramref name="acceptAll"/> <c>null</c> keeps the peer's setting;
+    /// <c>false</c> needs at least one type (<paramref name="types"/>, or else the stored list). The peer is only
+    /// changed when the result is valid. Never mutates the stored list in place (peers are copied shallowly).
+    /// </summary>
+    /// <param name="peer">The peer to change.</param>
+    /// <param name="acceptAll">Accept every media type; <c>null</c> keeps the setting.</param>
+    /// <param name="types">The types to accept instead of all; <c>null</c> keeps the stored list.</param>
+    /// <returns>The problem, or <c>null</c>.</returns>
+    public static string? ApplyAccept(RemotePeer peer, bool? acceptAll, IReadOnlyList<MediaType>? types)
+    {
+        ArgumentNullException.ThrowIfNull(peer);
+        if (acceptAll is null)
+        {
+            return null;
+        }
+
+        if (acceptAll == true)
+        {
+            peer.AcceptAllTypes = true;
+            return null;
+        }
+
+        var problem = ValidateTypes(types ?? peer.AcceptTypes, out var chosen);
+        if (problem is null)
+        {
+            peer.AcceptAllTypes = false;
+            peer.AcceptTypes = chosen;
+        }
+
+        return problem;
     }
 
     /// <summary>Describes the media types a share offers by default.</summary>

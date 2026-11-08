@@ -2,6 +2,7 @@ using System.Globalization;
 using JellyShare.Application.Features.Sync;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Configuration;
@@ -276,6 +277,42 @@ public sealed class SyncServiceTests : IDisposable
         movie.Sources[0].Item.Media.BitRate.ShouldBe(1312543);
         movie.Sources[0].Item.Name.ShouldBe("Big Buck Bunny");
         entries[0].Sources[0].Item.SeriesId.ShouldBe("s1");
+    }
+
+    [Fact]
+    public async Task Sync_PeerStopsAcceptingType_RemovesOnlyThatTypeFromThatPeer()
+    {
+        var bob = new RemotePeer { Id = TestItems.PeerB, Name = "bob", BaseUrl = "http://bob", Token = "t" };
+        _config.Settings.Peers.Add(bob);
+        _client.Catalogs[_alice.Id] = _ => FakePeerClient.Ok(Bunny(), Pioneer(1, 1));
+        _client.Catalogs[bob.Id] = _ => FakePeerClient.Ok(Bunny(), Pioneer(1, 1));
+        await _sync.RunAsync(CancellationToken.None);
+
+        // The cached catalog (not modified) still holds A's episode: the accept list alone drops it.
+        _alice.AcceptAllTypes = false;
+        _alice.AcceptTypes = [MediaType.Movies];
+        _client.Catalogs[_alice.Id] = _ => new PeerFetchResult(false, true, null, null);
+        await _sync.RunAsync(CancellationToken.None);
+
+        var entries = MergedIndexStore.Load(Path.Combine(DataDir, "merged-index.json"))!.ToEntries();
+        entries.Single(e => e.CanonicalKey == "movie:tmdb:10378").Sources.Select(s => s.PeerId).ShouldBe([_alice.Id, bob.Id], ignoreOrder: true);
+        entries.Single(e => e.CanonicalKey == "ep:tvdb:153021:s1e1").Sources.Select(s => s.PeerId).ShouldBe([bob.Id]);
+        File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 01", "Pioneer One S01E01.strm")).ShouldBeTrue();
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Sync_OnlyAcceptedTypeIsUnsupported_DropsTheTitlesWithoutAnError()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+
+        _alice.AcceptAllTypes = false;
+        _alice.AcceptTypes = [MediaType.Music];
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
+        report.PeerErrors.ShouldBeEmpty();
     }
 
     [Fact]

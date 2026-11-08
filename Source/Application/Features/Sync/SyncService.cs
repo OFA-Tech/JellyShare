@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using JellyShare.Application.Features.Placeholders;
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
@@ -371,8 +372,8 @@ public sealed class SyncService : ISyncRunner
             .ToDictionary(g => g.Key, g => g.First());
 
         var relay = _relayBase.Current;
-        var movies = affected.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
-        var episodes = affected.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
+        var movies = affected.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Movies).ToList();
+        var episodes = affected.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Shows).ToList();
         var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
         var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
         var (scanned, _) = ReportScans();
@@ -477,7 +478,8 @@ public sealed class SyncService : ISyncRunner
             }
 
             contributing[peer.Id] = peer;
-            sources.AddRange(catalog.Items.Where(item => item.Type is "Movie" or "Episode").Select(item => (peer.Id, item)));
+            // Also applied to a cached catalog: it may predate a change of what this peer is accepted for.
+            sources.AddRange(catalog.Items.Where(item => MediaTypes.IsRequested(peer, item.Type)).Select(item => (peer.Id, item)));
         }
 
         var index = MergeIndex.Build(sources);
@@ -490,8 +492,8 @@ public sealed class SyncService : ISyncRunner
         }
 
         var relay = _relayBase.Current;
-        var movies = index.Entries.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
-        var episodes = index.Entries.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
+        var movies = index.Entries.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Movies).ToList();
+        var episodes = index.Entries.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Shows).ToList();
         var skippedLocal = movies.Count(e => e.Keys.Any(local.MovieKeys.Contains))
             + episodes.Count(e => e.Keys.Any(local.EpisodeKeys.Contains));
 

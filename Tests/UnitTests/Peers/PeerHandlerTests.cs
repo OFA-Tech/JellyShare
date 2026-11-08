@@ -4,6 +4,7 @@ using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Requests.Peers;
+using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
 
 namespace JellyShare.UnitTests.Peers;
@@ -97,6 +98,117 @@ public sealed class PeerHandlerTests : IDisposable
         await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", "new-token", null));
 
         _h.Saver.Saved!.Peers.ShouldHaveSingleItem().Token.ShouldBe("new-token");
+    }
+
+    // ---- accept list ----
+
+    private void SeedEtag(RemotePeer peer)
+        => _h.PeerStates.Save(new Dictionary<Guid, PeerState> { [peer.Id] = new() { Etag = "abc", LastSuccessUtc = DateTimeOffset.UnixEpoch } });
+
+    [Fact]
+    public async Task UpdatePeer_AcceptListChange_ClearsEtag()
+    {
+        var peer = Seed();
+        SeedEtag(peer);
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", null, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Movies]));
+
+        result.IsSuccess.ShouldBeTrue();
+        result.Value.AcceptAllTypes.ShouldBeFalse();
+        result.Value.AcceptTypes.ShouldBe([MediaType.Movies]);
+        var saved = _h.Saver.Saved!.Peers.ShouldHaveSingleItem();
+        saved.AcceptAllTypes.ShouldBeFalse();
+        saved.AcceptTypes.ShouldBe([MediaType.Movies]);
+        var state = _h.PeerStates.Load()[peer.Id];
+        state.Etag.ShouldBeNull();
+        state.LastSuccessUtc.ShouldBe(DateTimeOffset.UnixEpoch);
+    }
+
+    [Fact]
+    public async Task UpdatePeer_AcceptListUnchanged_KeepsEtag()
+    {
+        var peer = Seed();
+        SeedEtag(peer);
+
+        await _h.Send(new UpdatePeerCommand(peer.Id, "alice2", "http://alice:8096", null, null, AcceptAllTypes: true));
+
+        _h.PeerStates.Load()[peer.Id].Etag.ShouldBe("abc");
+    }
+
+    [Fact]
+    public async Task UpdatePeer_KeepsAcceptListWhenOmitted()
+    {
+        var peer = Seed();
+        peer.AcceptAllTypes = false;
+        peer.AcceptTypes = [MediaType.Shows];
+        SeedEtag(peer);
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice2", "http://alice:8096", null, null));
+
+        result.IsSuccess.ShouldBeTrue();
+        var saved = _h.Saver.Saved!.Peers.ShouldHaveSingleItem();
+        saved.AcceptAllTypes.ShouldBeFalse();
+        saved.AcceptTypes.ShouldBe([MediaType.Shows]);
+        _h.PeerStates.Load()[peer.Id].Etag.ShouldBe("abc");
+    }
+
+    [Fact]
+    public async Task UpdatePeer_OnlyWithoutTypes_FailsValidationAndSavesNothing()
+    {
+        var peer = Seed();
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", null, null, AcceptAllTypes: false, AcceptTypes: []));
+
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        _h.Saver.Saves.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task UpdatePeer_UnreadablePeerState_StillSaves()
+    {
+        var peer = Seed();
+        Directory.CreateDirectory(_h.Tmp.Sub("data"));
+        await File.WriteAllTextAsync(Path.Combine(_h.Tmp.Sub("data"), "peer-state.json"), "{ not json");
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", null, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Movies]));
+
+        result.IsSuccess.ShouldBeTrue();
+        _h.Saver.Saved!.Peers.ShouldHaveSingleItem().AcceptAllTypes.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task UpdateAccountPeer_AcceptListChange_ClearsEtag()
+    {
+        var peer = SeedAccount();
+        SeedEtag(peer);
+
+        var result = await _h.Send(new UpdatePeerCommand(peer.Id, "alice", "http://alice:8096", null, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Shows]));
+
+        result.IsSuccess.ShouldBeTrue();
+        _h.Saver.Saved!.Peers.ShouldHaveSingleItem().AcceptTypes.ShouldBe([MediaType.Shows]);
+        _h.PeerStates.Load()[peer.Id].Etag.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Add_AcceptList_IsSaved_AndOnlyNeedsAtLeastOneType()
+    {
+        var ok = await _h.Send(new AddPeerCommand("bob", "http://bob:8096", Token, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Movies]));
+        var empty = await _h.Send(new AddPeerCommand("carl", "http://carl:8096", Token, null, AcceptAllTypes: false, AcceptTypes: []));
+        var dup = await _h.Send(new AddPeerCommand("dan", "http://dan:8096", Token, null, AcceptAllTypes: false, AcceptTypes: [MediaType.Movies, MediaType.Movies]));
+
+        ok.Value.AcceptTypes.ShouldBe([MediaType.Movies]);
+        _h.Saver.Saved!.Peers.Single().AcceptAllTypes.ShouldBeFalse();
+        empty.Error.Type.ShouldBe(ErrorType.Validation);
+        dup.Error.Type.ShouldBe(ErrorType.Validation);
+    }
+
+    [Fact]
+    public async Task Add_WithoutAcceptList_AcceptsEverything()
+    {
+        var result = await _h.Send(new AddPeerCommand("bob", "http://bob:8096", Token, null));
+
+        result.Value.AcceptAllTypes.ShouldBeTrue();
+        result.Value.AcceptTypes.ShouldBe(MediaTypes.All);
     }
 
     private RemotePeer SeedAccount()

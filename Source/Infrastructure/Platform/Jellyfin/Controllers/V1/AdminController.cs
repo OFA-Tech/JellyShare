@@ -112,7 +112,7 @@ public class AdminController : JellyShareControllerBase
         }
 
         return ToActionResult(await Sender.Send(
-            new AddPeerCommand(request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction),
+            new AddPeerCommand(request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction, request.AcceptAllTypes, request.AcceptTypes),
             ct).ConfigureAwait(false));
     }
 
@@ -130,7 +130,7 @@ public class AdminController : JellyShareControllerBase
         }
 
         return ToActionResult(await Sender.Send(
-            new UpdatePeerCommand(id, request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction),
+            new UpdatePeerCommand(id, request.Name, request.BaseUrl, request.Token, request.Enabled, request.Kind, request.Username, request.Password, request.MaxStreams, request.LimitAction, request.AcceptAllTypes, request.AcceptTypes),
             ct).ConfigureAwait(false));
     }
 

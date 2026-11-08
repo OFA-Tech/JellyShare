@@ -156,29 +156,36 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
                 return Fail(error);
             }
 
+            var requested = MediaTypes.Requested(peer);
             var series = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
-            error = await PageAsync(peer, "Series", "ProviderIds", s => series[s.Id ?? string.Empty] = Ids(s.ProviderIds), ct).ConfigureAwait(false);
-            if (error is not null)
+            if (requested.Contains(MediaType.Shows))
             {
-                return Fail(error);
+                error = await PageAsync(peer, "Series", "ProviderIds", s => series[s.Id ?? string.Empty] = Ids(s.ProviderIds), ct).ConfigureAwait(false);
+                if (error is not null)
+                {
+                    return Fail(error);
+                }
             }
 
             var items = new List<CatalogItem>();
-            error = await PageAsync(
-                peer,
-                "Movie,Episode",
-                "ProviderIds,Overview,MediaSources,DateCreated&EnableImages=true",
-                i =>
-                {
-                    if (IsShared(i))
-                    {
-                        items.Add(Map(i, series));
-                    }
-                },
-                ct).ConfigureAwait(false);
-            if (error is not null)
+            if (requested.Count > 0)
             {
-                return Fail(error);
+                error = await PageAsync(
+                    peer,
+                    string.Join(',', requested.Select(MediaTypes.CatalogItemType)),
+                    "ProviderIds,Overview,MediaSources,DateCreated&EnableImages=true",
+                    i =>
+                    {
+                        if (IsShared(i, peer))
+                        {
+                            items.Add(Map(i, series));
+                        }
+                    },
+                    ct).ConfigureAwait(false);
+                if (error is not null)
+                {
+                    return Fail(error);
+                }
             }
 
             var hash = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(items)));
@@ -393,9 +400,10 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
 
     private static string DeviceId(Guid peerId) => "jellyshare-" + peerId.ToString("N", CultureInfo.InvariantCulture);
 
-    private static bool IsShared(JfItem i)
+    private static bool IsShared(JfItem i, RemotePeer peer)
         => !string.IsNullOrWhiteSpace(i.Id)
-            && i.Type is "Movie" or "Episode"
+            && i.Type is not null
+            && MediaTypes.IsRequested(peer, i.Type)
             && i.LocationType != "Virtual"
             && i.MediaSources is [{ Protocol: "File" }, ..];
 

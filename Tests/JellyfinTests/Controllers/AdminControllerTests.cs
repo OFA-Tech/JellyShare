@@ -68,6 +68,7 @@ public sealed class AdminControllerTests : IDisposable
         services.AddSingleton<IAccountSignIn>(new FakeAccountSignIn());
         services.AddSingleton<ISyncRunner>(_sync);
         services.AddSingleton<IConsumerIndex>(_index);
+        services.AddSingleton<JellyShare.Domain.Interfaces.Storage.IPeerStateStore>(PeerStateStore.InDataFolder(() => _tmp.Sub("data")));
         services.AddSingleton<IAdminLibraries>(_libs);
         services.AddSingleton<IPlaceholderFiles>(new PlaceholderWriter());
         services.AddSingleton<IServerIdentity>(new FakeIdentity());

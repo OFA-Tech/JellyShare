@@ -1,8 +1,10 @@
 using JellyShare.Application.Features.Admin;
 using JellyShare.Domain.Enums;
+using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Interfaces.Peers;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
@@ -21,6 +23,7 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
     private readonly ISettingsProvider _config;
     private readonly ISettingsStore _store;
     private readonly IConsumerIndex _consumerIndex;
+    private readonly IPeerStateStore _peerStates;
     private readonly IAccountSignIn _accounts;
     private readonly ILogger<UpdatePeerCommandHandler> _logger;
 
@@ -28,13 +31,15 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
     /// <param name="config">The settings.</param>
     /// <param name="store">Persists settings changes.</param>
     /// <param name="consumerIndex">The persisted peer states.</param>
+    /// <param name="peerStates">The peer state store, to forget the ETag when the accept list changes.</param>
     /// <param name="accounts">Signs in to a friend's server.</param>
     /// <param name="logger">The logger.</param>
-    public UpdatePeerCommandHandler(ISettingsProvider config, ISettingsStore store, IConsumerIndex consumerIndex, IAccountSignIn accounts, ILogger<UpdatePeerCommandHandler> logger)
+    public UpdatePeerCommandHandler(ISettingsProvider config, ISettingsStore store, IConsumerIndex consumerIndex, IPeerStateStore peerStates, IAccountSignIn accounts, ILogger<UpdatePeerCommandHandler> logger)
     {
         _config = config;
         _store = store;
         _consumerIndex = consumerIndex;
+        _peerStates = peerStates;
         _accounts = accounts;
         _logger = logger;
     }
@@ -72,6 +77,11 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
         if (request.MaxStreams is < AdminRules.MinAccountStreams or > AdminRules.MaxAccountStreams)
         {
             return PeerErrors.InvalidMaxStreams;
+        }
+
+        if (AdminRules.ApplyAccept(current.Copy(), request.AcceptAllTypes, request.AcceptTypes) is { } typesProblem)
+        {
+            return PeerErrors.InvalidTypes(typesProblem);
         }
 
         var username = string.IsNullOrWhiteSpace(request.Username) ? current.Username : request.Username.Trim();
@@ -124,6 +134,11 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
             peer.Enabled = request.Enabled ?? latest.Enabled;
             peer.MaxStreams = request.MaxStreams ?? latest.MaxStreams;
             peer.LimitAction = request.LimitAction ?? latest.LimitAction;
+            if (AdminRules.ApplyAccept(peer, request.AcceptAllTypes, request.AcceptTypes) is { } problem)
+            {
+                return PeerErrors.InvalidTypes(problem);
+            }
+
             if (token is not null)
             {
                 peer.Token = token;
@@ -132,6 +147,7 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
 
             cfg.Peers = cfg.Peers.Select(p => p.Id == request.Id ? peer : p).ToList();
             _store.Save(cfg);
+            ForgetEtagIfAcceptChanged(latest, peer);
             _logger.LogInformation("JellyShare admin: updated account peer {PeerId} (enabled={Enabled})", peer.Id, peer.Enabled);
             return Result.Success(AdminRules.ToView(peer, _consumerIndex.PeerStates()));
         }
@@ -172,10 +188,40 @@ public sealed class UpdatePeerCommandHandler : ICommandHandler<UpdatePeerCommand
             peer.BaseUrl = url;
             peer.Token = string.IsNullOrEmpty(newToken) ? current.Token : newToken;
             peer.Enabled = request.Enabled ?? current.Enabled;
+            if (AdminRules.ApplyAccept(peer, request.AcceptAllTypes, request.AcceptTypes) is { } typesProblem)
+            {
+                return PeerErrors.InvalidTypes(typesProblem);
+            }
+
             cfg.Peers = cfg.Peers.Select(p => p.Id == request.Id ? peer : p).ToList();
             _store.Save(cfg);
+            ForgetEtagIfAcceptChanged(current, peer);
             _logger.LogInformation("JellyShare admin: updated peer {PeerId} (enabled={Enabled})", peer.Id, peer.Enabled);
             return Result.Success(AdminRules.ToView(peer, _consumerIndex.PeerStates()));
+        }
+    }
+
+    // The next sync must fetch the catalog in full. If the state file cannot be read or written this is skipped: the
+    // sync filters by the accept list itself, and the provider's ETag (or the account hash) covers the requested types.
+    private void ForgetEtagIfAcceptChanged(RemotePeer before, RemotePeer after)
+    {
+        if (MediaTypes.Accepted(before).SetEquals(MediaTypes.Accepted(after)))
+        {
+            return;
+        }
+
+        try
+        {
+            var states = _peerStates.Load();
+            if (states.TryGetValue(after.Id, out var state) && state.Etag is not null)
+            {
+                state.Etag = null;
+                _peerStates.Save(states);
+            }
+        }
+        catch (Exception ex) when (ex is PeerStateUnreadableException or IOException or UnauthorizedAccessException)
+        {
+            _logger.LogWarning(ex, "JellyShare admin: could not reset the catalog ETag of peer {PeerId}", after.Id);
         }
     }
 }

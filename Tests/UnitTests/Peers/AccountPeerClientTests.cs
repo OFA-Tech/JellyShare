@@ -187,6 +187,38 @@ public sealed class AccountPeerClientTests
     }
 
     [Fact]
+    public async Task Account_FetchCatalog_IncludeItemTypesFollowAccept()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Server(r)));
+        var peer = Peer();
+        peer.AcceptAllTypes = false;
+        peer.AcceptTypes = [MediaType.Movies, MediaType.Music];
+
+        var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        result.Catalog!.Items.Select(i => i.Id).ShouldBe(["m1"]);
+        ItemRequests(handler, "Movie&").Count.ShouldBe(1);
+        ItemRequests(handler, "Series").ShouldBeEmpty();
+        ItemRequests(handler, "Movie,Episode").ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Account_FetchCatalog_NothingSupportedAccepted_AsksForNoItems()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Server(r)));
+        var peer = Peer();
+        peer.AcceptAllTypes = false;
+        peer.AcceptTypes = [MediaType.Music];
+
+        var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        result.Catalog!.Items.ShouldBeEmpty();
+        handler.Requests.ShouldNotContain(r => r.RequestUri!.AbsolutePath.EndsWith("/Items", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task Account_Catalog_MapsMoviesAndEpisodes()
     {
         var (client, handler) = Create(new FakeHandler(r => Server(r)));

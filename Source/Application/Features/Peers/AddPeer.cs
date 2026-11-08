@@ -30,6 +30,11 @@ public sealed class AddPeerCommandValidator : IValidator<AddPeerCommand>
             return PeerErrors.InvalidUrl;
         }
 
+        if (AdminRules.ApplyAccept(new RemotePeer(), request.AcceptAllTypes, request.AcceptTypes) is { } typesProblem)
+        {
+            return PeerErrors.InvalidTypes(typesProblem);
+        }
+
         if (request.Kind == PeerKind.Account)
         {
             if (string.IsNullOrWhiteSpace(request.Username))
@@ -92,6 +97,7 @@ public sealed class AddPeerCommandHandler : ICommandHandler<AddPeerCommand, Peer
         var account = request.Kind == PeerKind.Account;
         var token = account ? string.Empty : request.Token!.Trim();
         var peer = new RemotePeer { Id = id, Name = name, BaseUrl = url, Token = token, Enabled = request.Enabled ?? true };
+        AdminRules.ApplyAccept(peer, request.AcceptAllTypes, request.AcceptTypes);
         if (account)
         {
             // The password is only used for this call; the peer keeps the access token.

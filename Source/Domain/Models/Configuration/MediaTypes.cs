@@ -26,6 +26,19 @@ public static class MediaTypes
         _ => null,
     };
 
+    /// <summary>Maps a media type to its catalog item type (the reverse of <see cref="Of"/>).</summary>
+    /// <param name="type">The media type.</param>
+    /// <returns>The catalog item type.</returns>
+    /// <exception cref="ArgumentOutOfRangeException">The media type has no catalog item type yet.</exception>
+    public static string CatalogItemType(MediaType type) => type switch
+    {
+        MediaType.Movies => "Movie",
+        MediaType.Shows => "Episode",
+        MediaType.Music => "Audio",
+        MediaType.Audiobooks => "AudioBook",
+        _ => throw new ArgumentOutOfRangeException(nameof(type)),
+    };
+
     /// <summary>Maps a library collection type to the media types it holds.</summary>
     /// <param name="collectionType">The lowercase collection type, or <c>null</c> for a mixed library.</param>
     /// <returns>The media types; a mixed or unknown library holds movies and shows.</returns>
@@ -72,6 +85,19 @@ public static class MediaTypes
         ArgumentNullException.ThrowIfNull(peer);
         return (peer.AcceptAllTypes ? All : peer.AcceptTypes).ToHashSet();
     }
+
+    /// <summary>Gets the types requested from a peer: what this server accepts from it and this version supports.</summary>
+    /// <param name="peer">The peer.</param>
+    /// <returns>The types in enum order; empty when none of the accepted types is supported yet.</returns>
+    public static IReadOnlyList<MediaType> Requested(RemotePeer peer)
+        => Accepted(peer).Intersect(Supported).Order().ToList();
+
+    /// <summary>Tells whether a peer's item of the given catalog type is wanted from it.</summary>
+    /// <param name="peer">The peer.</param>
+    /// <param name="catalogItemType">The catalog item type.</param>
+    /// <returns><c>true</c> when the type is accepted from the peer and supported.</returns>
+    public static bool IsRequested(RemotePeer peer, string catalogItemType)
+        => Of(catalogItemType) is { } type && Supported.Contains(type) && Accepted(peer).Contains(type);
 
     /// <summary>Formats types as a comma-separated list in enum order, without duplicates.</summary>
     /// <param name="types">The types.</param>

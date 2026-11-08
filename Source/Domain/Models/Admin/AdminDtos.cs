@@ -62,6 +62,8 @@ public sealed record CreatedShareResponse(Guid Id, string Name, string Token);
 /// <param name="Password">The password of an account peer; used once to sign in and never stored.</param>
 /// <param name="MaxStreams">The concurrent playback limit of an account peer (1 to 20); <c>null</c> means 1.</param>
 /// <param name="LimitAction">What happens at the limit; <c>null</c> means refuse.</param>
+/// <param name="AcceptAllTypes">Accept every media type from the peer; <c>null</c> means yes.</param>
+/// <param name="AcceptTypes">The media types to accept when <paramref name="AcceptAllTypes"/> is <c>false</c> (at least one).</param>
 public sealed record AddPeerRequest(
     string? Name,
     string? BaseUrl,
@@ -71,11 +73,13 @@ public sealed record AddPeerRequest(
     string? Username = null,
     string? Password = null,
     int? MaxStreams = null,
-    StreamLimitAction? LimitAction = null)
+    StreamLimitAction? LimitAction = null,
+    bool? AcceptAllTypes = null,
+    List<MediaType>? AcceptTypes = null)
 {
     /// <inheritdoc />
     public override string ToString()
-        => $"AddPeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction} }}";
+        => $"AddPeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction}, AcceptAllTypes = {AcceptAllTypes} }}";
 }
 
 /// <summary>Body of <c>PUT admin/peers/{id}</c>. An empty token (or password) keeps the stored credentials.</summary>
@@ -88,6 +92,8 @@ public sealed record AddPeerRequest(
 /// <param name="Password">A password that signs in again, or empty to keep the session.</param>
 /// <param name="MaxStreams">The concurrent playback limit of an account peer (1 to 20); <c>null</c> keeps it.</param>
 /// <param name="LimitAction">What happens at the limit; <c>null</c> keeps it.</param>
+/// <param name="AcceptAllTypes">Accept every media type from the peer; <c>null</c> keeps the current setting.</param>
+/// <param name="AcceptTypes">The media types to accept when <paramref name="AcceptAllTypes"/> is <c>false</c> (at least one); <c>null</c> keeps the current list.</param>
 public sealed record UpdatePeerRequest(
     string? Name,
     string? BaseUrl,
@@ -97,11 +103,13 @@ public sealed record UpdatePeerRequest(
     string? Username = null,
     string? Password = null,
     int? MaxStreams = null,
-    StreamLimitAction? LimitAction = null)
+    StreamLimitAction? LimitAction = null,
+    bool? AcceptAllTypes = null,
+    List<MediaType>? AcceptTypes = null)
 {
     /// <inheritdoc />
     public override string ToString()
-        => $"UpdatePeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction} }}";
+        => $"UpdatePeerRequest {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction}, AcceptAllTypes = {AcceptAllTypes} }}";
 }
 
 /// <summary>Body of <c>POST admin/peers/order</c>.</summary>
@@ -178,6 +186,8 @@ public sealed record ShareView(
 /// <param name="MaxStreams">The concurrent stream limit (account peers only).</param>
 /// <param name="LimitAction">What happens when a new stream exceeds the limit.</param>
 /// <param name="SignInFailed">An account peer whose last error is a failed sign-in.</param>
+/// <param name="AcceptAllTypes">Every media type is accepted from the peer.</param>
+/// <param name="AcceptTypes">The media types accepted from the peer now, in enum order.</param>
 public sealed record PeerView(
     Guid Id,
     string Name,
@@ -193,7 +203,9 @@ public sealed record PeerView(
     string? Username,
     int MaxStreams,
     StreamLimitAction LimitAction,
-    bool SignInFailed);
+    bool SignInFailed,
+    bool AcceptAllTypes,
+    IReadOnlyList<MediaType> AcceptTypes);
 
 /// <summary>A placeholder root and where it is attached.</summary>
 /// <param name="Path">The root folder.</param>

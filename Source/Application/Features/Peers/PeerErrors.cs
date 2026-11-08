@@ -33,6 +33,11 @@ public static class PeerErrors
         "Peer.InvalidMaxStreams",
         $"The stream limit must be between {Admin.AdminRules.MinAccountStreams} and {Admin.AdminRules.MaxAccountStreams}.");
 
+    /// <summary>Creates the error for an invalid accept list (400).</summary>
+    /// <param name="problem">What is wrong with the media types.</param>
+    /// <returns>The error.</returns>
+    public static Error InvalidTypes(string problem) => Error.Validation("Peer.InvalidTypes", problem);
+
     /// <summary>The peer kind cannot be changed (400).</summary>
     public static readonly Error KindChange = Error.Validation("Peer.KindChange", "The kind of a peer cannot be changed. Remove it and add it again.");
 
