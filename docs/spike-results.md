@@ -544,3 +544,102 @@ scratch console app driving `AccountPeerClient` (both outside the repo; no token
   placeholders stayed. `PUT admin/peers/{id}` with the new password stored a new token; the next sync cleared the state.
 - **Library access is respected.** A friend user with only bob's Shows library gave a catalog of 3 episodes; bob's
   Movies (Tears of Steel) got no placeholder on alice.
+
+## Media types spike (2026-11)
+
+Run on 2026-11-08 against the harness (alice/bob 12.4). Script: `harness/spike/music_strm.py` (usage in
+its header). Source references are to `jellyfin/jellyfin` tag `v12.4`. Audio clips come from
+`harness/make-media.sh` (20 s sine, mp3 = ID3v2, flac = Vorbis with `MUSICBRAINZ_TRACKID`); both
+servers got `Music` (`music`, `/media/Music`) and `Audiobooks` (`books`, `/media/Audiobooks`)
+libraries from `harness/setup.py`.
+
+Setup: each variant = a fresh scratch folder `harness/media/alice/spike-…` (= `/media/spike-…`)
+added as an **extra path of alice's Music or Audiobooks library**, one scan, inspect, remove the path,
+scan. `.strm` files point at the spike file server (`rangeserver.py`, started with
+`--network container:jellyshare-alice`), so `http://127.0.0.1:8900/bob/Music/...` reaches bob's files
+the way the relay would (no key involved). Scratch layouts held bob's `Artist A/Album One/03 Song
+Three` (album alice partly owns) and `Artist B/Album Two/01, 02` (album alice lacks); alice's own
+`Artist A/Album One/01, 02` are real tagged files.
+
+### Music: **link files alone FAIL (metadata and playback)**
+
+| Variant | Artists (`/Artists`) | Albums | Tracks | Playback |
+| --- | --- | --- | --- | --- |
+| `Artist/Album/NN Title.strm` | only alice's Artist A (no Artist B) | `Album One` ×2 (one per folder), `Album Two`; scratch albums `AlbumArtist: null` | `Name` = file stem (`01 First Light`), `IndexNumber`/`ParentIndexNumber`/`Album` null, `Artists: []` | fails (below) |
+| same + `album.nfo` (`<album>` title/artist/albumartist) + `artist.nfo` (`<artist><name>`) | same | same; nfo artist not kept | same | fails |
+| same + per-track `NN Title.nfo` (`<song>` title/artist/albumartist/album/track/disc) | same | same | same (not read) | fails |
+| real tagged files (alice's, control) | Artist A | Album One, `AlbumArtist: Artist A` | names, track/disc numbers, artists, MusicBrainz recording id all read | plays |
+
+Why (source):
+
+- **No track `.nfo` exists for audio.** `MediaBrowser.XbmcMetadata` has nfo providers for albums and
+  artists only; the only local metadata provider for `Audio`/`AudioBook` is `ProbeProvider` →
+  `AudioFileProber`.
+- `AudioFileProber.FetchDataFromTags` reads artists/album artists with ATL from **`audio.Path` (the
+  `.strm` file itself)**, never from the URL, so a link file never gets `Artists`/`AlbumArtists`.
+  Title/album/track/disc fall back to the ffprobe result of the URL, but that probe only runs with
+  `EnableRemoteContentProbe` (the first `PlaybackInfo`; scans skip `.strm`): after one
+  `PlaybackInfo`, `First Light` got `Name`, `IndexNumber 1`, `RunTimeTicks` — still `Artists: []`.
+- `AlbumMetadataService.UpdateMetadataFromChildren` replaces the album's artists/album artists with
+  its songs' on refresh, so `album.nfo` artists are wiped when the songs have none.
+- Albums are one item per folder: `Album One` in alice's folder and in the scratch folder are two
+  albums (no grouping across folders, unlike `EnableAutomaticSeriesGrouping` for series).
+
+**Playback of an audio `.strm` is broken in stock 12.4** (both `Audio` and `AudioBook`):
+`BaseItem.GetVersionInfo` swaps `Path` for `ShortcutPath` (`IsRemote`, `Protocol: Http`) **only for
+`Video`**. For audio the media source stays `Protocol: File` with `Path` = the `.strm` file:
+
+| Request (header auth) | Result |
+| --- | --- |
+| `PlaybackInfo` | `Protocol: File`, `IsRemote: false`, `Container: mp3`, `SupportsDirectPlay: true` (after the probe) |
+| `GET /Audio/{id}/stream?static=true` | 200 `audio/mpeg`, **77 bytes = the `.strm` text** (`http://127.0.0.1:8900/bob/...`); ffprobe: `Invalid data found when processing input` |
+| `GET /Audio/{id}/universal?...` (what jellyfin-web uses) | 200, the same 77 bytes |
+| `GET /Audio/{id}/stream.mp3?audioCodec=mp3` (transcode) | 500 `Error processing request.` (ffmpeg input is the text file) |
+
+The streaming code itself handles HTTP inputs (`AudioHelper`: static + `InputProtocol == Http` →
+`GetStaticRemoteStreamResult`, the proxy used for video `.strm`); only the item's media source never
+points at the URL.
+
+### Music with plugin-written metadata (what approach A would need instead of `.nfo`)
+
+`music_strm.py setmeta` wrote the fields through `POST /Items/{id}` (what the plugin could do through
+`ILibraryManager` after a scan): `Name`, `Album`, `IndexNumber`, `ParentIndexNumber`, `ArtistItems`,
+`AlbumArtists`, then a `FullRefresh` of each placeholder album (`replaceAllMetadata=false`):
+
+- `/Artists`: **Artist A (one item, alice's id) + Artist B** — the friend's Artist A track merged into
+  the owner's artist.
+- Artist B → **one album `Album Two`, `AlbumArtist: Artist B`, tracks 1, 2** in order.
+- **Partial album: does NOT merge** — Artist A shows `Album One` twice (alice's folder and the
+  placeholder folder). If A goes ahead: write only albums the owner lacks entirely.
+- The values survived a further library scan (scans don't probe `.strm`; the probe only fills
+  empty fields unless "replace all metadata").
+- The album needs the explicit `FullRefresh`: after a `Default` refresh it kept `AlbumArtist: null`
+  and was missing from its artist's album list.
+
+### Audiobooks: **grouping OK, playback FAILS**
+
+`Author X/Book Y/01 Chapter One.strm, 02 Chapter Two.strm` in alice's `books` library: two
+`AudioBook` items under `Folder` `Book Y` under `Folder` `Author X`, sorted by file name (chapter
+order right) — the same shape as the owner's audiobooks (no ids). No metadata (`Artists: []`,
+`IndexNumber` null, `RunTimeTicks` null even after `PlaybackInfo`, which reports `Container: strm`
+and no streams). Static stream = the 79-byte `.strm` text, as for music.
+
+### Decision: **STOP — approach A as designed does not work for Music or Audiobooks on 12.4**
+
+Neither type can play from a link file on stock 12.4, and music gets no artists from link files or
+`.nfo`. Options for the owner:
+
+- **A′ (link files + plugin code):** keep the `.strm` placeholders, but (1) the plugin writes track
+  metadata itself after each scan (proved above: artists merge, albums group, order right) and (2)
+  the plugin points playback at the relay, e.g. an `IMediaSourceProvider` returning an `Http`,
+  `IsRemote` source for its placeholders plus the existing `PlaybackInfo` filter dropping the `.strm`
+  source. Clients that call `/Audio/{id}/universal` without `PlaybackInfo` (some music apps) would
+  still get the `.strm` source unless an action filter also covers the audio stream endpoints.
+  **Not proven** (needs plugin code).
+- **B (channel per friend):** as in the spec.
+
+### Harness state after the spike
+
+Scratch paths removed from alice's Music/Audiobooks (`Locations` back to `/media/Music`,
+`/media/Audiobooks`), scratch folders deleted, `jellyshare-spike-http` removed. The audio clips and
+the two new libraries stay (for the e2e).

@@ -78,6 +78,13 @@ MEDIA_FILES = [
     "bob/Shows/Pioneer One [tvdbid-153021]/Season 01/Pioneer One S01E01.mkv",
     "bob/Shows/Pioneer One [tvdbid-153021]/Season 01/Pioneer One S01E02.mkv",
     "bob/Shows/Pioneer One [tvdbid-153021]/Season 02/Pioneer One S02E01.mkv",
+    "alice/Music/Artist A/Album One/01 Song One.mp3",
+    "alice/Music/Artist A/Album One/02 Song Two.flac",
+    "bob/Music/Artist A/Album One/03 Song Three.mp3",
+    "bob/Music/Artist B/Album Two/01 First Light.mp3",
+    "bob/Music/Artist B/Album Two/02 Second Wind.flac",
+    "bob/Audiobooks/Author X/Book Y/01 Chapter One.mp3",
+    "bob/Audiobooks/Author X/Book Y/02 Chapter Two.mp3",
 ]
 PROFILE = {
     "MaxStreamingBitrate": 120000000,

@@ -42,4 +42,30 @@ put "bob/Shows/Pioneer One [tvdbid-153021]/Season 01/Pioneer One S01E01.mkv"
 put "bob/Shows/Pioneer One [tvdbid-153021]/Season 01/Pioneer One S01E02.mkv"
 put "bob/Shows/Pioneer One [tvdbid-153021]/Season 02/Pioneer One S02E01.mkv"
 
+# Audio: 20 s sine tones, each encoded with its own tags (mp3 = ID3v2, flac = Vorbis comments).
+# audio <rel path> <freq> <artist> <album artist> <album> <title> <track> [musicbrainz recording id]
+audio() {
+  local target="${MEDIA}/$1"
+  [ -s "${target}" ] && return 0
+  mkdir -p "$(dirname "${target}")"
+  local extra=()
+  if [ -n "${8:-}" ]; then extra=(-metadata "MUSICBRAINZ_TRACKID=$8"); fi
+  "${FFMPEG}" -hide_banner -loglevel error -y \
+    -f lavfi -i "sine=frequency=$2:sample_rate=44100:duration=20" \
+    -metadata "artist=$3" -metadata "album_artist=$4" -metadata "album=$5" \
+    -metadata "title=$6" -metadata "track=$7" -metadata "disc=1" "${extra[@]}" "${target}"
+}
+
+# alice owns part of Album One; bob has its missing track 3 plus Album Two (alice lacks it) and a book.
+audio "alice/Music/Artist A/Album One/01 Song One.mp3" 330 "Artist A" "Artist A" "Album One" "Song One" 1
+audio "alice/Music/Artist A/Album One/02 Song Two.flac" 370 "Artist A" "Artist A" "Album One" "Song Two" 2 \
+  "0b3a6f6e-5c1e-4d2a-9b7a-2f1c3d4e5a01"
+audio "bob/Music/Artist A/Album One/03 Song Three.mp3" 415 "Artist A" "Artist A" "Album One" "Song Three" 3
+audio "bob/Music/Artist B/Album Two/01 First Light.mp3" 440 "Artist B" "Artist B" "Album Two" "First Light" 1
+audio "bob/Music/Artist B/Album Two/02 Second Wind.flac" 494 "Artist B" "Artist B" "Album Two" "Second Wind" 2 \
+  "0b3a6f6e-5c1e-4d2a-9b7a-2f1c3d4e5a02"
+audio "bob/Audiobooks/Author X/Book Y/01 Chapter One.mp3" 262 "Author X" "Author X" "Book Y" "Chapter One" 1
+audio "bob/Audiobooks/Author X/Book Y/02 Chapter Two.mp3" 294 "Author X" "Author X" "Book Y" "Chapter Two" 2
+mkdir -p "${MEDIA}/alice/Audiobooks"
+
 echo "media ready in ${MEDIA}"
