@@ -26,8 +26,12 @@ public class CatalogBuilder
     private readonly IServerIdentity _identity;
     private readonly ISettingsProvider _config;
     private readonly IAdminLibraries _libraries;
+    private static readonly TimeSpan _librariesTtl = TimeSpan.FromSeconds(30);
+
     private readonly Func<string, bool> _fileExists;
+    private readonly TimeProvider _clock;
     private readonly ConcurrentDictionary<(Guid Share, string Types), CatalogResponse> _cache = new();
+    private Tuple<DateTimeOffset, IReadOnlyList<LibraryInfo>>? _librariesCache;
 
     /// <summary>Initializes a new instance of the <see cref="CatalogBuilder"/> class.</summary>
     /// <param name="source">The local item source.</param>
@@ -35,18 +39,21 @@ public class CatalogBuilder
     /// <param name="config">The configuration provider.</param>
     /// <param name="libraries">The libraries on this server, to resolve a share saved before media types existed.</param>
     /// <param name="fileExists">Existence check for item files; defaults to <see cref="File.Exists(string)"/>.</param>
+    /// <param name="clock">The clock for the short library-list cache; defaults to <see cref="TimeProvider.System"/>.</param>
     public CatalogBuilder(
         ILocalItemSource source,
         IServerIdentity identity,
         ISettingsProvider config,
         IAdminLibraries libraries,
-        Func<string, bool>? fileExists = null)
+        Func<string, bool>? fileExists = null,
+        TimeProvider? clock = null)
     {
         _source = source;
         _identity = identity;
         _config = config;
         _libraries = libraries;
         _fileExists = fileExists ?? File.Exists;
+        _clock = clock ?? TimeProvider.System;
     }
 
     /// <summary>Builds the catalog for a share (served from the cache when nothing changed).</summary>
@@ -114,10 +121,24 @@ public class CatalogBuilder
 
     private HashSet<MediaType> Offered(PeerShare share)
     {
-        var libraries = share.UseDefaultTypes is null ? _libraries.List() : Array.Empty<LibraryInfo>();
+        var libraries = share.UseDefaultTypes is null ? Libraries() : Array.Empty<LibraryInfo>();
         var offered = MediaTypes.EffectiveShare(share, _config.Current, libraries).ToHashSet();
         offered.IntersectWith(MediaTypes.Supported);
         return offered;
+    }
+
+    // Reading the library list hits the disk; IsExposed runs on every image and stream request of a legacy share.
+    private IReadOnlyList<LibraryInfo> Libraries()
+    {
+        var now = _clock.GetUtcNow();
+        if (_librariesCache is { } cached && now - cached.Item1 < _librariesTtl)
+        {
+            return cached.Item2;
+        }
+
+        var list = _libraries.List();
+        _librariesCache = Tuple.Create(now, list);
+        return list;
     }
 
     private bool IsServable(LocalItem local, JellyShareSettings cfg)

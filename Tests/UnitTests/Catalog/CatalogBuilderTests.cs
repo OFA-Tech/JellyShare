@@ -194,6 +194,26 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void IsExposed_LegacyShare_ReadsLibrariesOncePer30Seconds()
+    {
+        var source = new FakeSource();
+        source.Items.Add((FakeLibraries.MoviesId, Local(G(1), "/media/Movies/A/A.mkv")));
+        var libraries = new FakeLibraries();
+        var clock = new MutableClock();
+        var builder = new CatalogBuilder(source, new FakeIdentity(), new FakeConfig(), libraries, _ => true, clock);
+        var legacy = new PeerShare { Id = Guid.NewGuid(), Name = "old", Enabled = true, LibraryIds = [FakeLibraries.MoviesId] };
+
+        builder.IsExposed(legacy, G(1)).ShouldBeTrue();
+        clock.Now += TimeSpan.FromSeconds(29);
+        builder.IsExposed(legacy, G(1)).ShouldBeTrue();
+        libraries.ListCalls.ShouldBe(1);
+
+        clock.Now += TimeSpan.FromSeconds(2);
+        builder.IsExposed(legacy, G(1)).ShouldBeTrue();
+        libraries.ListCalls.ShouldBe(2);
+    }
+
+    [Fact]
     public void Catalog_ShareFollowingTheDefault_ServesTheConfiguredDefault()
     {
         var source = new FakeSource();

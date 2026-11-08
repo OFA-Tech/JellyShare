@@ -48,7 +48,13 @@ internal sealed class FakeLibraries : IAdminLibraries
 
     public Exception? AddThrows { get; set; }
 
-    public IReadOnlyList<LibraryInfo> List() => Libraries.ToList();
+    public int ListCalls { get; private set; }
+
+    public IReadOnlyList<LibraryInfo> List()
+    {
+        ListCalls++;
+        return Libraries.ToList();
+    }
 
     public Task AddPathAsync(string libraryName, string path, CancellationToken ct)
     {
