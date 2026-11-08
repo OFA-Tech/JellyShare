@@ -2,6 +2,7 @@
 //   node harness/admin_page.js explore     # open the page on alice, print console output, screenshot
 //   node harness/admin_page.js account     # alice adds bob as an account peer (throwaway bob user), edits, removes
 //   node harness/admin_page.js full        # create share on alice, add it on bob, test, sync, error cases
+//   node harness/admin_page.js types       # media types: default sharing, invitation types, receive row (alice, restored after)
 // Needs playwright-core (the global @playwright/cli ships one); override with PLAYWRIGHT_CORE=<path>.
 // Tokens are written to harness/.secrets (gitignored) and never printed. Screenshots go to harness/screens/.
 const fs = require('fs');
@@ -68,6 +69,8 @@ async function main() {
       await cleanup(browser);
     } else if (mode === 'account') {
       await accountPeer(browser);
+    } else if (mode === 'types') {
+      await typesCheck(browser);
     }
   } finally {
     await browser.close();
@@ -84,8 +87,6 @@ async function full(browser) {
   await a.fill('#js-new-name', 'bob (admin page test)');
   await a.fill('#js-new-streams', '3');
   await a.fill('#js-new-mbps', '8');
-  // check every library
-  for (const box of await a.locator('#js-new-libs input[data-lib]').all()) await box.check();
   await a.click('#js-create-share');
   await a.waitForSelector('#js-created:not(.js-hidden)', { timeout: 15000 });
   const token = await a.inputValue('#js-created-token');
@@ -304,7 +305,6 @@ async function recheck(browser) {
   await login(a, SERVERS.alice.url);
   await openAdmin(a, SERVERS.alice.url, 'share');
   await a.fill('#js-new-name', 'validation check');
-  for (const box of await a.locator('#js-new-libs input[data-lib]').all()) await box.check();
   await a.fill('#js-new-streams', '');
   await a.click('#js-create-share');
   log('alice empty Max streams ->', await message(a));
@@ -366,13 +366,13 @@ async function accountPeer(browser) {
     await shot(a, 'account-peer');
 
     await c.locator('input[type=number]').fill('2');
-    await c.locator('select').selectOption('StopOldest');
+    await c.locator('select:has(option[value=StopOldest])').selectOption('StopOldest');
     await c.locator('button:has-text("Save")').click();
     await a.waitForFunction(() => /^Saved/.test(document.querySelector('#js-message').textContent), null, { timeout: 40000 });
     await a.waitForFunction(() => /max 2 streams/.test(document.querySelector('#js-peers').innerText), null, { timeout: 20000 });
     const edited = await (await cardFor()).innerText();
     check('edit shows "max 2 streams"', /max 2 streams/.test(edited));
-    check('edit keeps the limit action', (await (await cardFor()).locator('select').inputValue()) === 'StopOldest');
+    check('edit keeps the limit action', (await (await cardFor()).locator('select:has(option[value=StopOldest])').inputValue()) === 'StopOldest');
     check('save request carried the password only when typed', bodies.filter(b => b.startsWith('PUT')).every(b => !b.includes(pw)));
 
     // wrong password on bob -> the next sync marks the peer, the page offers "Sign in again"
@@ -404,6 +404,121 @@ async function accountPeer(browser) {
       }
     } catch (e) { log('cleanup of the alice peer failed:', e.message); }
     await rest('bob', 'DELETE', `/Users/${created.Id}`, undefined, bobAdmin).catch(e => log('could not delete the bob user:', e.message));
+  }
+}
+
+// Media types on the admin page (alice): default sharing, invitation types, the legacy share, the receive row of a peer.
+// The plugin configuration is snapshotted first and written back at the end, so alice is left as it was found.
+//   node harness/admin_page.js types
+const PLUGIN_ID = '8a55d113-5072-47cf-9827-f3c49f1c3971';
+
+async function typesCheck(browser) {
+  const admin = await adminToken('alice');
+  const configUrl = `/Plugins/${PLUGIN_ID}/Configuration`;
+  const snapshot = await rest('alice', 'GET', configUrl, undefined, admin);
+  const status = () => rest('alice', 'GET', '/JellyShare/v1/admin/status', undefined, admin);
+  const a = await (await browser.newContext({ viewport: { width: 1280, height: 1600 } })).newPage();
+  a.on('pageerror', e => log('alice pageerror', e.message.slice(0, 300)));
+  a.on('dialog', d => d.accept());
+  const toast = async re => a.waitForFunction(r => new RegExp(r).test(document.querySelector('#js-message').textContent), re.source, { timeout: 15000 });
+  const cardOf = async (list, name) => a.locator(`${list} .js-card`).nth(await cardIndex(a, list, name));
+  const tick = (scope, type) => scope.locator(`input[data-type="${type}"]`);
+  const flags = async (scope, types) => Promise.all(types.map(async t => `${t}:${await tick(scope, t).isChecked() ? 'on' : 'off'}${await tick(scope, t).isDisabled() ? '/locked' : ''}`));
+  const setup = async tab => { await reopen(a, SERVERS.alice.url, tab); await a.waitForTimeout(500); };
+  try {
+    await login(a, SERVERS.alice.url);
+    await openAdmin(a, SERVERS.alice.url, 'share');
+    const ds = a.locator('#js-default-sharing');
+    const found = await ds.locator('input[data-type]').first().waitFor({ timeout: 5000 }).then(() => true, () => false);
+    check('the Share tab has a "Default sharing" card with ticks', found);
+    if (!found) return;
+    const all7 = ['Movies', 'Shows', 'Music', 'Audiobooks', 'Ebooks', 'Collections', 'LiveTv'];
+    const unsupported = ['Music', 'Audiobooks', 'Ebooks', 'Collections', 'LiveTv'];
+    const allBox = ds.locator('input:not([data-type])');
+    check('7 ticks', await ds.locator('input[data-type]').count() === 7);
+    check('"All media types" is on', await allBox.isChecked());
+    check('in All every tick is on and locked', (await flags(ds, all7)).every(f => f.endsWith('on/locked')));
+    check('unsupported types say "coming later"', (await ds.innerText()).split('(coming later)').length - 1 === unsupported.length);
+    check('no library picker on the page', await a.locator('#js-new-libs, input[data-lib]').count() === 0);
+    check('the account note appears once', (await a.locator('#JellySharePage').innerText()).split('apply to invitations').length === 2);
+
+    await allBox.uncheck();
+    check('after unticking All Movies and Shows are editable, the rest stay locked',
+      !(await tick(ds, 'Movies').isDisabled()) && !(await tick(ds, 'Shows').isDisabled()) && (await Promise.all(unsupported.map(t => tick(ds, t).isDisabled()))).every(Boolean));
+    await tick(ds, 'Shows').uncheck();
+    await tick(ds, 'Movies').uncheck();
+    await ds.locator('button:has-text("Save")').click();
+    await toast(/Pick at least one media type to share\./);
+    check('saving an empty list is refused with the share message', true);
+    await tick(ds, 'Movies').check();
+    await ds.locator('button:has-text("Save")').click();
+    await toast(/Default sharing saved/);
+    await setup('share');
+    check('the default list persists after a reload', !(await allBox.isChecked()) && (await flags(ds, ['Movies', 'Shows'])).join() === 'Movies:on,Shows:off');
+    const st = await status();
+    log('status.defaultSharing =', JSON.stringify(st.defaultSharing ?? st.DefaultSharing), '; supportedTypes =', JSON.stringify(st.supportedTypes ?? st.SupportedTypes));
+
+    const create = a.locator('#js-new-types');
+    check('the create form offers "Use the default" (preselected) and "Custom"',
+      (await create.locator('select').inputValue()) === 'all' && (await create.locator('option').allInnerTexts()).join('|') === 'Use the default|Custom');
+    check('with the default, the create form shows the default list locked', (await flags(create, ['Movies', 'Shows'])).join() === 'Movies:on/locked,Shows:off/locked');
+    await a.fill('#js-new-name', 'types check default');
+    await a.click('#js-create-share');
+    await a.waitForSelector('#js-created:not(.js-hidden)', { timeout: 15000 });
+    await a.click('#js-dismiss-token');
+    await create.locator('select').selectOption('list');
+    await tick(create, 'Shows').check();
+    await tick(create, 'Movies').uncheck();
+    await a.fill('#js-new-name', 'types check custom');
+    await a.click('#js-create-share');
+    await a.waitForSelector('#js-created:not(.js-hidden)', { timeout: 15000 });
+    await a.click('#js-dismiss-token');
+    await setup('share');
+    const sh = (await status()).shares ?? (await status()).Shares;
+    log('shares:', JSON.stringify(sh.map(s => ({ name: s.name ?? s.Name, useDefaultTypes: s.useDefaultTypes ?? s.UseDefaultTypes, types: s.types ?? s.Types }))));
+
+    const cDefault = await cardOf('#js-shares', 'types check default');
+    check('a default share shows "Use the default", locked, with the default list', (await cDefault.locator('select').inputValue()) === 'all' && (await flags(cDefault, ['Movies', 'Shows'])).join() === 'Movies:on/locked,Shows:off/locked');
+    const cCustom = await cardOf('#js-shares', 'types check custom');
+    check('a custom share shows Custom with Shows only', (await cCustom.locator('select').inputValue()) === 'list' && (await flags(cCustom, ['Movies', 'Shows'])).join() === 'Movies:off,Shows:on');
+    const cLegacy = await cardOf('#js-shares', 'bob');
+    check('the legacy share shows Custom with Movies and Shows ticked', (await cLegacy.locator('select').inputValue()) === 'list' && (await flags(cLegacy, ['Movies', 'Shows'])).join() === 'Movies:on,Shows:on');
+
+    await cCustom.locator('select').selectOption('all');
+    await cCustom.locator('button:has-text("Save")').click();
+    await toast(/^Saved/);
+    await setup('share');
+    check('switching a share to the default persists', (await (await cardOf('#js-shares', 'types check custom')).locator('select').inputValue()) === 'all');
+    const cDefault2 = await cardOf('#js-shares', 'types check default');
+    await cDefault2.locator('select').selectOption('list');
+    await tick(cDefault2, 'Movies').uncheck();
+    await cDefault2.locator('button:has-text("Save")').click();
+    await toast(/Pick at least one media type to share\./);
+    check('an empty Custom list on a share is refused', true);
+
+    await a.click('#JellySharePage .js-tab[data-tab="receive"]');
+    const peer = await cardOf('#js-peers', 'bob');
+    check('a peer starts on "Everything they share" with every tick locked', (await peer.locator('select').inputValue()) === 'all' && (await peer.locator('option').allInnerTexts()).join('|') === 'Everything they share|Only:' && (await flags(peer, all7)).every(f => f.endsWith('on/locked')));
+    check('the receive row is labelled "Receive"', (await peer.innerText()).includes('Receive'));
+    await peer.locator('select').selectOption('list');
+    check('Only: unlocks Movies and Shows', !(await tick(peer, 'Movies').isDisabled()) && !(await tick(peer, 'Shows').isDisabled()));
+    await tick(peer, 'Shows').uncheck();
+    await tick(peer, 'Movies').uncheck();
+    await peer.locator('button:has-text("Save")').click();
+    await toast(/Pick at least one media type to receive\./);
+    check('an empty Only: list is refused with the receive message', true);
+    await tick(peer, 'Movies').check();
+    await peer.locator('button:has-text("Save")').click();
+    await toast(/^Saved/);
+    await setup('receive');
+    const peer2 = await cardOf('#js-peers', 'bob');
+    check('Only Movies persists after a reload', (await peer2.locator('select').inputValue()) === 'list' && (await flags(peer2, ['Movies', 'Shows'])).join() === 'Movies:on,Shows:off');
+    const p = ((await status()).peers ?? (await status()).Peers)[0];
+    log('peer acceptAllTypes =', JSON.stringify(p.acceptAllTypes ?? p.AcceptAllTypes), '; acceptTypes =', JSON.stringify(p.acceptTypes ?? p.AcceptTypes));
+    await a.click('#JellySharePage .js-tab[data-tab="share"]');
+    await shot(a, 'media-types');
+  } finally {
+    await rest('alice', 'POST', configUrl, snapshot, admin).then(() => log('alice configuration restored'), e => log('RESTORE FAILED:', e.message));
   }
 }
 
