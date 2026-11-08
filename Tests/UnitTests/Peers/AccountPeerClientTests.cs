@@ -658,6 +658,39 @@ public sealed class AccountPeerClientTests
     }
 
     [Fact]
+    public async Task Account_Audio_FailedBookFolderLookup_ListsTheBookLoose_AndWarnsWithoutToken()
+    {
+        var handler = new FakeHandler(r => r.RequestUri!.AbsolutePath.EndsWith("/Items/b1/Ancestors", StringComparison.Ordinal)
+            ? Json("{\"error\":\"" + Token + "\"}", HttpStatusCode.InternalServerError)
+            : AudioServer(r));
+        var logger = new LevelLogger<AccountPeerClient>();
+        var client = new AccountPeerClient(() => new HttpClient(handler, false), logger: logger);
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        result.Catalog!.Items.Where(i => i.Type == "AudioBook").Select(i => i.FolderPath).ShouldBe([null, null, null]);
+        result.Catalog.Items.ShouldContain(i => i.Id == "a1");
+        var warning = logger.Entries.ShouldHaveSingleItem();
+        warning.Level.ShouldBe(Microsoft.Extensions.Logging.LogLevel.Warning);
+        warning.Message.ShouldContain("HTTP 500", Case.Sensitive);
+        warning.Message.ShouldNotContain(Token, Case.Sensitive);
+    }
+
+    [Fact]
+    public async Task Account_Audio_BookFolderLookupRejected_FailsAsSignIn()
+    {
+        var (client, _) = Create(new FakeHandler(r => r.RequestUri!.AbsolutePath.EndsWith("/Ancestors", StringComparison.Ordinal)
+            ? Json("{}", HttpStatusCode.Unauthorized)
+            : AudioServer(r)));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeFalse();
+        result.Error.ShouldNotBeNull().ShouldStartWith(AccountPeerInfo.SignInFailedPrefix);
+    }
+
+    [Fact]
     public async Task Account_Audio_StreamsStaticAudio_EvenOverBitrateLimit()
     {
         var (client, handler) = Create(new FakeHandler(r => Server(r, bitrateLimit: 64000)));

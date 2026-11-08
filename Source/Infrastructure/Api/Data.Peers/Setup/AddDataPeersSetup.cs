@@ -1,6 +1,7 @@
 using JellyShare.Data.Peers.Clients;
 using JellyShare.Domain.Interfaces.Peers;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace JellyShare.Data.Peers.Setup;
 
@@ -22,7 +23,7 @@ public static class DataPeersSetup
         services.AddSingleton(sp =>
         {
             var factory = sp.GetRequiredService<IHttpClientFactory>();
-            return new AccountPeerClient(() => factory.CreateClient(PeerClient.HttpClientName));
+            return new AccountPeerClient(() => factory.CreateClient(PeerClient.HttpClientName), logger: sp.GetService<ILogger<AccountPeerClient>>());
         });
         services.AddSingleton<IAccountSignIn>(sp => sp.GetRequiredService<AccountPeerClient>());
         services.AddSingleton<IPeerClient>(sp =>

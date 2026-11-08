@@ -12,6 +12,8 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Peers;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Rules;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace JellyShare.Data.Peers.Clients;
 
@@ -43,6 +45,7 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     private readonly TimeProvider _clock;
     private readonly TimeSpan _timeout;
     private readonly TimeSpan _catalogTimeout;
+    private readonly ILogger<AccountPeerClient> _logger;
     // Keyed by peer, valid only for the token it was read with: a sign-in as another user must not reuse the limit.
     private readonly ConcurrentDictionary<Guid, (string Token, int Limit, DateTimeOffset FetchedAt)> _policies = new();
 
@@ -51,9 +54,16 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     /// <param name="clock">The clock for the bitrate-policy cache; defaults to <see cref="TimeProvider.System"/>.</param>
     /// <param name="timeout">Timeout for sign-in, image and policy requests; defaults to <see cref="PeerClient.DefaultTimeout"/>.</param>
     /// <param name="catalogTimeout">Timeout for each catalog page; defaults to <see cref="PeerClient.CatalogTimeout"/>.</param>
-    public AccountPeerClient(Func<HttpClient> client, TimeProvider? clock = null, TimeSpan? timeout = null, TimeSpan? catalogTimeout = null)
+    /// <param name="logger">The logger; defaults to none.</param>
+    public AccountPeerClient(
+        Func<HttpClient> client,
+        TimeProvider? clock = null,
+        TimeSpan? timeout = null,
+        TimeSpan? catalogTimeout = null,
+        ILogger<AccountPeerClient>? logger = null)
     {
         _client = client;
+        _logger = logger ?? NullLogger<AccountPeerClient>.Instance;
         _clock = clock ?? TimeProvider.System;
         _timeout = timeout ?? PeerClient.DefaultTimeout;
         _catalogTimeout = catalogTimeout ?? timeout ?? PeerClient.CatalogTimeout;
@@ -325,15 +335,38 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
         }
     }
 
-    /// <summary>Gets a book file's folder names below its library root (never an absolute path), like <c>AudiobookFolders</c>.</summary>
+    /// <summary>
+    /// Gets a book file's folder names below its library root (never an absolute path), like <c>AudiobookFolders</c>.
+    /// A failed lookup leaves the book loose (no folder) instead of failing the whole catalog; only a rejected sign-in
+    /// (HTTP 401) is returned as an error, so the peer is signed in again.
+    /// </summary>
     private async Task<(string? Folder, string? Error)> BookFolderAsync(RemotePeer peer, string itemId, CancellationToken ct)
     {
         var user = string.IsNullOrEmpty(peer.AccountUserId) ? string.Empty : "?userId=" + Uri.EscapeDataString(peer.AccountUserId);
         var uri = PeerUri.Build(peer.BaseUrl, "Items/" + Uri.EscapeDataString(itemId) + "/Ancestors" + user);
-        var (ancestors, error) = await GetJsonAsync<List<JfItem?>>(uri!, peer.Id, peer.Token, _catalogTimeout, ct).ConfigureAwait(false);
+        List<JfItem?>? ancestors;
+        string? error;
+        try
+        {
+            (ancestors, error) = await GetJsonAsync<List<JfItem?>>(uri!, peer.Id, peer.Token, _catalogTimeout, ct).ConfigureAwait(false);
+        }
+        catch (JsonException)
+        {
+            (ancestors, error) = (null, "invalid response");
+        }
+
         if (ancestors is null)
         {
-            return (null, error);
+            if (error?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true)
+            {
+                return (null, error);
+            }
+
+            _logger.LogWarning(
+                "JellyShare: folder of an audiobook from peer {Peer} could not be read ({Error}); it is listed without its folder",
+                peer.Id,
+                PeerClient.Redact(error ?? "no response", peer.Token));
+            return (null, null);
         }
 
         // Nearest first; the folders between the file and its library are the book's path.
