@@ -116,7 +116,7 @@ public class CatalogBuilder
     {
         var libraries = share.UseDefaultTypes is null ? _libraries.List() : Array.Empty<LibraryInfo>();
         var offered = MediaTypes.EffectiveShare(share, _config.Current, libraries).ToHashSet();
-        offered.IntersectWith(MediaTypes.Supported);
+        offered.IntersectWith(MediaTypes.ProviderSupported);
         return offered;
     }
 

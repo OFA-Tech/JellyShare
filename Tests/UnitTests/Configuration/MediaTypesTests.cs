@@ -15,6 +15,7 @@ public sealed class MediaTypesTests
         MediaTypes.All.ShouldBe(Enum.GetValues<MediaType>());
         MediaTypes.All.Count.ShouldBe(7);
         MediaTypes.Supported.ShouldBe(new[] { MediaType.Movies, MediaType.Shows });
+        MediaTypes.ProviderSupported.ShouldBe(new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks });
     }
 
     [Theory]

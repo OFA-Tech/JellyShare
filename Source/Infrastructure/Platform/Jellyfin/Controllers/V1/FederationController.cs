@@ -32,7 +32,7 @@ public class FederationController : JellyShareControllerBase
 
     private static readonly string[] _imageTypes = { "Primary", "Backdrop", "Logo", "Thumb" };
     private static readonly FileExtensionContentTypeProvider _contentTypes = new();
-    private static readonly FileExtensionContentTypeProvider _videoContentTypes = CreateVideoContentTypes();
+    private static readonly FileExtensionContentTypeProvider _mediaContentTypes = CreateMediaContentTypes();
 
     private readonly CatalogBuilder _catalog;
     private readonly ILocalItemSource _source;
@@ -146,8 +146,9 @@ public class FederationController : JellyShareControllerBase
     }
 
     /// <summary>
-    /// Streams the file of a movie or episode in the calling peer's catalog, with Range support. When the share has
-    /// a bitrate cap below the file's bitrate, serves a live MPEG-TS transcode within the cap instead (no Range).
+    /// Streams the file of a movie, episode, track or audiobook in the calling peer's catalog, with Range support. When
+    /// the share has a bitrate cap below a video's bitrate, serves a live MPEG-TS transcode within the cap instead (no
+    /// Range); audio is never capped.
     /// </summary>
     /// <param name="itemId">The item id.</param>
     /// <param name="start">Start offset in seconds for a capped transcode (ignored for the original file).</param>
@@ -170,8 +171,9 @@ public class FederationController : JellyShareControllerBase
         }
 
         var info = _source.GetStreamInfo(id);
+        var isAudio = info?.Type is "Audio" or "AudioBook";
         if (info is null
-            || (info.Type != "Movie" && info.Type != "Episode")
+            || (info.Type != "Movie" && info.Type != "Episode" && !isAudio)
             || string.IsNullOrEmpty(info.Path))
         {
             return NotFound();
@@ -180,7 +182,9 @@ public class FederationController : JellyShareControllerBase
         EncoderSettings? encoder = null;
         double? startSeconds = null;
         var cap = share.MaxBitrate;
-        var overCap = CappedStreamArgs.IsOverCap(cap, info.Bitrate);
+
+        // Audio is served as the file whatever the cap: it is small, and a transcode would break seeking for no gain.
+        var overCap = !isAudio && CappedStreamArgs.IsOverCap(cap, info.Bitrate);
         if (overCap)
         {
             if (!CappedStreamArgs.TryParseStart(start, info.RunTimeTicks, out startSeconds))
@@ -196,7 +200,7 @@ public class FederationController : JellyShareControllerBase
             }
         }
 
-        if (!_limiter.TryAcquireLease(share.Id, id, share.MaxStreams, out var lease))
+        if (!_limiter.TryAcquireLease(share.Id, info.TitleId ?? id, share.MaxStreams, out var lease))
         {
             Response.Headers.RetryAfter = "30";
             return StatusCode(StatusCodes.Status429TooManyRequests, new ErrorResponse("stream limit reached"));
@@ -235,7 +239,7 @@ public class FederationController : JellyShareControllerBase
             return new CappedStreamResult(_capped, encoder, info.Path, cap!.Value, startSeconds, lease, slot);
         }
 
-        if (!_videoContentTypes.TryGetContentType(info.Path, out var contentType))
+        if (!_mediaContentTypes.TryGetContentType(info.Path, out var contentType))
         {
             contentType = "application/octet-stream";
         }
@@ -243,9 +247,16 @@ public class FederationController : JellyShareControllerBase
         return PhysicalFile(info.Path, contentType, enableRangeProcessing: true);
     }
 
-    private static FileExtensionContentTypeProvider CreateVideoContentTypes()
+    private static FileExtensionContentTypeProvider CreateMediaContentTypes()
     {
         var provider = new FileExtensionContentTypeProvider();
+        provider.Mappings[".mp3"] = "audio/mpeg";
+        provider.Mappings[".flac"] = "audio/flac";
+        provider.Mappings[".m4a"] = "audio/mp4";
+        provider.Mappings[".m4b"] = "audio/mp4";
+        provider.Mappings[".ogg"] = "audio/ogg";
+        provider.Mappings[".opus"] = "audio/ogg";
+        provider.Mappings[".wav"] = "audio/wav";
         provider.Mappings[".mkv"] = "video/x-matroska";
         provider.Mappings[".m4v"] = "video/x-m4v";
         provider.Mappings[".ts"] = "video/mp2t";

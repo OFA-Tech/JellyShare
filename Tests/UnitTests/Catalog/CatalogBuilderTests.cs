@@ -426,4 +426,76 @@ public sealed class CatalogBuilderTests
         second.Etag.ShouldNotBe(first.Etag);
         second.Items.ShouldHaveSingleItem().DateModified.ShouldBe(_modified.AddMinutes(1));
     }
+
+    private static LocalItem AudioLocal(Guid id, string type, string path, Guid album, CatalogItem item)
+        => new(id, type, path, album, () => item) { DateModified = _modified };
+
+    [Fact]
+    public void Catalog_MusicRequestedAndShared_ServesTracksWithAlbumFields()
+    {
+        var album = G(50);
+        var track = new CatalogItem(
+            G(1).ToString("N"), "Audio", "Song", 1999, new Dictionary<string, string> { ["MusicBrainzTrack"] = "t-1" },
+            null, null, null, null, 2000, null, new MediaInfo("mp3", null, null, null, 320000, [], []), ["Primary"], _modified,
+            null, "Album", "Artist", ["Artist", "Guest"], 2, 7, album.ToString("N"));
+        var source = new FakeSource();
+        source.Items.Add((_libA, AudioLocal(G(1), "Audio", "/media/Music/Artist/Album/07.mp3", album, track)));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/A/A.mkv")));
+        var music = new HashSet<MediaType> { MediaType.Music };
+
+        var catalog = Builder(source).Build(Share(MediaType.Music), music);
+
+        var served = catalog.Items.ShouldHaveSingleItem();
+        served.Type.ShouldBe("Audio");
+        (served.Album, served.AlbumArtist, served.DiscNumber, served.TrackNumber, served.AlbumId).ShouldBe(("Album", "Artist", 2, 7, album.ToString("N")));
+        served.Artists.ShouldBe(["Artist", "Guest"]);
+        served.ProviderIds["MusicBrainzTrack"].ShouldBe("t-1");
+        served.SeasonNumber.ShouldBeNull();
+        served.EpisodeNumber.ShouldBeNull();
+        JsonSerializer.Serialize(served).ShouldContain("\"trackNumber\":7", Case.Sensitive);
+        Builder(source).Build(Share(MediaType.Movies), music).Items.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Catalog_AudiobookItem_CarriesFolderPathWithoutRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "books");
+        var file = Path.Combine(root, "Author X", "Book Y", "01.mp3");
+        var folderPath = AudiobookFolders.Relative(file, [root]);
+        var book = new CatalogItem(
+            G(1).ToString("N"), "AudioBook", "Book Y", null, new Dictionary<string, string>(),
+            null, null, null, null, 2000, null, new MediaInfo("mp3", null, null, null, null, [], []), [], _modified,
+            FolderPath: folderPath);
+        var source = new FakeSource();
+        source.Items.Add((_libA, AudioLocal(G(1), "AudioBook", file, G(60), book)));
+
+        var served = Builder(source).Build(Share(MediaType.Audiobooks), new HashSet<MediaType> { MediaType.Audiobooks }).Items.ShouldHaveSingleItem();
+
+        served.FolderPath.ShouldBe("Author X/Book Y");
+        served.FolderPath!.ShouldNotContain(root, Case.Insensitive);
+    }
+
+    [Fact]
+    public void AudiobookFolders_FileDirectlyInRootOrOutsideIt_HasNoFolderPath()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "books");
+
+        AudiobookFolders.Relative(Path.Combine(root, "book.m4b"), [root]).ShouldBeNull();
+        AudiobookFolders.Relative(Path.Combine(Path.GetTempPath(), "other", "A", "b.m4b"), [root]).ShouldBeNull();
+        AudiobookFolders.Relative(Path.Combine(root, "A", "B", "b.m4b"), [Path.Combine(root, "A"), root]).ShouldBe("B");
+        AudiobookFolders.Relative(null, [root]).ShouldBeNull();
+    }
+
+    [Fact]
+    public void IsExposed_AlbumId_ResolvesToItsTracks()
+    {
+        var album = G(50);
+        var source = new FakeSource();
+        source.Items.Add((_libA, AudioLocal(G(1), "Audio", "/media/Music/A/01.mp3", album, Item(G(1), "Audio"))));
+
+        var builder = Builder(source);
+
+        builder.IsExposed(Share(MediaType.Music), album).ShouldBeTrue();
+        builder.IsExposed(Share(MediaType.Movies), album).ShouldBeFalse();
+    }
 }

@@ -14,6 +14,9 @@ public static class MediaTypes
     /// <summary>Gets the media types this version can share and receive.</summary>
     public static IReadOnlyList<MediaType> Supported { get; } = _moviesAndShows;
 
+    /// <summary>Gets the media types this version can provide to a peer (a receiver still asks only for <see cref="Supported"/>).</summary>
+    public static IReadOnlyList<MediaType> ProviderSupported { get; } = new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks };
+
     /// <summary>Maps a catalog item type to its media type.</summary>
     /// <param name="catalogItemType">The catalog item type (<c>Movie</c>, <c>Episode</c>, <c>Audio</c>, <c>AudioBook</c>).</param>
     /// <returns>The media type, or <c>null</c> for an unknown type.</returns>

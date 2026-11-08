@@ -44,7 +44,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
         _source.Items.Add((_lib, Movie(_movieId, "/media/Movies/A/A.mkv")));
         _source.Items.Add((_lib, Episode(_episodeId, _seriesId, "/media/Shows/S/Season 01/S.mkv")));
-        _source.Items.Add((Guid.NewGuid(), Audio(_outsideId, "/media/Music/B.flac")));
+        _source.Items.Add((Guid.NewGuid(), Photo(_outsideId, "/media/Photos/B.jpg")));
     }
 
     public void Dispose()
@@ -65,8 +65,8 @@ public sealed class FederationControllerCatalogTests : IDisposable
         })
         { DateModified = _modified };
 
-    private static LocalItem Audio(Guid id, string path)
-        => new(id, "Audio", path, null, () => Make(id, "Audio", null)) { DateModified = _modified };
+    private static LocalItem Photo(Guid id, string path)
+        => new(id, "Photo", path, null, () => Make(id, "Photo", null)) { DateModified = _modified };
 
     private LocalItem Episode(Guid id, Guid seriesId, string path)
         => new(id, "Episode", path, seriesId, () =>

@@ -1,9 +1,11 @@
 using Jellyfin.Data.Enums;
+using JellyShare.Application.Features.Catalog;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -63,6 +65,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         {
             case Movie:
             case Episode:
+            case Audio:
                 ids = new[] { itemId };
                 break;
             case Series:
@@ -73,6 +76,25 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                     AncestorIds = new[] { itemId },
                     IsVirtualItem = false,
                     Recursive = true,
+                }).ToArray();
+                break;
+            case MusicAlbum:
+                ids = _libraryManager.GetItemIds(new InternalItemsQuery
+                {
+                    IncludeItemTypes = new[] { BaseItemKind.Audio },
+                    AncestorIds = new[] { itemId },
+                    IsVirtualItem = false,
+                    Recursive = true,
+                }).ToArray();
+                break;
+            case Folder:
+                // An audiobook's folder: the books directly inside it (their artwork is served under the folder id).
+                ids = _libraryManager.GetItemIds(new InternalItemsQuery
+                {
+                    IncludeItemTypes = new[] { BaseItemKind.AudioBook },
+                    ParentId = itemId,
+                    IsVirtualItem = false,
+                    Recursive = false,
                 }).ToArray();
                 break;
             default:
@@ -105,6 +127,16 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         if (types.Contains(ShareMediaType.Shows))
         {
             kinds.Add(BaseItemKind.Episode);
+        }
+
+        if (types.Contains(ShareMediaType.Music))
+        {
+            kinds.Add(BaseItemKind.Audio);
+        }
+
+        if (types.Contains(ShareMediaType.Audiobooks))
+        {
+            kinds.Add(BaseItemKind.AudioBook);
         }
 
         return kinds.ToArray();
@@ -152,11 +184,24 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                         DateModified = episode.DateModified,
                     });
                     break;
+                case AudioBook book:
+                    result.Add(new LocalItem(book.Id, "AudioBook", book.Path, BookFolderId(book), () => ToCatalogItem(book, "AudioBook", null))
+                    {
+                        DateModified = book.DateModified,
+                    });
+                    break;
+                case Audio track:
+                    result.Add(new LocalItem(track.Id, "Audio", track.Path, track.AlbumEntity?.Id, () => ToCatalogItem(track, "Audio", null))
+                    {
+                        DateModified = track.DateModified,
+                    });
+                    break;
             }
         }
 
         return result;
     }
+
     /// <inheritdoc />
     public string? GetImagePath(Guid itemId, string imageType)
     {
@@ -171,9 +216,27 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             return null;
         }
 
-        var info = item.ImageInfos?.FirstOrDefault(i => i.Type == type && i.IsLocalFile);
-        return info?.Path;
+        return (LocalImage(item, type) ?? LocalImage(ArtworkHolder(item), type))?.Path;
     }
+
+    private static ItemImageInfo? LocalImage(BaseItem? item, ImageType type)
+        => item?.ImageInfos?.FirstOrDefault(i => i.Type == type && i.IsLocalFile);
+
+    /// <summary>The album (tracks) or the book's folder (audiobooks) that supplies artwork for audio without its own.</summary>
+    private static BaseItem? ArtworkHolder(BaseItem item) => item switch
+    {
+        AudioBook book => BookFolder(book),
+        Audio track => track.AlbumEntity,
+        _ => null,
+    };
+
+    private static BaseItem? BookFolder(AudioBook book)
+    {
+        var parent = book.GetParent();
+        return parent is null || parent.IsTopParent ? null : parent;
+    }
+
+    private static Guid? BookFolderId(AudioBook book) => BookFolder(book)?.Id;
 
     /// <inheritdoc />
     public StreamInfo? GetStreamInfo(Guid itemId)
@@ -187,6 +250,9 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                     ? item.TotalBitrate
                     : SumOfStreamBitrates(_mediaSourceManager.GetMediaStreams(item.Id));
                 return new StreamInfo(item is Movie ? "Movie" : "Episode", item.Name, item.Path, bitrate, item.RunTimeTicks);
+            case Audio:
+                // Audio is never bitrate-capped; the title id makes one album (or book) count as one stream.
+                return new StreamInfo(item is AudioBook ? "AudioBook" : "Audio", item.Name, item.Path, null, item.RunTimeTicks, ArtworkHolder(item)?.Id);
             case null:
                 return null;
             default:
@@ -208,6 +274,11 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             .Select(s => new SubtitleTrack(s.Language, s.Codec, s.Title ?? s.DisplayTitle))
             .ToArray();
         var bitRate = EffectiveBitrate(item.TotalBitrate, streams);
+        var track = item as Audio;
+        var holder = track is null ? null : ArtworkHolder(track);
+        var folderPath = item is AudioBook book && holder is not null
+            ? AudiobookFolders.Relative(book.Path, _libraryManager.GetCollectionFolders(book).SelectMany(f => f.PhysicalLocations))
+            : null;
 
         return new CatalogItem(
             item.Id.ToString("N"),
@@ -223,11 +294,18 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
             item.Overview,
             new MediaInfo(item.Container, video?.Codec, video?.Width, video?.Height, bitRate, audio, subtitles),
             _sharedImageTypes
-                .Where(t => item.ImageInfos?.Any(i => i.Type == t && i.IsLocalFile) == true)
+                .Where(t => LocalImage(item, t) is not null || LocalImage(holder, t) is not null)
                 .Select(t => t.ToString())
                 .ToArray(),
             item.DateModified,
-            episode is null || episode.SeriesId == Guid.Empty ? null : episode.SeriesId.ToString("N"));
+            episode is null || episode.SeriesId == Guid.Empty ? null : episode.SeriesId.ToString("N"),
+            track?.Album,
+            track is { AlbumArtists.Count: > 0 } ? track.AlbumArtists[0] : null,
+            track?.Artists.ToArray(),
+            track?.ParentIndexNumber,
+            track?.IndexNumber,
+            holder?.Id.ToString("N"),
+            folderPath);
     }
 
     /// <summary>The container total when positive, else the sum of the stream bitrates; <c>null</c> when unknown.</summary>
