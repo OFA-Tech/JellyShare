@@ -76,7 +76,8 @@ public static class MediaTypes
         {
             true => DefaultShare(cfg),
             false => share.Types.ToHashSet(),
-            null => libraries.Where(l => share.LibraryIds.Contains(l.Id)).SelectMany(l => FromLibrary(l.CollectionType)).ToHashSet(),
+            // A share saved before media types existed only ever served movies and shows; an update must not widen it.
+            null => libraries.Where(l => share.LibraryIds.Contains(l.Id)).SelectMany(l => FromLibrary(l.CollectionType)).Intersect(_moviesAndShows).ToHashSet(),
         };
     }
 

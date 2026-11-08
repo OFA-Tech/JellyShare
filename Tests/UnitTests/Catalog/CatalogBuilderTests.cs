@@ -487,6 +487,28 @@ public sealed class CatalogBuilderTests
     }
 
     [Fact]
+    public void Catalog_LegacyShareWithMusicLibrary_ServesNoAudio_AndExposesNone()
+    {
+        var album = G(50);
+        var source = new FakeSource();
+        source.Items.Add((_libA, AudioLocal(G(1), "Audio", "/media/Music/A/01.mp3", album, Item(G(1), "Audio"))));
+        source.Items.Add((_libA, Local(G(2), "/media/Movies/A/A.mkv")));
+        var legacy = new PeerShare
+        {
+            Id = Guid.NewGuid(),
+            Name = "old",
+            Enabled = true,
+            LibraryIds = { FakeLibraries.MoviesId, FakeLibraries.MusicId },
+        };
+        var builder = Builder(source);
+
+        builder.Build(legacy, new HashSet<MediaType> { MediaType.Music }).Items.ShouldBeEmpty();
+        builder.Build(legacy, new HashSet<MediaType> { MediaType.Movies, MediaType.Music }).Items.ShouldHaveSingleItem().Type.ShouldBe("Movie");
+        builder.IsExposed(legacy, G(1)).ShouldBeFalse();
+        builder.IsExposed(legacy, album).ShouldBeFalse();
+    }
+
+    [Fact]
     public void IsExposed_AlbumId_ResolvesToItsTracks()
     {
         var album = G(50);

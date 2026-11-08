@@ -58,6 +58,28 @@ public sealed class MediaTypesTests
     }
 
     [Fact]
+    public void EffectiveShare_LegacyShareWithMusicAndBooksLibraries_StaysMoviesAndShows()
+    {
+        var movies = Guid.NewGuid();
+        var music = Guid.NewGuid();
+        var books = Guid.NewGuid();
+        var share = new PeerShare { LibraryIds = { movies, music, books } };
+        var libraries = new[] { Library(movies, "movies"), Library(music, "music"), Library(books, "books") };
+
+        MediaTypes.EffectiveShare(share, new JellyShareSettings(), libraries).ShouldBe(new[] { MediaType.Movies });
+    }
+
+    [Fact]
+    public void ShareView_LegacyShareWithMusicLibrary_ShowsOnlyMoviesAndShows()
+    {
+        var share = new PeerShare { Name = "old", LibraryIds = { Fakes.FakeLibraries.MoviesId, Fakes.FakeLibraries.MusicId } };
+
+        var view = JellyShare.Application.Features.Admin.AdminRules.ToView(share, 0, new JellyShareSettings(), new Fakes.FakeLibraries().List());
+
+        view.Types.ShouldBe(new[] { MediaType.Movies });
+    }
+
+    [Fact]
     public void EffectiveShare_UseDefault_FollowsDefault()
     {
         var cfg = new JellyShareSettings { DefaultShareTypes = new[] { MediaType.Music } };
