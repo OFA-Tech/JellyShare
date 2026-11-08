@@ -5,6 +5,45 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- Media types: **Movies, Shows, Music, Audiobooks & podcasts** (Ebooks, Collections and Live TV are listed as "coming
+  later"). **Default sharing** on the admin page sets the types an invitation offers with **Use the default**; an
+  invitation can instead be **Custom** with its own types. Admin API: `PUT admin/sharing/default` (`all`, `types`),
+  `useDefaultTypes`/`types` on `POST`/`PUT admin/shares`, status `DefaultSharing`, `SupportedTypes`.
+- Receiving by type, per peer: **Everything they share** (default) or **Only:** a list. Unticking a type removes that
+  peer's placeholders of that type at the next sync. Admin API: `acceptAllTypes`/`acceptTypes` on `POST`/`PUT
+  admin/peers`. The catalog request carries the wanted types (`?types=`).
+- Music and audiobooks: placeholder folders `placeholders/Music` and `placeholders/Audiobooks` with **Add to library**
+  in Setup (music library / books library; status `Music`, `Audiobooks`). Tracks are written as
+  `{album artist}/{album}/{disc}{track} {title}.strm`, audiobooks as their author/book folders with `{NN} {name}.strm`,
+  plus `folder.jpg` when the peer has cover art (no `.nfo`). After the scan JellyShare writes the track details (title,
+  artists, album artist, album, track and disc number; title and people locked) into the library, so a rescan or
+  restart keeps them. A peer's album is skipped when you own any track of it; albums you lack join your artist when the
+  names match. A type whose folder is not a folder of a library of that kind is skipped and reported
+  (`lastSync.SkippedTypesWithoutFolder`, "set up the folder first" on the admin page).
+- Audio playback through the relay: a media source provider plus the PlaybackInfo filter point `Audio/{id}/universal`,
+  `stream`, HLS and `PlaybackInfo` at the relay (also for clients that skip PlaybackInfo); the relay address stays
+  hidden. Audio is never sent through the capped video transcode, and an album (a book) counts as one stream on share
+  and account peer limits. The startup check also warns when Jellyfin's audio routes change.
+- Account peers receive music and audiobooks from the friend user's music and books libraries (static audio stream,
+  never the video transcode).
+- Harness: `harness/e2e.py` "media types" section and `harness/web_play_audio.js` (jellyfin-web plays a track and an
+  audiobook in headless Chromium).
+
+### Changed
+
+- Shares are by media type, not by library: a type covers every library of that kind on the server. **A share that
+  covered one of two movie libraries now covers all movie libraries** (the library list in `LibraryIds` is ignored on
+  create and update).
+- A share saved by 0.2.0.0 keeps offering exactly Movies and/or Shows, derived from the kinds of the libraries it
+  listed (a mixed library counts as both); music or books libraries in it are **not** shared until you tick Music or
+  Audiobooks for that invitation. Editing only its name or limits keeps that; choosing types makes it Use the default
+  or Custom. New invitations use the default sharing (all types at first).
+- Peers saved by 0.2.0.0 accept everything. The first sync after the upgrade fetches each peer's full catalog once (the
+  catalog ETag now includes the media types). A 0.2.0.0 receiver, which sends no `types`, still gets only movies and
+  episodes.
+
 ## [0.2.0.0] - 2026-11-02
 
 ### Added

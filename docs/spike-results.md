@@ -753,3 +753,45 @@ metadata before that scan (or create the artist through `ILibraryManager`).
 Scratch paths removed (alice Music/Audiobooks `Locations` = `/media/Music`, `/media/Audiobooks`), scratch
 folders deleted, rescanned (no spike items, `/Artists` = Artist A), `jellyshare-spike-http` removed, both
 servers back on a `feat/media-types` Release build.
+
+## Media types end to end (2026-11-08, `harness/e2e.py` "media types")
+
+Run against the harness (alice/bob 12.4, `feat/media-types` Release build) as the last section of `py harness/e2e.py`;
+two full runs in a row printed `ALL PASS` (139 checks each, ~455 s). bob shares Music + Audiobooks with alice (custom
+types), alice's `placeholders/Music` and `placeholders/Audiobooks` are attached to her `music` and `books` libraries
+through `POST admin/libraries/attach`. Proved:
+
+- **Layout and grouping.** alice gets exactly `Artist B/Album Two/01 First Light.strm`, `02 Second Wind.strm` and
+  `Author X/Book Y/01 Chapter One.strm`, `02 Chapter Two.strm` (no `.nfo`). bob's `Album One/03 Song Three` is not
+  written (alice owns tracks 1-2 of that album). After the scan and the metadata pass: one `Album One` (alice's), one
+  `Album Two` with album artist Artist B listing First Light (1), Second Wind (2); `/Artists` has one Artist A and one
+  Artist B, whose only album is Album Two; the AudioBook items sit in one `Book Y` folder as Chapter One (1), Chapter
+  Two (2).
+- **Persistence.** After a full library refresh and after `docker restart` of alice everything above is unchanged and
+  the plugin logged no further "wrote metadata" (the values were kept, not rewritten).
+- **Playback without PlaybackInfo first** (fresh items): `Audio/{id}/universal` with jellyfin-web's container list →
+  200 static audio (ffprobe `mp3` for First Light and Chapter One); `Audio/{id}/stream?static=true` → 200 (ffprobe
+  `flac` for Second Wind, `mp3` for Chapter Two). No response header carries the relay address. `POST PlaybackInfo` of
+  all four: one source, `Path ""`, no `127.0.0.1` / `JellyShare/v1/play` in the body.
+- **jellyfin-web** (headless Chromium shell 1243, `harness/web_play_audio.js`) plays First Light and Chapter Two
+  (`currentTime` ~7.7 s of 20 after 8 s, no error, no browser request to the relay).
+  This found a bug: Jellyfin stores no `Container` for AudioBook items of a multi-file folder (on bob, so the catalog
+  had none), the relay source had none either, `universal` matched no direct-play profile and redirected the browser
+  to `main.m3u8`, which never started in the headless shell. Fixed: the relay source falls back to the audio codec
+  (`fix: audiobook placeholders without a container play directly in jellyfin-web`).
+- **One stream per album.** With bob's share at `MaxStreams = 1` and First Light held open (curl at 8 kB/s), Second
+  Wind from bob → 206, and through alice's relay (`Audio/{id}/stream?static=true`) → 206; Song Three (Album One) and
+  Chapter One (Book Y) → 429 `Retry-After: 30`. The slot is free again after the read ends.
+- **Legacy catalog.** `GET catalog` without `types` on that share → only Movie and Episode items; with
+  `types=Music,Audiobooks` → 3 Audio + 2 AudioBook items.
+- **Folder not in a library.** With the Music placeholder folder removed from alice's Music library, the sync reports
+  `SkippedTypesWithoutFolder = [Music]`, status `Music.Attached = false`, and keeps the existing files; attaching it
+  again brings Album Two back as before.
+- **Receive only Movies.** alice's peer bob on `AcceptTypes = [Movies]` → after the sync no music, audiobook (or
+  episode) placeholder from bob remains, Tears of Steel stays; back to Everything restores all of them.
+- **Account peer.** A plain bob user with access to the Music library only, added on alice as an account peer (token
+  peer paused): sync without errors (3 titles), Album Two arrives the same way (Song Three skipped, no audiobooks), and
+  First Light plays (`stream?static=true`, ffprobe `mp3`).
+
+Not covered: cover art (`folder.jpg`; the harness tones have none), native apps, HLS/transcoded audio, m4b
+audiobooks (the codec-as-container fallback gives `aac` there), audio stream limits on the account peer side.
