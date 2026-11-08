@@ -49,7 +49,7 @@ public class AdminController : JellyShareControllerBase
             return BadRequestError(MissingBody);
         }
 
-        var result = await Sender.Send(new CreateShareCommand(request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate), ct).ConfigureAwait(false);
+        var result = await Sender.Send(new CreateShareCommand(request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate, request.UseDefaultTypes, request.Types), ct).ConfigureAwait(false);
         if (result.IsSuccess)
         {
             Response.Headers.CacheControl = "no-store";
@@ -58,7 +58,7 @@ public class AdminController : JellyShareControllerBase
         return ToActionResult(result);
     }
 
-    /// <summary>Updates a share's name, libraries, limits and enabled flag.</summary>
+    /// <summary>Updates a share's name, media types, limits and enabled flag.</summary>
     /// <param name="id">The share id.</param>
     /// <param name="request">The new values.</param>
     /// <param name="ct">The cancellation token.</param>
@@ -72,8 +72,23 @@ public class AdminController : JellyShareControllerBase
         }
 
         return ToActionResult(await Sender.Send(
-            new UpdateShareCommand(id, request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate, request.Enabled),
+            new UpdateShareCommand(id, request.Name, request.LibraryIds, request.MaxStreams, request.MaxBitrate, request.Enabled, request.UseDefaultTypes, request.Types),
             ct).ConfigureAwait(false));
+    }
+
+    /// <summary>Sets the media types a share offers by default.</summary>
+    /// <param name="request">The default sharing.</param>
+    /// <param name="ct">The cancellation token.</param>
+    /// <returns>The default sharing now in effect.</returns>
+    [HttpPut("sharing/default")]
+    public async Task<IActionResult> UpdateDefaultSharing([FromBody] DefaultSharingRequest request, CancellationToken ct = default)
+    {
+        if (request is null)
+        {
+            return BadRequestError(MissingBody);
+        }
+
+        return ToActionResult(await Sender.Send(new UpdateDefaultSharingCommand(request.All, request.Types), ct).ConfigureAwait(false));
     }
 
     /// <summary>Revokes a share immediately.</summary>

@@ -1,7 +1,7 @@
 using JellyShare.Application.Features.Admin;
 using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
-using JellyShare.Domain.Interfaces.Library;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
@@ -14,25 +14,16 @@ namespace JellyShare.Application.Features.Shares;
 /// <summary>Validates a new share before any token is created.</summary>
 public sealed class CreateShareCommandValidator : IValidator<CreateShareCommand>
 {
-    private readonly IAdminLibraries _libraries;
-
-    /// <summary>Initializes a new instance of the <see cref="CreateShareCommandValidator"/> class.</summary>
-    /// <param name="libraries">The libraries on this server.</param>
-    public CreateShareCommandValidator(IAdminLibraries libraries)
-    {
-        _libraries = libraries;
-    }
-
     /// <inheritdoc />
     public Error? Validate(CreateShareCommand request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var problem = AdminRules.ValidateShare(
             request.Name,
-            request.LibraryIds,
             request.MaxStreams,
             request.MaxBitrate,
-            () => _libraries.List().Select(l => l.Id),
+            request.UseDefaultTypes == false,
+            request.Types,
             out _,
             out _);
         return problem is null ? null : Error.Validation("Share.Invalid", problem);
@@ -65,9 +56,9 @@ public sealed class CreateShareCommandHandler : ICommandHandler<CreateShareComma
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // The validator has accepted the fields; this only normalizes them (trimmed name, distinct libraries).
+        // The validator has accepted the fields; this only normalizes them (trimmed name, chosen types).
         var name = AdminRules.CleanName(request.Name)!;
-        var libs = (request.LibraryIds ?? []).Distinct().ToList();
+        var custom = request.UseDefaultTypes == false;
         var (token, hash) = _tokens.Create();
         var share = new PeerShare
         {
@@ -75,9 +66,10 @@ public sealed class CreateShareCommandHandler : ICommandHandler<CreateShareComma
             Name = name,
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = libs,
             MaxStreams = request.MaxStreams!.Value,
             MaxBitrate = request.MaxBitrate,
+            UseDefaultTypes = !custom,
+            Types = custom ? request.Types!.ToList() : new List<MediaType>(),
         };
 
         lock (AdminRules.SettingsLock)

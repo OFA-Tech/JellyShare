@@ -178,7 +178,7 @@ internal sealed class FakeSource : ILocalItemSource
 
     private int _calls;
 
-    public IEnumerable<LocalItem> GetItems(IReadOnlyCollection<Guid> libraryIds)
+    public IEnumerable<LocalItem> GetItems(IReadOnlySet<MediaType> types)
     {
         Interlocked.Increment(ref _calls);
         if (GetItemsDelay > TimeSpan.Zero)
@@ -186,18 +186,21 @@ internal sealed class FakeSource : ILocalItemSource
             Thread.Sleep(GetItemsDelay);
         }
 
-        return Items.Where(i => libraryIds.Contains(i.Library)).Select(i => i.Item).ToList();
+        return Items.Where(i => OfType(i.Item, types)).Select(i => i.Item).ToList();
     }
 
     public int CandidateCalls => _candidateCalls;
 
     private int _candidateCalls;
 
-    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds)
+    private static bool OfType(LocalItem item, IReadOnlySet<MediaType> types)
+        => MediaTypes.Of(item.Type) is { } type && types.Contains(type);
+
+    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlySet<MediaType> types)
     {
         Interlocked.Increment(ref _candidateCalls);
         return Items
-            .Where(i => libraryIds.Contains(i.Library) && (i.Item.Id == itemId || i.Item.SeriesId == itemId))
+            .Where(i => OfType(i.Item, types) && (i.Item.Id == itemId || i.Item.SeriesId == itemId))
             .Select(i => i.Item)
             .ToList();
     }

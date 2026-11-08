@@ -54,7 +54,7 @@ public sealed class FederationControllerStreamTests : IDisposable
             Name = "bob",
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = new List<Guid> { _lib },
+            UseDefaultTypes = true,
             MaxStreams = 1,
         });
 
@@ -66,7 +66,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         AddItem(_lib, _movie2Id, "Movie", _movie2File, null);
         AddItem(_lib, _episodeId, "Episode", Path.Combine(_tempDir, "e.mkv"), _seriesId);
         File.WriteAllBytes(Path.Combine(_tempDir, "e.mkv"), new byte[10]);
-        AddItem(Guid.NewGuid(), _outsideId, "Movie", _movieFile, null);
+        AddItem(Guid.NewGuid(), _outsideId, "Audio", _movieFile, null);
     }
 
     public void Dispose()
@@ -95,7 +95,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
     private FederationController AbortableController(string? token, string method, CancellationToken aborted)
     {
-        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
+        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, new FakeLibraries(), _ => true);
         _capped ??= new CappedStreamService(_encoder, _runner, _clock, _cappedLogger);
         var controller = new FederationController(FederationSender.Create(new FakeIdentity(), builder, _config, _tokens), builder, _source, _config, _tokens, _limiter, _capped, _logger);
         var http = new DefaultHttpContext();

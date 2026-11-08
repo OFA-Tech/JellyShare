@@ -23,13 +23,14 @@ public sealed class ShareHandlerTests : IDisposable
     [Fact]
     public async Task Create_SavesTheShareWithTheTokenHash_AndReturnsTheTokenOnce()
     {
-        var result = await _h.Send(new CreateShareCommand("  bob  ", [FakeLibraries.MoviesId, FakeLibraries.MoviesId], 3, 8_000_000));
+        var result = await _h.Send(new CreateShareCommand("  bob  ", null, 3, 8_000_000));
 
         result.IsSuccess.ShouldBeTrue();
         var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
         saved.Id.ShouldBe(result.Value.Id);
         saved.Name.ShouldBe("bob");
-        saved.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+        saved.UseDefaultTypes.ShouldBe(true);
+        saved.Types.ShouldBeEmpty();
         saved.MaxStreams.ShouldBe(3);
         saved.MaxBitrate.ShouldBe(8_000_000);
         saved.Enabled.ShouldBeTrue();
@@ -52,20 +53,72 @@ public sealed class ShareHandlerTests : IDisposable
     }
 
     [Fact]
-    public async Task Create_WithoutLibraries_FailsValidation()
+    public async Task CreateShare_DefaultsToUseDefault()
     {
-        var result = await _h.Send(new CreateShareCommand("bob", [], 2, null));
+        await _h.Send(new CreateShareCommand("bob", null, 2, null, null, [MediaType.Music]));
 
-        result.Error.Description.ShouldBe("Pick at least one library to share.");
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.UseDefaultTypes.ShouldBe(true);
+        saved.Types.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task Create_WithAnUnknownLibrary_FailsValidation()
+    public async Task CreateShare_Custom_StoresTheTypes()
     {
-        var result = await _h.Send(new CreateShareCommand("bob", [Guid.NewGuid()], 2, null));
+        var result = await _h.Send(new CreateShareCommand("bob", null, 2, null, false, [MediaType.Shows, MediaType.Music]));
+
+        result.IsSuccess.ShouldBeTrue();
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.UseDefaultTypes.ShouldBe(false);
+        saved.Types.ShouldBe([MediaType.Shows, MediaType.Music]);
+    }
+
+    [Theory]
+    [InlineData(new MediaType[0], "Pick at least one media type to share.")]
+    [InlineData(new[] { MediaType.Movies, MediaType.Movies }, "The media types are not valid. Pick each type at most once.")]
+    [InlineData(new[] { (MediaType)99 }, "The media types are not valid. Pick each type at most once.")]
+    public async Task CreateShare_CustomWithBadTypes_FailsValidation(MediaType[] types, string message)
+    {
+        var result = await _h.Send(new CreateShareCommand("bob", null, 2, null, false, types));
 
         result.Error.Type.ShouldBe(ErrorType.Validation);
-        result.Error.Description.ShouldBe("One of the selected libraries does not exist.");
+        result.Error.Description.ShouldBe(message);
+        _h.Saver.Saves.ShouldBe(0);
+    }
+
+    // ---- default sharing ----
+
+    [Fact]
+    public async Task UpdateDefaultSharing_All_StoresNull()
+    {
+        _h.Config.Settings.DefaultShareTypes = [MediaType.Movies];
+
+        var result = await _h.Send(new UpdateDefaultSharingCommand(true, [MediaType.Music]));
+
+        result.Value.All.ShouldBeTrue();
+        result.Value.Types.ShouldBe(MediaTypes.All);
+        _h.Saver.Saved!.DefaultShareTypes.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task UpdateDefaultSharing_Custom_StoresTheTypes()
+    {
+        var result = await _h.Send(new UpdateDefaultSharingCommand(false, [MediaType.Shows, MediaType.Movies]));
+
+        result.Value.All.ShouldBeFalse();
+        result.Value.Types.ShouldBe([MediaType.Movies, MediaType.Shows]);
+        _h.Saver.Saved!.DefaultShareTypes.ShouldBe([MediaType.Shows, MediaType.Movies]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(null)]
+    public async Task UpdateDefaultSharing_EmptyCustom_Rejected(bool? all)
+    {
+        var result = await _h.Send(new UpdateDefaultSharingCommand(all, []));
+
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        _h.Saver.Saves.ShouldBe(0);
     }
 
     // ---- update ----
@@ -75,15 +128,73 @@ public sealed class ShareHandlerTests : IDisposable
     {
         var share = Seed();
 
-        var result = await _h.Send(new UpdateShareCommand(share.Id, "carol", [FakeLibraries.ShowsId], 5, null, false));
+        var result = await _h.Send(new UpdateShareCommand(share.Id, "carol", null, 5, null, false));
 
         result.IsSuccess.ShouldBeTrue();
         result.Value.Name.ShouldBe("carol");
         result.Value.Enabled.ShouldBeFalse();
         var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
         saved.TokenHash.ShouldBe("hash");
-        saved.LibraryIds.ShouldBe([FakeLibraries.ShowsId]);
+        saved.MaxStreams.ShouldBe(5);
         saved.ShouldNotBeSameAs(share);
+    }
+
+    [Fact]
+    public async Task UpdateShare_Custom_StoresTypes_AndKeepsOtherFields()
+    {
+        var share = Seed();
+        share.MaxBitrate = 4_000_000;
+
+        var result = await _h.Send(new UpdateShareCommand(share.Id, "bob", null, 2, 4_000_000, null, false, [MediaType.Shows]));
+
+        result.Value.UseDefaultTypes.ShouldBeFalse();
+        result.Value.Types.ShouldBe([MediaType.Shows]);
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.UseDefaultTypes.ShouldBe(false);
+        saved.Types.ShouldBe([MediaType.Shows]);
+        saved.Name.ShouldBe("bob");
+        saved.MaxStreams.ShouldBe(2);
+        saved.MaxBitrate.ShouldBe(4_000_000);
+        saved.TokenHash.ShouldBe("hash");
+        saved.Enabled.ShouldBeTrue();
+        saved.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+    }
+
+    [Fact]
+    public async Task UpdateShare_TypesAlone_MakeItCustom_AndUseDefaultClearsThem()
+    {
+        var share = Seed();
+
+        await _h.Send(new UpdateShareCommand(share.Id, "bob", null, 2, null, null, null, [MediaType.Movies]));
+        _h.Saver.Saved!.Shares.Single().UseDefaultTypes.ShouldBe(false);
+
+        await _h.Send(new UpdateShareCommand(share.Id, "bob", null, 2, null, null, true, null));
+        var saved = _h.Saver.Saved.Shares.Single();
+        saved.UseDefaultTypes.ShouldBe(true);
+        saved.Types.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task UpdateShare_Custom_WithoutTypes_FailsValidation()
+    {
+        var share = Seed();
+
+        var result = await _h.Send(new UpdateShareCommand(share.Id, "bob", null, 2, null, null, false, []));
+
+        result.Error.Type.ShouldBe(ErrorType.Validation);
+        _h.Saver.Saves.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task UpdateShare_LegacyShare_ViewShowsDerivedTypes()
+    {
+        var share = Seed();
+
+        var result = await _h.Send(new UpdateShareCommand(share.Id, "bob", null, 2, null, null));
+
+        result.Value.UseDefaultTypes.ShouldBeFalse();
+        result.Value.Types.ShouldBe([MediaType.Movies]);
+        _h.Saver.Saved!.Shares.Single().UseDefaultTypes.ShouldBeNull();
     }
 
     [Fact]
@@ -93,7 +204,7 @@ public sealed class ShareHandlerTests : IDisposable
         share.UseDefaultTypes = false;
         share.Types = [JellyShare.Domain.Enums.MediaType.Shows];
 
-        await _h.Send(new UpdateShareCommand(share.Id, "carol", [FakeLibraries.ShowsId], 5, null, null));
+        await _h.Send(new UpdateShareCommand(share.Id, "carol", null, 5, null, null));
 
         var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
         saved.UseDefaultTypes.ShouldBe(false);

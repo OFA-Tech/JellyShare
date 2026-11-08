@@ -167,7 +167,7 @@ public sealed class AdminControllerTests : IDisposable
         share.MaxStreams.ShouldBe(3);
         share.MaxBitrate.ShouldBe(8_000_000);
         share.Enabled.ShouldBeTrue();
-        share.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+        share.UseDefaultTypes.ShouldBe(true);
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
         (_saver.Saves >= 1).ShouldBeTrue();
         _saver.Saved!.Shares.ShouldHaveSingleItem().Id.ShouldBe(created.Id);
@@ -207,12 +207,27 @@ public sealed class AdminControllerTests : IDisposable
     }
 
     [Fact]
-    public void CreateShare_UnknownLibrary_IsBadRequest()
+    public void CreateShare_CustomWithoutTypes_IsBadRequest()
     {
-        var result = Run(_c.CreateShare(new CreateShareRequest("bob", [Guid.NewGuid()], 2, null), CancellationToken.None));
+        var result = Run(_c.CreateShare(new CreateShareRequest("bob", null, 2, null, false, []), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void DefaultSharing_IsInStatus_AndCanBeChanged()
+    {
+        Status().DefaultSharing.All.ShouldBeTrue();
+        Status().SupportedTypes.ShouldBe([MediaType.Movies, MediaType.Shows]);
+
+        var view = Value<DefaultSharingView>(Run(_c.UpdateDefaultSharing(new DefaultSharingRequest(false, [MediaType.Music, MediaType.Movies]), CancellationToken.None)));
+
+        view.All.ShouldBeFalse();
+        view.Types.ShouldBe([MediaType.Movies, MediaType.Music]);
+        Status().DefaultSharing.Types.ShouldBe(view.Types);
+        Status().DefaultSharing.All.ShouldBeFalse();
+        Run(_c.UpdateDefaultSharing(null!, CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -222,17 +237,20 @@ public sealed class AdminControllerTests : IDisposable
     }
 
     [Fact]
-    public void UpdateShare_ChangesNameLibrariesLimitsEnabled_KeepsToken()
+    public void UpdateShare_ChangesNameTypesLimitsEnabled_KeepsToken()
     {
         var created = CreateShare();
         var hashBefore = _config.Current.Shares[0].TokenHash;
 
-        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.ShowsId, FakeLibraries.MoviesId], 5, 4_000_000, false), CancellationToken.None));
+        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", null, 5, 4_000_000, false, false, [MediaType.Shows]), CancellationToken.None));
 
         var view = Value<ShareView>(result);
         var share = _config.Current.Shares.Single();
         share.Name.ShouldBe("bobby");
-        share.LibraryIds.ShouldBe([FakeLibraries.ShowsId, FakeLibraries.MoviesId]);
+        share.UseDefaultTypes.ShouldBe(false);
+        share.Types.ShouldBe([MediaType.Shows]);
+        view.UseDefaultTypes.ShouldBeFalse();
+        view.Types.ShouldBe([MediaType.Shows]);
         share.MaxStreams.ShouldBe(5);
         share.MaxBitrate.ShouldBe(4_000_000);
         share.Enabled.ShouldBeFalse();

@@ -81,7 +81,7 @@ public static class MediaTypes
 
     /// <summary>Parses <see cref="Format"/> output. An absent value is a peer from before types existed: movies and shows.</summary>
     /// <param name="value">The text, or <c>null</c>.</param>
-    /// <returns>The types; unknown names are ignored.</returns>
+    /// <returns>The types; unknown names and numbers are ignored.</returns>
     public static IReadOnlySet<MediaType> ParseOrLegacy(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -90,7 +90,7 @@ public static class MediaTypes
         }
 
         return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(n => Enum.TryParse<MediaType>(n, ignoreCase: false, out var t) && Enum.IsDefined(t) ? (MediaType?)t : null)
+            .Select(n => Enum.IsDefined(typeof(MediaType), n) ? Enum.Parse<MediaType>(n) : (MediaType?)null)
             .OfType<MediaType>()
             .ToHashSet();
     }

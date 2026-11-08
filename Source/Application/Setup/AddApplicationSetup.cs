@@ -38,7 +38,8 @@ public static class ApplicationSetup
         services.AddSingleton<CatalogBuilder>(sp => new CatalogBuilder(
             sp.GetRequiredService<ILocalItemSource>(),
             sp.GetRequiredService<IServerIdentity>(),
-            sp.GetRequiredService<ISettingsProvider>()));
+            sp.GetRequiredService<ISettingsProvider>(),
+            sp.GetRequiredService<IAdminLibraries>()));
 
         services.AddSingleton<ILocalIndex>(sp => new LocalIndex(
             sp.GetRequiredService<ILocalLibrary>(),

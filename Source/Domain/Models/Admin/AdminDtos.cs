@@ -1,22 +1,50 @@
 using JellyShare.Domain.Enums;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Sync;
 
 namespace JellyShare.Domain.Models.Admin;
 
 /// <summary>Body of <c>POST admin/shares</c>.</summary>
 /// <param name="Name">The display name of the peer the invitation is for.</param>
-/// <param name="LibraryIds">The libraries the peer may see.</param>
+/// <param name="LibraryIds">Ignored: shares are by media type now.</param>
 /// <param name="MaxStreams">The concurrent stream limit.</param>
 /// <param name="MaxBitrate">The bitrate cap in bits per second, or <c>null</c> for no cap.</param>
-public sealed record CreateShareRequest(string? Name, List<Guid>? LibraryIds, int? MaxStreams, int? MaxBitrate);
+/// <param name="UseDefaultTypes"><c>false</c> to offer <paramref name="Types"/>; otherwise the default sharing is used.</param>
+/// <param name="Types">The media types to offer when <paramref name="UseDefaultTypes"/> is <c>false</c>.</param>
+public sealed record CreateShareRequest(
+    string? Name,
+    List<Guid>? LibraryIds,
+    int? MaxStreams,
+    int? MaxBitrate,
+    bool? UseDefaultTypes = null,
+    List<MediaType>? Types = null);
 
-/// <summary>Body of <c>PUT admin/shares/{id}</c>. Replaces name, libraries, limits and the enabled flag; the token is untouched.</summary>
+/// <summary>Body of <c>PUT admin/shares/{id}</c>. Replaces name, media types, limits and the enabled flag; the token is untouched.</summary>
 /// <param name="Name">The display name.</param>
-/// <param name="LibraryIds">The libraries the peer may see.</param>
+/// <param name="LibraryIds">Ignored: shares are by media type now.</param>
 /// <param name="MaxStreams">The concurrent stream limit.</param>
 /// <param name="MaxBitrate">The bitrate cap in bits per second, or <c>null</c> for no cap.</param>
 /// <param name="Enabled">Whether the share is active.</param>
-public sealed record UpdateShareRequest(string? Name, List<Guid>? LibraryIds, int? MaxStreams, int? MaxBitrate, bool? Enabled);
+/// <param name="UseDefaultTypes"><c>true</c> for the default sharing, <c>false</c> for <paramref name="Types"/>; with neither set the share keeps its media types.</param>
+/// <param name="Types">The media types to offer; setting it without <paramref name="UseDefaultTypes"/> makes the share custom.</param>
+public sealed record UpdateShareRequest(
+    string? Name,
+    List<Guid>? LibraryIds,
+    int? MaxStreams,
+    int? MaxBitrate,
+    bool? Enabled,
+    bool? UseDefaultTypes = null,
+    List<MediaType>? Types = null);
+
+/// <summary>Body of <c>PUT admin/sharing/default</c>.</summary>
+/// <param name="All"><c>true</c> to share every media type by default.</param>
+/// <param name="Types">The media types shared by default when <paramref name="All"/> is not <c>true</c>.</param>
+public sealed record DefaultSharingRequest(bool? All, List<MediaType>? Types);
+
+/// <summary>The media types a share offers by default.</summary>
+/// <param name="All">Every media type is shared by default.</param>
+/// <param name="Types">The media types shared by default, in enum order.</param>
+public sealed record DefaultSharingView(bool All, IReadOnlyList<MediaType> Types);
 
 /// <summary>Response of <c>POST admin/shares</c>. The only place the plaintext token is ever returned.</summary>
 /// <param name="Id">The share id.</param>
@@ -121,7 +149,18 @@ public sealed record AttachLibraryRequest(Guid LibraryId, string? Type);
 /// <param name="MaxStreams">The concurrent stream limit.</param>
 /// <param name="MaxBitrate">The bitrate cap in bits per second, or <c>null</c>.</param>
 /// <param name="ActiveStreams">The streams currently active.</param>
-public sealed record ShareView(Guid Id, string Name, bool Enabled, IReadOnlyList<Guid> LibraryIds, int MaxStreams, int? MaxBitrate, int ActiveStreams);
+/// <param name="UseDefaultTypes">The share follows the default sharing (a share saved before media types existed shows <c>false</c>).</param>
+/// <param name="Types">The media types the share offers now, in enum order.</param>
+public sealed record ShareView(
+    Guid Id,
+    string Name,
+    bool Enabled,
+    IReadOnlyList<Guid> LibraryIds,
+    int MaxStreams,
+    int? MaxBitrate,
+    int ActiveStreams,
+    bool UseDefaultTypes,
+    IReadOnlyList<MediaType> Types);
 
 /// <summary>A peer as shown on the admin page. Never contains the token.</summary>
 /// <param name="Id">The peer id.</param>
@@ -190,6 +229,12 @@ public sealed record StatusResponse(
 
     /// <summary>Gets the error of the last sync when it failed (for example an unusable placeholder folder).</summary>
     public string? SyncError { get; init; }
+
+    /// <summary>Gets the media types a share offers by default.</summary>
+    public DefaultSharingView DefaultSharing { get; init; } = new(true, MediaTypes.All);
+
+    /// <summary>Gets the media types this version can share and receive.</summary>
+    public IReadOnlyList<MediaType> SupportedTypes { get; init; } = MediaTypes.Supported;
 }
 
 /// <summary>A Jellyfin library, reduced to what the admin page needs.</summary>

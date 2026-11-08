@@ -73,25 +73,24 @@ public static class AdminRules
 
     /// <summary>Validates a share's fields, in the order the admin page expects the messages.</summary>
     /// <param name="rawName">The name as typed.</param>
-    /// <param name="libraryIds">The selected libraries.</param>
     /// <param name="maxStreams">The stream limit.</param>
     /// <param name="maxBitrate">The bitrate cap, or <c>null</c>.</param>
-    /// <param name="knownLibraries">Returns the ids of the libraries on this server (read only when needed).</param>
+    /// <param name="customTypes">The share offers its own media types, so <paramref name="types"/> must be valid.</param>
+    /// <param name="types">The chosen media types (read only when <paramref name="customTypes"/>).</param>
     /// <param name="name">The clean name.</param>
-    /// <param name="libs">The distinct selected libraries.</param>
+    /// <param name="chosen">The chosen media types, or none when <paramref name="customTypes"/> is <c>false</c>.</param>
     /// <returns>The first problem, or <c>null</c>.</returns>
     public static string? ValidateShare(
         string? rawName,
-        IReadOnlyList<Guid>? libraryIds,
         int? maxStreams,
         int? maxBitrate,
-        Func<IEnumerable<Guid>> knownLibraries,
+        bool customTypes,
+        IReadOnlyList<MediaType>? types,
         out string name,
-        out List<Guid> libs)
+        out List<MediaType> chosen)
     {
-        ArgumentNullException.ThrowIfNull(knownLibraries);
         name = string.Empty;
-        libs = new List<Guid>();
+        chosen = new List<MediaType>();
         var clean = CleanName(rawName);
         if (clean is null)
         {
@@ -108,21 +107,34 @@ public static class AdminRules
             return $"Max bitrate must be between 0 and {MaxBitrateBps / 1_000_000} Mbps, or empty for no limit.";
         }
 
-        var wanted = (libraryIds ?? []).Distinct().ToList();
-        if (wanted.Count == 0)
+        if (customTypes)
         {
-            return "Pick at least one library to share.";
-        }
-
-        var known = knownLibraries().ToHashSet();
-        if (wanted.Any(id => !known.Contains(id)))
-        {
-            return "One of the selected libraries does not exist.";
+            var problem = ValidateTypes(types, out chosen);
+            if (problem is not null)
+            {
+                return problem;
+            }
         }
 
         name = clean;
-        libs = wanted;
         return null;
+    }
+
+    /// <summary>Checks a chosen set of media types: at least one, each known, none twice.</summary>
+    /// <param name="types">The media types as sent.</param>
+    /// <param name="chosen">The media types, in the order sent.</param>
+    /// <returns>The problem, or <c>null</c>.</returns>
+    public static string? ValidateTypes(IReadOnlyList<MediaType>? types, out List<MediaType> chosen)
+    {
+        chosen = (types ?? []).ToList();
+        if (chosen.Count == 0)
+        {
+            return "Pick at least one media type to share.";
+        }
+
+        return chosen.Any(t => !Enum.IsDefined(t)) || chosen.Distinct().Count() != chosen.Count
+            ? "The media types are not valid. Pick each type at most once."
+            : null;
     }
 
     /// <summary>Compares two library folder paths the way Jellyfin stores them (slashes, trailing separator, OS case rules).</summary>
@@ -151,11 +163,22 @@ public static class AdminRules
     /// <summary>Describes a share (never its token or hash).</summary>
     /// <param name="share">The share.</param>
     /// <param name="activeStreams">The streams active now.</param>
+    /// <param name="cfg">The settings (the default sharing).</param>
+    /// <param name="libraries">The libraries on this server, for a share saved before media types existed.</param>
     /// <returns>The view.</returns>
-    public static ShareView ToView(PeerShare share, int activeStreams)
+    public static ShareView ToView(PeerShare share, int activeStreams, JellyShareSettings cfg, IReadOnlyList<LibraryInfo> libraries)
     {
         ArgumentNullException.ThrowIfNull(share);
-        return new ShareView(share.Id, share.Name, share.Enabled, share.LibraryIds.ToList(), share.MaxStreams, share.MaxBitrate, activeStreams);
+        return new ShareView(
+            share.Id,
+            share.Name,
+            share.Enabled,
+            share.LibraryIds.ToList(),
+            share.MaxStreams,
+            share.MaxBitrate,
+            activeStreams,
+            share.UseDefaultTypes == true,
+            MediaTypes.EffectiveShare(share, cfg, libraries).Order().ToList());
     }
 
     /// <summary>Describes a peer (never its token) with its sync state.</summary>
@@ -183,6 +206,15 @@ public static class AdminRules
             peer.MaxStreams,
             peer.LimitAction,
             peer.Kind == PeerKind.Account && state?.LastError?.StartsWith(AccountPeerInfo.SignInFailedPrefix, StringComparison.Ordinal) == true);
+    }
+
+    /// <summary>Describes the media types a share offers by default.</summary>
+    /// <param name="cfg">The settings.</param>
+    /// <returns>The view.</returns>
+    public static DefaultSharingView DefaultSharing(JellyShareSettings cfg)
+    {
+        ArgumentNullException.ThrowIfNull(cfg);
+        return new DefaultSharingView(cfg.DefaultShareTypes is null, MediaTypes.DefaultShare(cfg).Order().ToList());
     }
 
     /// <summary>Orders peers by priority, then by their position in the settings.</summary>

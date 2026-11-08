@@ -8,6 +8,7 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
+using ShareMediaType = JellyShare.Domain.Enums.MediaType;
 
 namespace JellyShare.Jellyfin.Adapters;
 
@@ -29,17 +30,17 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
     }
 
     /// <inheritdoc />
-    public IEnumerable<LocalItem> GetItems(IReadOnlyCollection<Guid> libraryIds)
+    public IEnumerable<LocalItem> GetItems(IReadOnlySet<ShareMediaType> types)
     {
-        if (libraryIds.Count == 0)
+        var kinds = Kinds(types);
+        if (kinds.Length == 0)
         {
             return Array.Empty<LocalItem>();
         }
 
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
-            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
-            AncestorIds = libraryIds.ToArray(),
+            IncludeItemTypes = kinds,
             IsVirtualItem = false,
             Recursive = true,
         });
@@ -48,9 +49,10 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
     }
 
     /// <inheritdoc />
-    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds)
+    public IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlySet<ShareMediaType> types)
     {
-        if (libraryIds.Count == 0 || itemId == Guid.Empty)
+        var kinds = Kinds(types);
+        if (kinds.Length == 0 || itemId == Guid.Empty)
         {
             return Array.Empty<LocalItem>();
         }
@@ -64,7 +66,7 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
                 ids = new[] { itemId };
                 break;
             case Series:
-                // The series' own episodes; library membership is checked below, like for a single item.
+                // The series' own episodes; the media type is checked below, like for a single item.
                 ids = _libraryManager.GetItemIds(new InternalItemsQuery
                 {
                     IncludeItemTypes = new[] { BaseItemKind.Episode },
@@ -85,12 +87,27 @@ public sealed class JellyfinLocalItemSource : ILocalItemSource
         var inShare = _libraryManager.GetItemList(new InternalItemsQuery
         {
             ItemIds = ids,
-            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
-            AncestorIds = libraryIds.ToArray(),
+            IncludeItemTypes = kinds,
             IsVirtualItem = false,
             Recursive = true,
         });
         return ToLocalItems(inShare);
+    }
+
+    private static BaseItemKind[] Kinds(IReadOnlySet<ShareMediaType> types)
+    {
+        var kinds = new List<BaseItemKind>();
+        if (types.Contains(ShareMediaType.Movies))
+        {
+            kinds.Add(BaseItemKind.Movie);
+        }
+
+        if (types.Contains(ShareMediaType.Shows))
+        {
+            kinds.Add(BaseItemKind.Episode);
+        }
+
+        return kinds.ToArray();
     }
 
     private List<LocalItem> ToLocalItems(IReadOnlyList<BaseItem> items)

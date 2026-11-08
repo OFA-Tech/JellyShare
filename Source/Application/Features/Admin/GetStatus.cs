@@ -5,6 +5,7 @@ using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Admin;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Requests.Admin;
 using JellyShare.Domain.Results;
@@ -51,7 +52,7 @@ public sealed class GetStatusQueryHandler : IQueryHandler<GetStatusQuery, Status
         var libraries = _libraries.List();
         var states = _consumerIndex.PeerStates();
 
-        var shares = cfg.Shares.Select(s => AdminRules.ToView(s, _limiter.Active(s.Id))).ToList();
+        var shares = cfg.Shares.Select(s => AdminRules.ToView(s, _limiter.Active(s.Id), cfg, libraries)).ToList();
         var peers = AdminRules.ByPriority(cfg.Peers).Select(p => AdminRules.ToView(p, states)).ToList();
 
         return Task.FromResult(Result.Success(new StatusResponse(
@@ -67,6 +68,8 @@ public sealed class GetStatusQueryHandler : IQueryHandler<GetStatusQuery, Status
         {
             SyncRunning = _sync.IsRunning,
             SyncError = _sync.LastError,
+            DefaultSharing = AdminRules.DefaultSharing(cfg),
+            SupportedTypes = MediaTypes.Supported,
         }));
     }
 }

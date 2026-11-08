@@ -84,15 +84,16 @@ public class FederationController : JellyShareControllerBase
     }
 
     /// <summary>Gets the catalog the calling peer may see.</summary>
+    /// <param name="types">Comma-separated media types the peer wants; absent means movies and shows.</param>
     /// <param name="ct">The cancellation token.</param>
     /// <returns>The catalog, 304 when <c>If-None-Match</c> matches, or 401.</returns>
     [HttpGet("catalog")]
     [AllowAnonymous]
     [Produces("application/json")]
     [SuppressMessage("Minor Code Smell", "S6932:Use model binding instead of accessing the raw request data", Justification = RawHeaders)]
-    public async Task<IActionResult> Catalog(CancellationToken ct = default)
+    public async Task<IActionResult> Catalog([FromQuery] string? types = null, CancellationToken ct = default)
     {
-        var query = new GetCatalogQuery(Request.Headers[TokenHeader].ToString(), Request.Headers.IfNoneMatch.ToArray());
+        var query = new GetCatalogQuery(Request.Headers[TokenHeader].ToString(), Request.Headers.IfNoneMatch.ToArray(), types);
         var result = await Sender.Send(query, ct).ConfigureAwait(false);
         if (result.IsFailure)
         {

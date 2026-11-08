@@ -42,7 +42,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         await File.WriteAllBytesAsync(file, Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray());
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { _lib } });
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, UseDefaultTypes = true });
 
         var source = new FakeSource();
         source.Items.Add((_lib, new LocalItem(_movieId, "Movie", file, null, () => throw new InvalidOperationException())));
@@ -62,7 +62,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         builder.Services.AddSingleton(new StreamLimiter(TimeProvider.System));
         builder.Services.AddSingleton<ILocalItemSource>(source);
         builder.Services.AddSingleton(FakeCapped.Create());
-        builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, _ => true));
+        builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, new FakeLibraries(), _ => true));
         builder.Services.AddDispatcherSetup();
         _app = builder.Build();
         _app.MapControllers();

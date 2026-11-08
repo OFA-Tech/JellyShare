@@ -29,6 +29,7 @@ internal abstract class SnapshotSettings : ISettingsProvider
         Settings.PresenceSweepSeconds = saved.PresenceSweepSeconds;
         Settings.MaxConcurrentTranscodes = saved.MaxConcurrentTranscodes;
         Settings.RelayBaseOverride = saved.RelayBaseOverride;
+        Settings.DefaultShareTypes = saved.DefaultShareTypes;
     }
 
     private static JellyShareSettings Snapshot(JellyShareSettings source) => new()
@@ -41,5 +42,6 @@ internal abstract class SnapshotSettings : ISettingsProvider
         PresenceSweepSeconds = source.PresenceSweepSeconds,
         MaxConcurrentTranscodes = source.MaxConcurrentTranscodes,
         RelayBaseOverride = source.RelayBaseOverride,
+        DefaultShareTypes = source.DefaultShareTypes,
     };
 }

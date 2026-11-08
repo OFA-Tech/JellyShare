@@ -95,6 +95,14 @@ public sealed class MediaTypesTests
     public void ParseOrLegacy_IgnoresUnknownNames()
         => MediaTypes.ParseOrLegacy("Music,Bogus").ShouldBe(new[] { MediaType.Music });
 
+    [Theory]
+    [InlineData("1")]
+    [InlineData("0,1,2")]
+    [InlineData("99")]
+    [InlineData("-1")]
+    public void ParseOrLegacy_IgnoresNumbers(string value)
+        => MediaTypes.ParseOrLegacy(value).ShouldBeEmpty();
+
     [Fact]
     public void Format_RoundTripsThroughParse()
     {

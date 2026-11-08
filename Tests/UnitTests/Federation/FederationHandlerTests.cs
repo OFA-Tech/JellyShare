@@ -25,14 +25,14 @@ public sealed class FederationHandlerTests
     {
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, Enabled = true, LibraryIds = [_lib] });
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, Enabled = true, UseDefaultTypes = true });
         _source.Items.Add((_lib, new LocalItem(_movieId, "Movie", "/media/A.mkv", null, () =>
         {
             _built++;
             return TestItems.Movie("A", tmdb: "1", id: _movieId.ToString("N"));
         })
         { DateModified = new DateTime(2026, 1, 2, 3, 4, 5, DateTimeKind.Utc) }));
-        _handler = new GetCatalogQueryHandler(_tokens, _config, new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true));
+        _handler = new GetCatalogQueryHandler(_tokens, _config, new CatalogBuilder(_source, new FakeIdentity(), _config, new FakeLibraries(), _ => true));
     }
 
     [Fact]

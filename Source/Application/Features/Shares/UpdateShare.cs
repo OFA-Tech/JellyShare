@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace JellyShare.Application.Features.Shares;
 
 /// <summary>
-/// Replaces a share's name, libraries, limits and enabled flag, keeping its token. A missing share is reported before
+/// Replaces a share's name, media types, limits and enabled flag, keeping its token. A missing share is reported before
 /// the fields are validated, so this has no validator.
 /// </summary>
 public sealed class UpdateShareCommandHandler : ICommandHandler<UpdateShareCommand, ShareView>
@@ -61,14 +61,16 @@ public sealed class UpdateShareCommandHandler : ICommandHandler<UpdateShareComma
                 return ShareErrors.NotFound;
             }
 
+            var changesTypes = request.UseDefaultTypes is not null || request.Types is not null;
+            var custom = request.UseDefaultTypes == false || (request.UseDefaultTypes is null && request.Types is not null);
             var problem = AdminRules.ValidateShare(
                 request.Name,
-                request.LibraryIds,
                 request.MaxStreams,
                 request.MaxBitrate,
-                () => _libraries.List().Select(l => l.Id),
+                custom,
+                request.Types,
                 out var name,
-                out var libs);
+                out var chosen);
             if (problem is not null)
             {
                 return Error.Validation("Share.Invalid", problem);
@@ -81,16 +83,16 @@ public sealed class UpdateShareCommandHandler : ICommandHandler<UpdateShareComma
                 Name = name,
                 TokenHash = current.TokenHash,
                 Enabled = request.Enabled ?? current.Enabled,
-                LibraryIds = libs,
+                LibraryIds = current.LibraryIds,
                 MaxStreams = request.MaxStreams!.Value,
                 MaxBitrate = request.MaxBitrate,
-                UseDefaultTypes = current.UseDefaultTypes,
-                Types = current.Types,
+                UseDefaultTypes = changesTypes ? !custom : current.UseDefaultTypes,
+                Types = changesTypes ? chosen : current.Types,
             };
             cfg.Shares = cfg.Shares.Select(s => s.Id == request.Id ? share : s).ToList();
             _store.Save(cfg);
             _logger.LogInformation("JellyShare admin: updated share {ShareId} (enabled={Enabled})", share.Id, share.Enabled);
-            return Result.Success(AdminRules.ToView(share, _limiter.Active(share.Id)));
+            return Result.Success(AdminRules.ToView(share, _limiter.Active(share.Id), cfg, _libraries.List()));
         }
     }
 }

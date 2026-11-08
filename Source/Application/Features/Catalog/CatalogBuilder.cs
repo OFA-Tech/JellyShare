@@ -3,9 +3,11 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using JellyShare.Application.Features.Placeholders;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Platform;
+using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
@@ -23,47 +25,59 @@ public class CatalogBuilder
     private readonly ILocalItemSource _source;
     private readonly IServerIdentity _identity;
     private readonly ISettingsProvider _config;
+    private readonly IAdminLibraries _libraries;
     private readonly Func<string, bool> _fileExists;
-    private readonly ConcurrentDictionary<Guid, CatalogResponse> _cache = new();
+    private readonly ConcurrentDictionary<(Guid Share, string Types), CatalogResponse> _cache = new();
 
     /// <summary>Initializes a new instance of the <see cref="CatalogBuilder"/> class.</summary>
     /// <param name="source">The local item source.</param>
     /// <param name="identity">The local server identity.</param>
     /// <param name="config">The configuration provider.</param>
+    /// <param name="libraries">The libraries on this server, to resolve a share saved before media types existed.</param>
     /// <param name="fileExists">Existence check for item files; defaults to <see cref="File.Exists(string)"/>.</param>
     public CatalogBuilder(
         ILocalItemSource source,
         IServerIdentity identity,
         ISettingsProvider config,
+        IAdminLibraries libraries,
         Func<string, bool>? fileExists = null)
     {
         _source = source;
         _identity = identity;
         _config = config;
+        _libraries = libraries;
         _fileExists = fileExists ?? File.Exists;
     }
 
     /// <summary>Builds the catalog for a share (served from the cache when nothing changed).</summary>
     /// <param name="share">The share.</param>
+    /// <param name="requested">The media types the peer asks for.</param>
     /// <returns>The catalog response including its ETag.</returns>
-    public CatalogResponse Build(PeerShare share) => Plan(share).Build();
+    public CatalogResponse Build(PeerShare share, IReadOnlySet<MediaType> requested) => Plan(share, requested).Build();
 
     /// <summary>
-    /// Lists the share's items and computes the catalog ETag from their ids and modification times only, so a
-    /// conditional request that ends in 304 never builds a catalog entry (no media stream queries). The returned
-    /// <see cref="CatalogPlan.Build"/> reuses the catalog last built for the share when its ETag is the same.
+    /// Lists the share's items and computes the catalog ETag from the served media types and the items' ids and
+    /// modification times only, so a conditional request that ends in 304 never builds a catalog entry (no media
+    /// stream queries). The returned <see cref="CatalogPlan.Build"/> reuses the catalog last built for the share and
+    /// types when its ETag is the same.
     /// </summary>
     /// <param name="share">The share.</param>
+    /// <param name="requested">The media types the peer asks for; the catalog serves those the share offers and this server can read.</param>
     /// <returns>The ETag and a builder for the body.</returns>
-    public CatalogPlan Plan(PeerShare share)
+    public CatalogPlan Plan(PeerShare share, IReadOnlySet<MediaType> requested)
     {
         ArgumentNullException.ThrowIfNull(share);
-        var included = Included(share).ToList();
+        ArgumentNullException.ThrowIfNull(requested);
+        var served = Offered(share);
+        served.IntersectWith(requested);
+        var servedKey = MediaTypes.Format(served);
+        var cfg = _config.Current;
+        var included = served.Count == 0 ? new List<LocalItem>() : _source.GetItems(served).Where(l => IsServable(l, cfg)).ToList();
         included.Sort((a, b) => string.CompareOrdinal(a.Id.ToString("N"), b.Id.ToString("N")));
-        var etag = ComputeEtag(included);
+        var etag = ComputeEtag(servedKey, included);
         return new CatalogPlan(etag, () =>
         {
-            if (_cache.TryGetValue(share.Id, out var cached) && cached.Etag == etag)
+            if (_cache.TryGetValue((share.Id, servedKey), out var cached) && cached.Etag == etag)
             {
                 return cached;
             }
@@ -71,15 +85,15 @@ public class CatalogBuilder
             var items = included.Select(l => l.CreateItem()).ToList();
             items.Sort((a, b) => string.CompareOrdinal(a.Id, b.Id));
             var built = new CatalogResponse(ProtocolInfo.Version, _identity.ServerName, etag, items);
-            _cache[share.Id] = built;
+            _cache[(share.Id, servedKey)] = built;
             return built;
         });
     }
 
     /// <summary>
     /// Checks whether an item (or a series owning an episode) is part of the share's catalog, by looking up only that
-    /// item (or the series' episodes) in the shared libraries: same rules as the catalog (not a placeholder or
-    /// <c>.strm</c>, file exists), without reading the library.
+    /// item (or the series' episodes) among the media types the share offers: same rules as the catalog (not a
+    /// placeholder or <c>.strm</c>, file exists), without reading the library.
     /// </summary>
     /// <param name="share">The share.</param>
     /// <param name="itemId">The item or series id.</param>
@@ -87,14 +101,23 @@ public class CatalogBuilder
     public bool IsExposed(PeerShare share, Guid itemId)
     {
         ArgumentNullException.ThrowIfNull(share);
-        if (share.LibraryIds.Count == 0 || itemId == Guid.Empty)
+        var offered = Offered(share);
+        if (offered.Count == 0 || itemId == Guid.Empty)
         {
             return false;
         }
 
         var cfg = _config.Current;
-        return _source.GetExposureCandidates(itemId, share.LibraryIds.ToArray())
+        return _source.GetExposureCandidates(itemId, offered)
             .Any(local => (local.Id == itemId || local.SeriesId == itemId) && IsServable(local, cfg));
+    }
+
+    private HashSet<MediaType> Offered(PeerShare share)
+    {
+        var libraries = share.UseDefaultTypes is null ? _libraries.List() : Array.Empty<LibraryInfo>();
+        var offered = MediaTypes.EffectiveShare(share, _config.Current, libraries).ToHashSet();
+        offered.IntersectWith(MediaTypes.Supported);
+        return offered;
     }
 
     private bool IsServable(LocalItem local, JellyShareSettings cfg)
@@ -106,23 +129,9 @@ public class CatalogBuilder
             && _fileExists(path);
     }
 
-    private IEnumerable<LocalItem> Included(PeerShare share)
+    private static string ComputeEtag(string servedTypes, IReadOnlyList<LocalItem> items)
     {
-        if (share.LibraryIds.Count == 0)
-        {
-            yield break;
-        }
-
-        var cfg = _config.Current;
-        foreach (var local in _source.GetItems(share.LibraryIds.ToArray()).Where(l => IsServable(l, cfg)))
-        {
-            yield return local;
-        }
-    }
-
-    private static string ComputeEtag(IReadOnlyList<LocalItem> items)
-    {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(servedTypes).Append('\n');
         foreach (var item in items)
         {
             sb.Append(item.Id.ToString("N")).Append('|').Append(item.DateModified.ToString("O", CultureInfo.InvariantCulture)).Append('\n');

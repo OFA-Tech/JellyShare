@@ -1,3 +1,4 @@
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Library;
 
 namespace JellyShare.Domain.Interfaces.Library;
@@ -5,19 +6,19 @@ namespace JellyShare.Domain.Interfaces.Library;
 /// <summary>Reads local library content, abstracted so the catalog logic stays unit-testable.</summary>
 public interface ILocalItemSource
 {
-    /// <summary>Lists the movies and episodes (recursively) under the given libraries.</summary>
-    /// <param name="libraryIds">The ids of the libraries to read.</param>
+    /// <summary>Lists the items of the given media types in every library.</summary>
+    /// <param name="types">The media types to read; types this server cannot read are ignored.</param>
     /// <returns>The local items.</returns>
-    IEnumerable<LocalItem> GetItems(IReadOnlyCollection<Guid> libraryIds);
+    IEnumerable<LocalItem> GetItems(IReadOnlySet<MediaType> types);
 
     /// <summary>
-    /// Gets what decides whether one id is exposed, without reading the whole library: the movie or episode with that
-    /// id, or the episodes of the series with that id, as far as they are in the given libraries.
+    /// Gets what decides whether one id is exposed, without reading the whole library: the item with that id, or the
+    /// episodes of the series with that id, as far as they are of the given media types.
     /// </summary>
     /// <param name="itemId">The item or series id.</param>
-    /// <param name="libraryIds">The shared libraries.</param>
+    /// <param name="types">The shared media types.</param>
     /// <returns>The candidates (not yet filtered for placeholders or missing files).</returns>
-    IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlyCollection<Guid> libraryIds);
+    IEnumerable<LocalItem> GetExposureCandidates(Guid itemId, IReadOnlySet<MediaType> types);
 
     /// <summary>Gets the local image file of an item as Jellyfin recorded it.</summary>
     /// <param name="itemId">The item (or series) id.</param>
