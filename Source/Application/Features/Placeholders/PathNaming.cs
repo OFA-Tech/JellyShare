@@ -18,6 +18,7 @@ public sealed record PlaceholderFile(string RelativeDir, string BaseName, string
 public static class PathNaming
 {
     private const int MaxLength = 120;
+    private const int MaxBookDepth = 6;
 
     private static readonly HashSet<string> _reserved = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -163,8 +164,10 @@ public static class PathNaming
             return new PlaceholderFile(artist + "/" + album, baseName, "Audio");
         }
 
+        // The folder path comes from the peer: keep only its first MaxBookDepth segments so it cannot nest without end.
         var folders = (item.FolderPath ?? string.Empty)
             .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(MaxBookDepth)
             .Select(Safe)
             .ToList();
         return new PlaceholderFile(folders.Count == 0 ? Safe(item.Name) : string.Join('/', folders), baseName, "AudioBook");

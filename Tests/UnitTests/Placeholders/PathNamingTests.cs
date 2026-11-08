@@ -184,6 +184,14 @@ public sealed class PathNamingTests
         PathNaming.ForEntry(Entry(TestItems.Book("Lone Book", folderPath: null))).RelativeDir.ShouldBe("Lone Book");
     }
 
+    [Fact]
+    public void PathNaming_Audiobook_DeepFolder_KeepsFirstSixSegments()
+        => PathNaming.ForEntry(Entry(TestItems.Book("Part", folderPath: "a/b/c/d/e/f/g/h"))).RelativeDir.ShouldBe("a/b/c/d/e/f");
+
+    [Fact]
+    public void PathNaming_SymbolOnlyAlbumAndArtist_KeepTheirNames()
+        => PathNaming.ForEntry(Entry(TestItems.Track("One", albumArtist: "!!!", album: "÷"))).RelativeDir.ShouldBe("!!!/÷");
+
     internal static MergedEntry Entry(CatalogItem item)
     {
         var keys = MediaKey.For(item);
