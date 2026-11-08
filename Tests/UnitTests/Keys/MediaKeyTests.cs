@@ -115,6 +115,89 @@ public sealed class MediaKeyTests
         MediaKey.For(Episode("Show", new Dictionary<string, string>(), 1, 1)).ShouldBeEmpty();
     }
 
+    private const string Mbid = "b9f3a1c2-5d4e-4f6a-8b7c-0123456789ab";
+
+    [Fact]
+    public void NormalizeId_AcceptsMusicBrainzUuid()
+    {
+        MediaKey.NormalizeId(" " + Mbid.ToUpperInvariant() + " ").ShouldBe(Mbid);
+        MediaKey.NormalizeId(new string('a', 36)).ShouldBe(new string('a', 36));
+    }
+
+    [Theory]
+    [InlineData("b9f3a1c2-5d4e-4f6a-8b7c-0123456789ag")]
+    [InlineData("b9f3a1c2-5d4e-4f6a-8b7c-0123456789abc")]
+    [InlineData("b9f3a1c2_5d4e_4f6a_8b7c_0123456789ab")]
+    public void NormalizeId_RejectsOtherLongValues(string bad)
+        => MediaKey.NormalizeId(bad).ShouldBeNull();
+
+    [Fact]
+    public void For_Audio_WithMbid_HasMbAndNameKeys()
+    {
+        var keys = MediaKey.For(Track("Hells Bells", mbid: Mbid));
+
+        keys.Count.ShouldBe(2);
+        keys[0].ShouldBe("track:mb:" + Mbid);
+        keys[1].ShouldStartWith("track:name:");
+        keys[1].Length.ShouldBe("track:name:".Length + 16);
+    }
+
+    [Fact]
+    public void For_Audio_WithoutMbid_HasOnlyNameKey()
+        => MediaKey.For(Track("Hells Bells")).ShouldHaveSingleItem().ShouldStartWith("track:name:");
+
+    [Fact]
+    public void For_Audio_FallsBackToReleaseTrackId()
+    {
+        var item = Track("Hells Bells") with { ProviderIds = new() { ["MusicBrainzTrack"] = Mbid } };
+
+        MediaKey.For(item).ShouldContain("track:mb:" + Mbid);
+    }
+
+    [Fact]
+    public void For_Audio_NameKeyIgnoresCaseAndPunctuation()
+    {
+        var a = MediaKey.For(Track("Hells Bells", albumArtist: "AC/DC"));
+        var b = MediaKey.For(Track("hells  bells!", albumArtist: "ac dc"));
+
+        a.ShouldBe(b);
+    }
+
+    [Fact]
+    public void For_Audio_NameKeyIgnoresDiacritics()
+        => MediaKey.For(Track("Déjà Vu")).ShouldBe(MediaKey.For(Track("deja vu")));
+
+    [Fact]
+    public void For_Audio_DifferentTrackNumber_DifferentKey()
+        => MediaKey.For(Track("Intro", track: 1)).ShouldNotBe(MediaKey.For(Track("Intro", track: 2)));
+
+    [Fact]
+    public void For_Audio_WithoutTitle_HasNoKey()
+        => MediaKey.For(Track("  ", mbid: Mbid)).ShouldBeEmpty();
+
+    [Fact]
+    public void For_Audio_NameKey_IsFirst16HexOfSha256OfNormalizedFields()
+    {
+        var expected = Convert.ToHexStringLower(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("ac dc|back in black|1|1|hells bells")))[..16];
+
+        MediaKey.For(Track("Hells Bells")).ShouldBe(["track:name:" + expected]);
+    }
+
+    [Fact]
+    public void For_AudioBook_KeyFromFolderAndName()
+    {
+        var keys = MediaKey.For(Book("Part 1"));
+
+        keys.ShouldHaveSingleItem().ShouldStartWith("book:name:");
+        keys.ShouldBe(MediaKey.For(Book("part 1", folderPath: "author x/BOOK y")));
+        keys.ShouldNotBe(MediaKey.For(Book("Part 1", folderPath: "Author X/Other")));
+    }
+
+    [Fact]
+    public void For_AudioBook_WithoutName_HasNoKey()
+        => MediaKey.For(Book("")).ShouldBeEmpty();
+
     [Fact]
     public void OtherTypes_AreUnmatched()
     {

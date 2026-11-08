@@ -1,5 +1,6 @@
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Enums;
+using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Relay;
 using JellyShare.UnitTests.Fakes;
@@ -59,6 +60,23 @@ public sealed class StreamLimitGateTests
         _sessions.Touch("movie:tmdb:1", _a);
 
         StreamLimitGate.HasRoom(peer, "movie:tmdb:2", _sessions).ShouldBeTrue();
+    }
+
+    // The relay claims slots under TitleKey.For(entry): two tracks of one album are one stream.
+    [Fact]
+    public void Relay_AudioOfSameAlbum_OneStreamOnAccountPeer()
+    {
+        var peer = Account(_a, "alice");
+        var one = MergeIndex.Build(new[] { (_a, TestItems.Track("Hells Bells", track: 1)) }).Entries.Single();
+        var two = MergeIndex.Build(new[] { (_a, TestItems.Track("Shoot to Thrill", track: 2)) }).Entries.Single();
+
+        StreamLimitGate.TryClaim(peer, TitleKey.For(one), _sessions, out var firstCreated).ShouldBeTrue();
+        StreamLimitGate.TryClaim(peer, TitleKey.For(two), _sessions, out var secondCreated).ShouldBeTrue();
+
+        firstCreated.ShouldBeTrue();
+        secondCreated.ShouldBeFalse();
+        _sessions.ActiveTitles(_a).ShouldHaveSingleItem();
+        StreamLimitGate.TryClaim(peer, "movie:tmdb:1", _sessions, out _).ShouldBeFalse();
     }
 
     [Fact]

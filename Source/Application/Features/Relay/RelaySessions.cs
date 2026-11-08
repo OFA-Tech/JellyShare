@@ -23,7 +23,7 @@ public sealed class RelaySessions
     }
 
     /// <summary>Gets the peer serving an active playback of a title.</summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <returns>The peer id, or <c>null</c> when no playback is active.</returns>
     public Guid? ActivePeer(string key)
     {
@@ -36,7 +36,7 @@ public sealed class RelaySessions
     }
 
     /// <summary>Records that a peer answered a relay request for a title.</summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="peerId">The serving peer.</param>
     /// <returns><c>true</c> when this starts a new playback (none active, or another peer took over).</returns>
     public bool Touch(string key, Guid peerId)
@@ -53,7 +53,7 @@ public sealed class RelaySessions
     /// Claims a slot on a peer for a title, atomically with the limit check: two titles asked at once for a peer with
     /// one slot cannot both get it. The title counts as active on the peer from now on (start = now).
     /// </summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="peerId">The peer to claim on.</param>
     /// <param name="max">The peer's stream limit.</param>
     /// <param name="created">
@@ -84,7 +84,7 @@ public sealed class RelaySessions
     }
 
     /// <summary>Undoes a claim made by <see cref="TryReserve"/>, unless the title has meanwhile moved to another peer or a body copy holds a lease on it.</summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="peerId">The peer the claim was made on.</param>
     public void CancelReservation(string key, Guid peerId)
     {
@@ -121,7 +121,7 @@ public sealed class RelaySessions
     /// lease is open the playback never expires (the grace counts from when the last lease ends), and the returned
     /// token is cancelled when the playback is released, so the copy stops pulling from the peer.
     /// </summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="peerId">The serving peer.</param>
     /// <returns>
     /// Whether this starts a new playback, the stop token, and the lease to dispose when the copy ends. A lease
@@ -140,7 +140,7 @@ public sealed class RelaySessions
     }
 
     /// <summary>Ends the playback of a title at once, freeing its peer slot and ending its relay body copies.</summary>
-    /// <param name="key">The canonical key.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     public void Release(string key)
     {
         CancellationTokenSource? stop;

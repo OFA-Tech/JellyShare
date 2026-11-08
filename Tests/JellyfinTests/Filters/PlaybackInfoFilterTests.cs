@@ -359,6 +359,41 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
         _sessions.ActiveTitles(TestItems.PeerA).ShouldBe(new[] { OtherKey });
     }
 
+    private static readonly Guid _track = Guid.Parse("44444444-0000-0000-0000-000000000004");
+
+    private string AddTrack()
+    {
+        var item = TestItems.Track("Hells Bells", id: "alice-track");
+        var entry = MergeIndex.Build(new[] { (TestItems.PeerA, item) }).Entries.Single();
+        _index.Entries[entry.CanonicalKey] = entry;
+        _placeholders.Items[_track] = new PlaceholderMedia(entry.CanonicalKey, 1_312_543, TitleKey.For(entry));
+        return TitleKey.For(entry);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_AudioPlaceholder_NoForcedTranscode()
+    {
+        AddTrack();
+
+        var info = await Post(_track, Body(maxStreamingBitrate: 1_000_000));
+
+        var source = info.MediaSources.ShouldHaveSingleItem();
+        source.SupportsDirectStream.ShouldBeTrue();
+        source.TranscodingUrl.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_StopOldest_StopsByTitleKey()
+    {
+        var album = AddTrack();
+        _config.Settings.Peers[0].LimitAction = StreamLimitAction.StopOldest;
+        _sessions.Touch(album, TestItems.PeerA);
+
+        await Post(Placeholder, Body());
+
+        _stopper.Calls.ShouldHaveSingleItem().Key.ShouldBe(album);
+    }
+
     [Fact]
     public async Task PlaybackInfo_NotPlaceholder_Unaffected()
     {
@@ -388,9 +423,9 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         public List<(string Key, string Message)> Calls { get; } = new();
 
-        public Task<int> StopTitleAsync(string canonicalKey, string message, CancellationToken ct)
+        public Task<int> StopTitleAsync(string titleKey, string message, CancellationToken ct)
         {
-            Calls.Add((canonicalKey, message));
+            Calls.Add((titleKey, message));
             return Fail ? Task.FromException<int>(new InvalidOperationException("client gone")) : Task.FromResult(0);
         }
     }
@@ -507,15 +542,19 @@ public sealed class FakeMediaInfoController : ControllerBase
     private static BaseItemDto Dto(Guid itemId)
         => new() { Id = itemId, MediaSources = new[] { Source(itemId, true, true, null) } };
 
+    // Items not in _paths (extra placeholders a test registers) look like the relay placeholder.
     private static MediaSourceInfo Source(Guid itemId, bool directPlay, bool directStream, string? transcodingUrl)
-        => new()
+    {
+        var path = _paths.GetValueOrDefault(itemId, PlaybackInfoFilterTests.RelayUrl);
+        return new()
         {
             Id = itemId.ToString("N"),
-            Path = _paths[itemId],
-            Protocol = _paths[itemId].StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
+            Path = path,
+            Protocol = path.StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
             SupportsDirectPlay = directPlay,
             SupportsDirectStream = directStream,
             SupportsTranscoding = true,
             TranscodingUrl = transcodingUrl,
         };
+    }
 }

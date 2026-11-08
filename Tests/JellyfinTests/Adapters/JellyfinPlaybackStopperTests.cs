@@ -13,6 +13,8 @@ public sealed class JellyfinPlaybackStopperTests
 
     private static readonly Guid _placeholder = Guid.Parse("11111111-0000-0000-0000-000000000001");
     private static readonly Guid _otherPlaceholder = Guid.Parse("11111111-0000-0000-0000-000000000002");
+    private static readonly Guid _trackOne = Guid.Parse("11111111-0000-0000-0000-000000000011");
+    private static readonly Guid _trackTwo = Guid.Parse("11111111-0000-0000-0000-000000000012");
     private static readonly Guid _local = Guid.Parse("22222222-0000-0000-0000-000000000002");
 
     private static SessionInfo Session(ISessionManager manager, string id, Guid? playing)
@@ -51,12 +53,33 @@ public sealed class JellyfinPlaybackStopperTests
         });
     }
 
+    [Fact]
+    public async Task StopTitle_Album_StopsEveryTrackOfIt()
+    {
+        var manager = SessionManagerProxy.Create();
+        var proxy = (SessionManagerProxy)(object)manager;
+        proxy.Sessions.AddRange(new[]
+        {
+            Session(manager, "s1", _trackOne),
+            Session(manager, "s2", _trackTwo),
+            Session(manager, "s3", _otherPlaceholder),
+        });
+        var stopper = new JellyfinPlaybackStopper(manager, new Lookup(), NullLogger<JellyfinPlaybackStopper>.Instance);
+
+        var stopped = await stopper.StopTitleAsync("album:name:abc", "Stopped", CancellationToken.None);
+
+        stopped.ShouldBe(2);
+        proxy.Calls.Where(c => c.StartsWith("stop:", StringComparison.Ordinal)).ShouldBe(new[] { "stop:(null)->s1:Stop", "stop:(null)->s2:Stop" });
+    }
+
     private sealed class Lookup : IPlaceholderLookup
     {
         private readonly Dictionary<Guid, PlaceholderMedia> _items = new()
         {
             [_placeholder] = new PlaceholderMedia(Key, null),
             [_otherPlaceholder] = new PlaceholderMedia("movie:tmdb:2", null),
+            [_trackOne] = new PlaceholderMedia("track:name:1", null, "album:name:abc"),
+            [_trackTwo] = new PlaceholderMedia("track:name:2", null, "album:name:abc"),
         };
 
         public PlaceholderMedia? Find(Guid itemId) => _items.GetValueOrDefault(itemId);

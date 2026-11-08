@@ -5,7 +5,12 @@ namespace JellyShare.Jellyfin.Adapters;
 /// <summary>A library item that is a JellyShare relay placeholder.</summary>
 /// <param name="CanonicalKey">The merged-index key from its <c>.strm</c> URL.</param>
 /// <param name="SourceBitrate">The source bitrate in bit/s (stored media info, else the peer's catalog), if known.</param>
-internal sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate);
+/// <param name="TitleKey">The key its stream is counted under (the album for a track); the canonical key when <c>null</c>.</param>
+internal sealed record PlaceholderMedia(string CanonicalKey, int? SourceBitrate, string? TitleKey = null)
+{
+    /// <summary>Gets the key its stream is counted under.</summary>
+    public string StreamKey => TitleKey ?? CanonicalKey;
+}
 
 /// <summary>Bitrate limits of a caller that Jellyfin applies besides the request values.</summary>
 /// <param name="RemoteLimit">

@@ -12,7 +12,7 @@ public static class StreamLimitGate
 {
     /// <summary>Tells whether a peer can serve a title now.</summary>
     /// <param name="peer">The peer.</param>
-    /// <param name="key">The canonical key of the title.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="sessions">The active playbacks.</param>
     /// <returns><c>true</c> for token peers, for the title already playing on the peer (seeks, range requests), or when a slot is free.</returns>
     public static bool HasRoom(RemotePeer peer, string key, RelaySessions sessions)
@@ -28,7 +28,7 @@ public static class StreamLimitGate
     /// Claims a slot for a title on a peer, atomically with the limit check. Token peers need no claim.
     /// </summary>
     /// <param name="peer">The peer.</param>
-    /// <param name="key">The canonical key of the title.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="sessions">The active playbacks.</param>
     /// <param name="created"><c>true</c> when this call took the slot; only then may the caller undo it (<see cref="RelaySessions.CancelReservation"/>).</param>
     /// <returns><c>true</c> when the peer may serve the title now.</returns>
@@ -42,7 +42,7 @@ public static class StreamLimitGate
 
     /// <summary>Decides what a new playback of a title needs, given the sources in play order.</summary>
     /// <param name="ordered">The sources, preferred first.</param>
-    /// <param name="key">The canonical key of the title.</param>
+    /// <param name="key">The title key (<c>TitleKey.For</c>).</param>
     /// <param name="sessions">The active playbacks.</param>
     /// <returns>
     /// <see cref="StreamDecisionKind.Play"/> when a source has room (or there are no sources); otherwise

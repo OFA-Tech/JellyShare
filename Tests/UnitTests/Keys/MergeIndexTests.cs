@@ -241,4 +241,64 @@ public sealed class MergeIndexTests
         var entry = index.Entries.ShouldHaveSingleItem();
         entry.Sources.Select(s => s.PeerId).ToArray().ShouldBe(new[] { PeerC, PeerA, PeerB });
     }
+
+    private const string Mbid = "b9f3a1c2-5d4e-4f6a-8b7c-0123456789ab";
+
+    [Fact]
+    public void MergeIndex_TrackFromTwoPeers_SameMbid_OneEntry()
+    {
+        var index = MergeIndex.Build(new[]
+        {
+            (PeerA, Track("Hells Bells", albumArtist: "AC/DC", mbid: Mbid)),
+            (PeerB, Track("Hells Bells", albumArtist: "ACDC", mbid: Mbid)),
+        });
+
+        var entry = index.Entries.ShouldHaveSingleItem();
+        entry.Sources.Count.ShouldBe(2);
+        entry.CanonicalKey.ShouldBe("track:mb:" + Mbid);
+        entry.Keys.Count(k => k.StartsWith("track:name:", StringComparison.Ordinal)).ShouldBe(2);
+        index.ConflictCount.ShouldBe(0);
+    }
+
+    [Fact]
+    public void MergeIndex_TrackFromTwoPeers_SameNameKey_NoMbid_OneEntryWithNameCanonical()
+    {
+        var index = MergeIndex.Build(new[]
+        {
+            (PeerA, Track("Hells Bells", albumArtist: "AC/DC")),
+            (PeerB, Track("hells bells", albumArtist: "ac dc")),
+        });
+
+        index.Entries.ShouldHaveSingleItem().CanonicalKey.ShouldStartWith("track:name:");
+    }
+
+    [Fact]
+    public void MergeIndex_TwoMbidsBridgedByOneNameKey_IsAConflict()
+    {
+        var index = MergeIndex.Build(new[]
+        {
+            (PeerA, Track("Hells Bells", mbid: Mbid)),
+            (PeerB, Track("Hells Bells", mbid: "c9f3a1c2-5d4e-4f6a-8b7c-0123456789ab")),
+        });
+
+        index.Entries.ShouldBeEmpty();
+        index.ConflictCount.ShouldBe(2);
+    }
+
+    [Fact]
+    public void MergeIndex_Movie_PrefersTmdbOverAudioKinds()
+    {
+        var index = MergeIndex.Build(new[] { (PeerA, Movie("S", tmdb: "1")), (PeerA, Track("T", mbid: Mbid)) });
+
+        index.Entries.Select(e => e.CanonicalKey).ShouldBe(new[] { "movie:tmdb:1", "track:mb:" + Mbid }, ignoreOrder: true);
+    }
+
+    [Fact]
+    public void MergeIndex_AudioBookFiles_AreSeparateEntries()
+    {
+        var index = MergeIndex.Build(new[] { (PeerA, Book("Part 1")), (PeerA, Book("Part 2")), (PeerB, Book("Part 1")) });
+
+        index.Entries.Count.ShouldBe(2);
+        index.Entries.ShouldAllBe(e => e.CanonicalKey.StartsWith("book:name:", StringComparison.Ordinal));
+    }
 }

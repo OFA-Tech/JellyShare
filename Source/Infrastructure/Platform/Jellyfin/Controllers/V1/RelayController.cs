@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
+using JellyShare.Domain.Keys;
 using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Models.Configuration;
@@ -102,7 +103,9 @@ public class RelayController : ControllerBase
             return NotFound(new ErrorResponse("unknown title"));
         }
 
-        var sources = PreferActive(entry.CanonicalKey, SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates()));
+        // Streams are counted per title (an album is one), not per canonical key.
+        var titleKey = TitleKey.For(entry);
+        var sources = PreferActive(titleKey, SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates()));
         var range = RelayRange.Forwardable(Request.Headers.Range.ToString());
         var aborted = HttpContext.RequestAborted;
         var isHead = HttpMethods.IsHead(Request.Method);
@@ -111,7 +114,7 @@ public class RelayController : ControllerBase
         foreach (var source in sources)
         {
             // The slot is taken before the request, so a second title asked meanwhile finds the peer full.
-            if (!StreamLimitGate.TryClaim(source.Peer, entry.CanonicalKey, _sessions, out var claimed))
+            if (!StreamLimitGate.TryClaim(source.Peer, titleKey, _sessions, out var claimed))
             {
                 (full ??= new()).Add(source.Peer);
                 continue;
@@ -126,19 +129,19 @@ public class RelayController : ControllerBase
             }
             catch (OperationCanceledException) when (aborted.IsCancellationRequested)
             {
-                Unclaim(claimed, entry.CanonicalKey, source.Peer);
+                Unclaim(claimed, titleKey, source.Peer);
                 return new EmptyResult();
             }
             catch (OperationCanceledException)
             {
-                Unclaim(claimed, entry.CanonicalKey, source.Peer);
+                Unclaim(claimed, titleKey, source.Peer);
                 LogTimedOut(source.Peer, entry.CanonicalKey);
                 continue;
             }
             catch (Exception ex) when (ex is HttpRequestException or InvalidOperationException)
             {
                 // PeerClient redacts the token from connection errors.
-                Unclaim(claimed, entry.CanonicalKey, source.Peer);
+                Unclaim(claimed, titleKey, source.Peer);
                 LogPeerFailed(source.Peer, entry.CanonicalKey, ex);
                 continue;
             }
@@ -148,7 +151,7 @@ public class RelayController : ControllerBase
                 var status = (int)response.StatusCode;
                 if (status != StatusCodes.Status200OK && status != StatusCodes.Status206PartialContent)
                 {
-                    Unclaim(claimed, entry.CanonicalKey, source.Peer);
+                    Unclaim(claimed, titleKey, source.Peer);
                     _logger.LogDebug("JellyShare relay: peer {Peer} answered {Status} for {Key}", source.Peer.Name, status, entry.CanonicalKey);
                     continue;
                 }
@@ -156,7 +159,7 @@ public class RelayController : ControllerBase
                 // Committed to this peer: from here on no other peer is tried.
                 cts.CancelAfter(Timeout.InfiniteTimeSpan);
                 // The lease keeps a long copy counted; stop-oldest releases the title and its token ends the copy.
-                var (isNew, stopToken, lease) = _sessions.Lease(entry.CanonicalKey, source.Peer.Id);
+                var (isNew, stopToken, lease) = _sessions.Lease(titleKey, source.Peer.Id);
                 using (lease)
                 {
                     if (isNew || claimed)

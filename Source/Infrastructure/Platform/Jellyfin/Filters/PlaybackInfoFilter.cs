@@ -3,6 +3,7 @@ using JellyShare.Domain.Enums;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Sync;
+using JellyShare.Domain.Keys;
 using JellyShare.Jellyfin.Adapters;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Dto;
@@ -260,7 +261,7 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
             return true;
         }
 
-        var key = entry.CanonicalKey;
+        var key = TitleKey.For(entry);
         var sources = SourceSelector.Order(entry, _config.Current.Peers, _index.PeerStates());
         var decision = StreamLimitGate.Decide(sources, key, _sessions);
         switch (decision.Kind)
@@ -302,6 +303,12 @@ internal sealed class PlaybackInfoFilter : IAsyncActionFilter, IAsyncResultFilte
 
         var placeholder = _lookup.Find(itemId);
         if (placeholder?.SourceBitrate is not { } sourceBitrate || sourceBitrate <= 0)
+        {
+            return;
+        }
+
+        // Audio is small enough to direct play; forcing a transcode would only waste the host's CPU.
+        if (_index.Find(placeholder.CanonicalKey)?.Sources is [{ Item.Type: "Audio" or "AudioBook" }, ..])
         {
             return;
         }

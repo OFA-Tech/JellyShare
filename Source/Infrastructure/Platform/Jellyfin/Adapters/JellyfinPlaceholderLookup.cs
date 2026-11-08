@@ -2,6 +2,7 @@ using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Sync;
+using JellyShare.Domain.Keys;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Devices;
@@ -60,7 +61,11 @@ internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
             return null;
         }
 
-        return new PlaceholderMedia(key, item.TotalBitrate is > 0 ? item.TotalBitrate : CatalogBitrate(key));
+        var entry = _index.Find(key);
+        return new PlaceholderMedia(
+            key,
+            item.TotalBitrate is > 0 ? item.TotalBitrate : CatalogBitrate(entry),
+            entry is null ? null : TitleKey.For(entry));
     }
 
     /// <inheritdoc />
@@ -105,9 +110,8 @@ internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
         }
     }
 
-    private int? CatalogBitrate(string key)
+    private int? CatalogBitrate(MergedEntry? entry)
     {
-        var entry = _index.Find(key);
         if (entry is null)
         {
             return null;

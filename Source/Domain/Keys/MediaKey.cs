@@ -30,13 +30,34 @@ public static class MediaKey
             var suffix = string.Create(CultureInfo.InvariantCulture, $":s{season}e{episode}");
             AddKeys(keys, item.SeriesProviderIds, _episodeKinds, "ep", suffix);
         }
+        else if (string.Equals(item.Type, "Audio", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(item.Name))
+        {
+            if (RecordingId(item.ProviderIds) is { } mb)
+            {
+                keys.Add($"track:mb:{mb}");
+            }
+
+            var albumArtist = item.AlbumArtist ?? item.Artists?.FirstOrDefault();
+            var disc = item.DiscNumber?.ToString(CultureInfo.InvariantCulture);
+            var track = item.TrackNumber?.ToString(CultureInfo.InvariantCulture);
+            keys.Add($"track:name:{KeyText.Hash(albumArtist, item.Album, disc, track, item.Name)}");
+        }
+        else if (string.Equals(item.Type, "AudioBook", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(item.Name))
+        {
+            keys.Add($"book:name:{KeyText.Hash(item.FolderPath, item.Name)}");
+        }
 
         return keys;
     }
 
+    // Jellyfin's file prober only fills MusicBrainzTrack (the release track id); the recording id comes from plugins.
+    private static string? RecordingId(Dictionary<string, string>? providerIds)
+        => providerIds is null ? null : Lookup(providerIds, "MusicBrainzRecording") ?? Lookup(providerIds, "MusicBrainzTrack");
+
     /// <summary>
-    /// Trims and lowercases a provider id and validates it against <c>^[a-z0-9_-]{1,32}$</c>. Provider ids come from
-    /// untrusted peers and end up in keys and file names, so anything else is treated as absent.
+    /// Trims and lowercases a provider id and validates it against <c>^[a-z0-9_-]{1,32}$</c> or, for a 36-character
+    /// UUID (MusicBrainz), <c>^[0-9a-f-]{36}$</c>. Provider ids come from untrusted peers and end up in keys and
+    /// file names, so anything else is treated as absent.
     /// </summary>
     /// <param name="id">The raw provider id.</param>
     /// <returns>The normalized id, or <c>null</c> if it is blank or invalid.</returns>
@@ -48,15 +69,16 @@ public static class MediaKey
         }
 
         var normalized = id.Trim().ToLowerInvariant();
-        if (normalized.Length is 0 or > 32)
+        return normalized.Length switch
         {
-            return null;
-        }
-
-        return normalized.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-') ? normalized : null;
+            0 => null,
+            <= 32 => normalized.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_' or '-') ? normalized : null,
+            36 => normalized.All(c => c is (>= 'a' and <= 'f') or (>= '0' and <= '9') or '-') ? normalized : null,
+            _ => null,
+        };
     }
 
-    /// <summary>Returns the provider kind (<c>tmdb</c>, <c>imdb</c>, <c>tvdb</c>) of a key.</summary>
+    /// <summary>Returns the kind (<c>tmdb</c>, <c>imdb</c>, <c>tvdb</c>, <c>mb</c>, <c>name</c>) of a key.</summary>
     /// <param name="key">A key produced by <see cref="For"/>.</param>
     /// <returns>The provider kind, or an empty string if the key is malformed.</returns>
     internal static string KindOf(string key)
