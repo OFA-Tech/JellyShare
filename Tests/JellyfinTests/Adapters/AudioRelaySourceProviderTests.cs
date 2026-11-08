@@ -96,6 +96,17 @@ public sealed class AudioRelaySourceProviderTests
     }
 
     [Fact]
+    public void Source_NoContainerAnywhere_PrefersTheStoredStreamCodecOverTheCatalog()
+    {
+        var book = Track() with { Media = new Domain.Models.Protocol.MediaInfo(null, null, null, null, 64_000, [new AudioTrack(null, "flac", 2, null)], []) };
+        var stored = new List<MediaStream> { new() { Type = MediaStreamType.Audio, Index = 0, Codec = "mp3", Channels = 1 } };
+
+        var source = AudioRelaySourceProvider.Source(Item(), new PlaceholderMedia(Key, 64_000, null, book), "http://127.0.0.1:8096", stored);
+
+        source.Container.ShouldBe("mp3");
+    }
+
+    [Fact]
     public async Task OwnItem_NoSources()
     {
         (await Provider().GetMediaSources(Item(), CancellationToken.None)).ShouldBeEmpty();

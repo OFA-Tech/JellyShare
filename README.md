@@ -52,8 +52,8 @@ On the **consumer** (**Dashboard → Plugins → JellyShare → Receive from pee
 
 1. Follow **Setup**: JellyShare keeps the peers' titles in folders of its own, one per media type (movies, shows,
    music, audiobooks). For each type you want, pick your existing library of that kind and press **Add to library**;
-   Jellyfin then scans that library once. Do this before the first sync. If you ever attach a placeholder folder by hand, attach it **with a library refresh**;
-   without one Jellyfin never notices later changes in it.
+   Jellyfin then scans that library once. Do this before the first sync. If you ever attach a placeholder folder by
+   hand, attach it **with a library refresh**; without one Jellyfin never notices later changes in it.
 2. **Add a peer:** name, server address, token. Press **Test connection** first; it must report success.
 3. **Add peer**, then **Sync now**. The sync runs in the background (the page shows "Syncing..." and you can leave
    it); posters and backdrops are fetched after the placeholders are written. About a minute later the provider's titles that you do not already have appear
@@ -101,8 +101,8 @@ Music and audiobooks:
    restart keeps them.
 3. Podcasts: put them in a Books library like audiobooks; they are shared as **Audiobooks & podcasts**.
 
-Tracks and audiobooks play directly in Jellyfin Web (and in apps that use Jellyfin's universal audio endpoint), through
-the same relay as videos; the relay address never reaches the client.
+Tracks and audiobooks play through the same relay as videos; the relay address never reaches the client. Playback is
+verified in Jellyfin Web; other clients are untested.
 
 ## Account peers
 

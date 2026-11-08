@@ -1291,6 +1291,7 @@ def check_media_types():
               share["Types"] == AUDIO_TYPES and share["UseDefaultTypes"] is False, str(share["Types"]))
         if not orig_peer["AcceptAllTypes"]:
             put_peer(ALICE, orig_peer, AcceptAllTypes=True)
+        first_sync = utc_now()
         report = ALICE.sync()
         check("alice: sync with bob's music and audiobooks finished without peer errors or skipped types",
               not report.get("PeerErrors") and not report.get("SkippedTypesWithoutFolder"),
@@ -1301,6 +1302,10 @@ def check_media_types():
         if not wait_audio("alice: Artist B / Album Two is one album of 2 tracks in order (1 First Light, 2 Second Wind), "
                           "one Artist A with only alice's Album One, Book Y lists Chapter One, Chapter Two"):
             return
+        # Positive control for the "0 metadata writes" checks below: the log line they count really appears when it writes.
+        written = metadata_writes_since(first_sync)
+        check("the plugin logged 'wrote metadata' after the first sync (so the later 0 counts mean something)", written > 0,
+              f"{written} log lines")
 
         # 2. Metadata survives a library rescan (no rewrite needed).
         since = utc_now()
@@ -1415,7 +1420,27 @@ def check_media_types():
               str(report.get("SkippedTypesWithoutFolder")))
         wait_audio("Music folder attached again: Album Two is back as before")
 
-        # 8. alice receives only movies from bob: bob's music, audiobooks (and episodes) go, movies stay.
+        # 8a. Unticking one type removes only that type: without Music, Album Two goes; Book Y, episodes and movies stay.
+        put_peer(ALICE, peer_view(ALICE, "bob"), AcceptAllTypes=False, AcceptTypes=["Movies", "Shows", "Audiobooks"])
+        view = peer_view(ALICE, "bob")
+        check("alice: peer bob set to Only Movies, Shows, Audiobooks (Music unticked)",
+              (view["AcceptAllTypes"], view["AcceptTypes"]) == (False, ["Movies", "Shows", "Audiobooks"]),
+              f"{view['AcceptAllTypes']}, {view['AcceptTypes']}")
+        report = ALICE.sync()
+        ALICE.refresh()
+        book_files = [f for f in expected_audio_files() if f.startswith("/Author X/")]
+
+        def only_music_gone():
+            return (audio_placeholder_files() == book_files
+                    and not [i for i in ALICE.items("Audio", extra={"Fields": "Path"}) if is_strm(i)]
+                    and set(account_placeholders()) == {(1, 2), (2, 1)}
+                    and placeholder(ALICE, TEARS) is not None and not book_problems())
+        ok = wait_until(only_music_gone, 180, 5, tick=ALICE.refresh, tick_every=60)
+        check("Music unticked: Album Two's placeholders are gone; Book Y (in order), the 2 episode placeholders and Tears of Steel stay",
+              bool(ok), f"files {audio_placeholder_files()}, episodes {sorted(account_placeholders())}, "
+              f"Tears {placeholder(ALICE, TEARS) is not None}, {book_problems()}, deleted {report.get('Deleted')}")
+
+        # 8b. alice receives only movies from bob: bob's music, audiobooks (and episodes) go, movies stay.
         put_peer(ALICE, peer_view(ALICE, "bob"), AcceptAllTypes=False, AcceptTypes=["Movies"])
         view = peer_view(ALICE, "bob")
         check("alice: peer bob set to Only Movies", (view["AcceptAllTypes"], view["AcceptTypes"]) == (False, ["Movies"]),
