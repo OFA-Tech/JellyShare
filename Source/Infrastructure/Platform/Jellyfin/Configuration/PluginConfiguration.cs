@@ -1,3 +1,4 @@
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 using MediaBrowser.Model.Plugins;
 
@@ -22,6 +23,12 @@ public class PluginConfiguration : BasePluginConfiguration
     /// <summary>Gets or sets the plugin-owned folder holding show placeholders. Empty resolves to the default.</summary>
     public string ShowsPlaceholderPath { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the plugin-owned folder holding music placeholders. Empty resolves to the default.</summary>
+    public string MusicPlaceholderPath { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the plugin-owned folder holding audiobook placeholders. Empty resolves to the default.</summary>
+    public string AudiobooksPlaceholderPath { get; set; } = string.Empty;
+
     /// <summary>Gets or sets the hours between catalog syncs.</summary>
     public int SyncIntervalHours { get; set; } = 6;
 
@@ -38,7 +45,13 @@ public class PluginConfiguration : BasePluginConfiguration
     public string? RelayBaseOverride { get; set; }
 
     /// <summary>
-    /// Fills empty placeholder roots with <c>&lt;dataFolder&gt;/placeholders/{Movies,Shows}</c>.
+    /// Gets or sets the media types a new share offers by default; <c>null</c> means all, including future types.
+    /// An array with no initializer: <c>XmlSerializer</c> fills a missing <c>List</c> property with an empty list (so null would be lost) and appends to a filled one.
+    /// </summary>
+    public MediaType[]? DefaultShareTypes { get; set; }
+
+    /// <summary>
+    /// Fills empty placeholder roots with <c>&lt;dataFolder&gt;/placeholders/{Movies,Shows,Music,Audiobooks}</c>.
     /// Configured values are kept. Does not touch the file system.
     /// </summary>
     /// <param name="cfg">The configuration to update in place.</param>
@@ -52,10 +65,14 @@ public class PluginConfiguration : BasePluginConfiguration
         {
             MoviesPlaceholderPath = cfg.MoviesPlaceholderPath,
             ShowsPlaceholderPath = cfg.ShowsPlaceholderPath,
+            MusicPlaceholderPath = cfg.MusicPlaceholderPath,
+            AudiobooksPlaceholderPath = cfg.AudiobooksPlaceholderPath,
         };
         JellyShareSettings.ResolvePlaceholderRoots(settings, dataFolder);
         cfg.MoviesPlaceholderPath = settings.MoviesPlaceholderPath;
         cfg.ShowsPlaceholderPath = settings.ShowsPlaceholderPath;
+        cfg.MusicPlaceholderPath = settings.MusicPlaceholderPath;
+        cfg.AudiobooksPlaceholderPath = settings.AudiobooksPlaceholderPath;
     }
 
     /// <summary>
@@ -69,10 +86,13 @@ public class PluginConfiguration : BasePluginConfiguration
         Peers = Peers,
         MoviesPlaceholderPath = MoviesPlaceholderPath,
         ShowsPlaceholderPath = ShowsPlaceholderPath,
+        MusicPlaceholderPath = MusicPlaceholderPath,
+        AudiobooksPlaceholderPath = AudiobooksPlaceholderPath,
         SyncIntervalHours = SyncIntervalHours,
         PresenceSweepSeconds = PresenceSweepSeconds,
         MaxConcurrentTranscodes = MaxConcurrentTranscodes,
         RelayBaseOverride = RelayBaseOverride,
+        DefaultShareTypes = DefaultShareTypes,
     };
 
     /// <summary>Copies every setting from <paramref name="settings"/> into this configuration.</summary>
@@ -84,10 +104,13 @@ public class PluginConfiguration : BasePluginConfiguration
         Peers = settings.Peers;
         MoviesPlaceholderPath = settings.MoviesPlaceholderPath;
         ShowsPlaceholderPath = settings.ShowsPlaceholderPath;
+        MusicPlaceholderPath = settings.MusicPlaceholderPath;
+        AudiobooksPlaceholderPath = settings.AudiobooksPlaceholderPath;
         SyncIntervalHours = settings.SyncIntervalHours;
         PresenceSweepSeconds = settings.PresenceSweepSeconds;
         MaxConcurrentTranscodes = settings.MaxConcurrentTranscodes;
         RelayBaseOverride = settings.RelayBaseOverride;
+        DefaultShareTypes = settings.DefaultShareTypes;
     }
 
     /// <inheritdoc />

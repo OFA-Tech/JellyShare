@@ -1,6 +1,7 @@
 using System.Xml;
 using System.Xml.Serialization;
 using JellyShare.Application.Features.Catalog;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Jellyfin.Configuration;
 
@@ -124,6 +125,27 @@ public sealed class PluginConfigurationTests
 
         cfg.MoviesPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Movies"));
         cfg.ShowsPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Shows"));
+        cfg.MusicPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Music"));
+        cfg.AudiobooksPlaceholderPath.ShouldBe(Path.Combine("data", "plugin", "placeholders", "Audiobooks"));
+    }
+
+    [Fact]
+    public void MediaTypeSettings_RoundTripThroughXmlWithoutDuplicates()
+    {
+        var cfg = new PluginConfiguration { DefaultShareTypes = new[] { MediaType.Movies, MediaType.Music } };
+        cfg.Shares.Add(new PeerShare { Name = "a", UseDefaultTypes = false, Types = { MediaType.Shows, MediaType.Audiobooks } });
+        cfg.Shares.Add(new PeerShare { Name = "b", UseDefaultTypes = true });
+        cfg.Peers.Add(new RemotePeer { Name = "c", AcceptAllTypes = false, AcceptTypes = { MediaType.Movies } });
+
+        RoundTrip(cfg, out var copy);
+
+        copy.DefaultShareTypes.ShouldBe(new[] { MediaType.Movies, MediaType.Music });
+        copy.Shares[0].UseDefaultTypes.ShouldBe(false);
+        copy.Shares[0].Types.ShouldBe(new[] { MediaType.Shows, MediaType.Audiobooks });
+        copy.Shares[1].UseDefaultTypes.ShouldBe(true);
+        copy.Shares[1].Types.ShouldBeEmpty();
+        copy.Peers[0].AcceptAllTypes.ShouldBeFalse();
+        copy.Peers[0].AcceptTypes.ShouldBe(new[] { MediaType.Movies });
     }
 
     [Fact]
@@ -148,6 +170,9 @@ public sealed class PluginConfigurationTests
         {
             MoviesPlaceholderPath = "/m",
             ShowsPlaceholderPath = "/s",
+            MusicPlaceholderPath = "/mu",
+            AudiobooksPlaceholderPath = "/ab",
+            DefaultShareTypes = new[] { MediaType.Movies },
             SyncIntervalHours = 12,
             PresenceSweepSeconds = 30,
             MaxConcurrentTranscodes = 2,
@@ -162,6 +187,9 @@ public sealed class PluginConfigurationTests
         settings.Peers.ShouldBeSameAs(cfg.Peers);
         settings.MoviesPlaceholderPath.ShouldBe("/m");
         settings.ShowsPlaceholderPath.ShouldBe("/s");
+        settings.MusicPlaceholderPath.ShouldBe("/mu");
+        settings.AudiobooksPlaceholderPath.ShouldBe("/ab");
+        settings.DefaultShareTypes.ShouldBe(new[] { MediaType.Movies });
         settings.SyncIntervalHours.ShouldBe(12);
         settings.PresenceSweepSeconds.ShouldBe(30);
         settings.MaxConcurrentTranscodes.ShouldBe(2);
@@ -237,6 +265,21 @@ public sealed class PluginConfigurationTests
         if (type == typeof(List<RemotePeer>))
         {
             return new List<RemotePeer> { new() { Name = name } };
+        }
+
+        if (type == typeof(bool) || type == typeof(bool?))
+        {
+            return true;
+        }
+
+        if (type == typeof(List<MediaType>))
+        {
+            return new List<MediaType> { MediaType.Music };
+        }
+
+        if (type == typeof(MediaType[]))
+        {
+            return new[] { MediaType.Music };
         }
 
         throw new NotSupportedException("Add a non-default value for " + type + " (" + name + ") to this test.");

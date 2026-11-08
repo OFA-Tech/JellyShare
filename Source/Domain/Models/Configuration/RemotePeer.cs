@@ -38,6 +38,15 @@ public class RemotePeer
     /// <summary>Gets or sets what happens when a new stream exceeds <see cref="MaxStreams"/>.</summary>
     public StreamLimitAction LimitAction { get; set; }
 
+    /// <summary>Gets or sets a value indicating whether every media type is accepted from this peer. Old settings accept everything.</summary>
+    public bool AcceptAllTypes { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets the media types accepted when <see cref="AcceptAllTypes"/> is <c>false</c>.
+    /// <see cref="Copy"/> is shallow: assign a new list instead of changing this one.
+    /// </summary>
+    public List<MediaType> AcceptTypes { get; set; } = new();
+
     /// <summary>Creates a shallow copy, for copy-on-write updates.</summary>
     /// <returns>The copy.</returns>
     public RemotePeer Copy() => (RemotePeer)MemberwiseClone();

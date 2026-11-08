@@ -87,6 +87,20 @@ public sealed class ShareHandlerTests : IDisposable
     }
 
     [Fact]
+    public async Task Update_KeepsTheMediaTypeChoice()
+    {
+        var share = Seed();
+        share.UseDefaultTypes = false;
+        share.Types = [JellyShare.Domain.Enums.MediaType.Shows];
+
+        await _h.Send(new UpdateShareCommand(share.Id, "carol", [FakeLibraries.ShowsId], 5, null, null));
+
+        var saved = _h.Saver.Saved!.Shares.ShouldHaveSingleItem();
+        saved.UseDefaultTypes.ShouldBe(false);
+        saved.Types.ShouldBe([JellyShare.Domain.Enums.MediaType.Shows]);
+    }
+
+    [Fact]
     public async Task Update_UnknownShare_IsNotFound_EvenWithInvalidFields()
     {
         var result = await _h.Send(new UpdateShareCommand(Guid.NewGuid(), " ", null, null, null, null));

@@ -84,6 +84,8 @@ public sealed class UpdateShareCommandHandler : ICommandHandler<UpdateShareComma
                 LibraryIds = libs,
                 MaxStreams = request.MaxStreams!.Value,
                 MaxBitrate = request.MaxBitrate,
+                UseDefaultTypes = current.UseDefaultTypes,
+                Types = current.Types,
             };
             cfg.Shares = cfg.Shares.Select(s => s.Id == request.Id ? share : s).ToList();
             _store.Save(cfg);

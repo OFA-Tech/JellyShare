@@ -1,3 +1,5 @@
+using JellyShare.Domain.Enums;
+
 namespace JellyShare.Domain.Models.Configuration;
 
 /// <summary>The plugin settings, independent of how the host stores them.</summary>
@@ -15,6 +17,12 @@ public class JellyShareSettings
     /// <summary>Gets or sets the plugin-owned folder holding show placeholders. Empty resolves to the default.</summary>
     public string ShowsPlaceholderPath { get; set; } = string.Empty;
 
+    /// <summary>Gets or sets the plugin-owned folder holding music placeholders. Empty resolves to the default.</summary>
+    public string MusicPlaceholderPath { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the plugin-owned folder holding audiobook placeholders. Empty resolves to the default.</summary>
+    public string AudiobooksPlaceholderPath { get; set; } = string.Empty;
+
     /// <summary>Gets or sets the hours between catalog syncs.</summary>
     public int SyncIntervalHours { get; set; } = 6;
 
@@ -31,7 +39,13 @@ public class JellyShareSettings
     public string? RelayBaseOverride { get; set; }
 
     /// <summary>
-    /// Fills empty placeholder roots with <c>&lt;dataFolder&gt;/placeholders/{Movies,Shows}</c>.
+    /// Gets or sets the media types a new share offers by default; <c>null</c> means all, including future types.
+    /// An array with no initializer: <c>XmlSerializer</c> fills a missing <c>List</c> property with an empty list (so null would be lost) and appends to a filled one.
+    /// </summary>
+    public MediaType[]? DefaultShareTypes { get; set; }
+
+    /// <summary>
+    /// Fills empty placeholder roots with <c>&lt;dataFolder&gt;/placeholders/{Movies,Shows,Music,Audiobooks}</c>.
     /// Configured values are kept. Does not touch the file system.
     /// </summary>
     /// <param name="settings">The settings to update in place.</param>
@@ -43,6 +57,8 @@ public class JellyShareSettings
 
         settings.MoviesPlaceholderPath = ResolveRoot(settings.MoviesPlaceholderPath, dataFolder, "Movies");
         settings.ShowsPlaceholderPath = ResolveRoot(settings.ShowsPlaceholderPath, dataFolder, "Shows");
+        settings.MusicPlaceholderPath = ResolveRoot(settings.MusicPlaceholderPath, dataFolder, "Music");
+        settings.AudiobooksPlaceholderPath = ResolveRoot(settings.AudiobooksPlaceholderPath, dataFolder, "Audiobooks");
     }
 
     private static string ResolveRoot(string? configured, string dataFolder, string kind)
