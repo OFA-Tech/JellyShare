@@ -84,6 +84,11 @@ public static class PathNaming
             return ForEpisode(e, item, localSeries);
         }
 
+        if (item.Type is "Audio" or "AudioBook")
+        {
+            return ForAudio(item);
+        }
+
         var name = Safe(item.Name);
         var baseName = item.Year is { } year ? string.Create(CultureInfo.InvariantCulture, $"{name} ({year})") : name;
         var ids = ItemIds(e, item);
@@ -138,6 +143,28 @@ public static class PathNaming
         var episode = (item.EpisodeNumber ?? 0).ToString("00", CultureInfo.InvariantCulture);
         var seriesDir = tag.Length == 0 ? seriesName : seriesName + " " + tag;
         return new PlaceholderFile($"{seriesDir}/Season {season}", $"{seriesName} S{season}E{episode}", "Episode");
+    }
+
+    // No .nfo for audio (Jellyfin has no track nfo reader): the plugin writes the item's metadata after the scan.
+    // Jellyfin makes one album per folder, so every track of an album shares its folder.
+    private static PlaceholderFile ForAudio(CatalogItem item)
+    {
+        var disc = item.DiscNumber is > 1 ? string.Create(CultureInfo.InvariantCulture, $"{item.DiscNumber}-") : string.Empty;
+        var baseName = item.TrackNumber is { } track
+            ? string.Create(CultureInfo.InvariantCulture, $"{disc}{track:00} {Safe(item.Name)}")
+            : Safe(item.Name);
+        if (string.Equals(item.Type, "Audio", StringComparison.Ordinal))
+        {
+            var artist = Safe(TrackMetadataRules.AlbumArtist(item) ?? "Unknown Artist");
+            var album = Safe(string.IsNullOrWhiteSpace(item.Album) ? "Unknown Album" : item.Album);
+            return new PlaceholderFile(artist + "/" + album, baseName, "Audio");
+        }
+
+        var folders = (item.FolderPath ?? string.Empty)
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(Safe)
+            .ToList();
+        return new PlaceholderFile(folders.Count == 0 ? Safe(item.Name) : string.Join('/', folders), baseName, "AudioBook");
     }
 
     private static string SeriesTag(Dictionary<string, string> ids, LocalSeries? local)

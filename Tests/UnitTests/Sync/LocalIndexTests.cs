@@ -1,5 +1,6 @@
 using JellyShare.Application.Features.Sync;
 using JellyShare.Domain.Enums;
+using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Library;
 using JellyShare.UnitTests.Fakes;
 
@@ -30,6 +31,33 @@ public sealed class LocalIndexTests
         return (new LocalIndex(library, config, probe), library);
     }
 
+
+    [Fact]
+    public async Task LocalIndex_ReadsMusicKeys()
+    {
+        var (index, library, config) = Create(_ => true);
+        config.Settings.MusicPlaceholderPath = "/ph/Music";
+        config.Settings.AudiobooksPlaceholderPath = "/ph/Audiobooks";
+        var mbid = "b9f3a1c2-5d4e-4f6a-8b7c-0123456789ab";
+        library.Media.Add(new LocalMedia("Audio", "/media/Music/a.flac", new Dictionary<string, string> { ["MusicBrainzRecording"] = mbid }, null, null, null)
+        {
+            Name = "Song One", Album = "Album One", AlbumArtist = "Artist A", Artists = ["Artist A"], DiscNumber = 1, TrackNumber = 1,
+        });
+        library.Media.Add(new LocalMedia("AudioBook", "/media/Books/Author X/Book Y/01.mp3", null, null, null, null) { Name = "Chapter One", FolderPath = "Author X/Book Y" });
+        library.Media.Add(new LocalMedia("Audio", "/ph/Music/Artist B/Album Two/01 First Light.strm", null, null, null, null) { Name = "First Light", Album = "Album Two", AlbumArtist = "Artist B" });
+
+        var result = await index.BuildAsync(CancellationToken.None);
+
+        var friendTrack = TestItems.Track("song one", albumArtist: "artist a", album: "album one", disc: 1, track: 1);
+        var music = result.KeysOf(MediaType.Music);
+        music.ShouldContain("track:mb:" + mbid);
+        music.ShouldContain(MediaKey.For(friendTrack).Single());
+        music.ShouldContain(TitleKey.For(new MergedEntry("x", ["x"], [(TestItems.PeerA, friendTrack)])));
+        music.ShouldNotContain(k => k.Contains(KeyText.Hash("Artist B", "Album Two"), StringComparison.Ordinal));
+        result.KeysOf(MediaType.Audiobooks).ShouldContain(TitleKey.For(new MergedEntry("x", ["x"], [(TestItems.PeerA, TestItems.Book("Other Chapter"))])));
+        result.MovieKeys.ShouldBeEmpty();
+        result.EpisodeKeys.ShouldBeEmpty();
+    }
 
     [Fact]
     public async Task LocalIndex_RealProbe_MissingFileIsMissing_ExistingIsLocal()

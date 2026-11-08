@@ -147,12 +147,21 @@ public sealed class MediaKeyTests
         => MediaKey.For(Track("Hells Bells")).ShouldHaveSingleItem().ShouldStartWith("track:name:");
 
     [Fact]
-    public void For_Audio_FallsBackToReleaseTrackId()
+    public void For_Audio_IgnoresReleaseTrackId()
     {
+        // Release-track ids differ per edition: matching on them would turn one recording into a false conflict.
         var item = Track("Hells Bells") with { ProviderIds = new() { ["MusicBrainzTrack"] = Mbid } };
 
-        MediaKey.For(item).ShouldContain("track:mb:" + Mbid);
+        MediaKey.For(item).ShouldHaveSingleItem().ShouldStartWith("track:name:");
     }
+
+    [Fact]
+    public void For_Audio_TitleOfOnlySymbols_HasNoKey()
+        => MediaKey.For(Track("?!…", mbid: Mbid)).ShouldBeEmpty();
+
+    [Fact]
+    public void For_AudioBook_NameOfOnlySymbols_HasNoKey()
+        => MediaKey.For(Book("--")).ShouldBeEmpty();
 
     [Fact]
     public void For_Audio_NameKeyIgnoresCaseAndPunctuation()

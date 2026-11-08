@@ -17,6 +17,12 @@ public static class MediaTypes
     /// <summary>Gets the media types this version can provide to a peer (a receiver still asks only for <see cref="Supported"/>).</summary>
     public static IReadOnlyList<MediaType> ProviderSupported { get; } = new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks };
 
+    /// <summary>
+    /// Gets the media types the sync can turn into placeholders. Wider than <see cref="Supported"/> until every peer kind
+    /// serves audio: peers are only asked for <see cref="Supported"/> types, so this only decides what is placed.
+    /// </summary>
+    public static IReadOnlyList<MediaType> Receivable { get; } = ProviderSupported;
+
     /// <summary>Maps a catalog item type to its media type.</summary>
     /// <param name="catalogItemType">The catalog item type (<c>Movie</c>, <c>Episode</c>, <c>Audio</c>, <c>AudioBook</c>).</param>
     /// <returns>The media type, or <c>null</c> for an unknown type.</returns>
@@ -102,6 +108,13 @@ public static class MediaTypes
     /// <returns><c>true</c> when the type is accepted from the peer and supported.</returns>
     public static bool IsRequested(RemotePeer peer, string catalogItemType)
         => Of(catalogItemType) is { } type && Supported.Contains(type) && Accepted(peer).Contains(type);
+
+    /// <summary>Tells whether a peer's catalog item of the given type is placed by the sync.</summary>
+    /// <param name="peer">The peer.</param>
+    /// <param name="catalogItemType">The catalog item type.</param>
+    /// <returns><c>true</c> when the type is accepted from the peer and <see cref="Receivable"/>.</returns>
+    public static bool IsReceived(RemotePeer peer, string catalogItemType)
+        => Of(catalogItemType) is { } type && Receivable.Contains(type) && Accepted(peer).Contains(type);
 
     /// <summary>Formats types as a comma-separated list in enum order, without duplicates.</summary>
     /// <param name="types">The types.</param>

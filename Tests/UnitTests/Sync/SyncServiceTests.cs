@@ -793,4 +793,86 @@ public sealed class SyncServiceTests : IDisposable
         maxInside.ShouldBe(1);
         _client.Fetches.Count.ShouldBe(2);
     }
+
+    private static CatalogItem Song(string name, int track, string album = "Album Two", string albumArtist = "Artist B")
+        => TestItems.Track(name, albumArtist: albumArtist, album: album, track: track, id: "t" + track) with { AlbumId = "album2", ImageTypes = ["Primary"] };
+
+    [Fact]
+    public async Task Sync_MusicWithoutFolder_SkippedAndReported()
+    {
+        _config.Settings.MusicPlaceholderPath = string.Empty;
+        _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
+        Offer(Bunny(), Song("First Light", 1));
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedTypesWithoutFolder.ShouldBe([MediaType.Music]);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Written.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Sync_MusicAndMoviesFromOnePeer_EachInItsRoot()
+    {
+        var music = _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        var books = _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
+        _client.Images[(_alice.Id, "album2", "Primary")] = [1, 2, 3];
+        Offer(Bunny(), Song("First Light", 1), Song("Second Wind", 2), TestItems.Book("Chapter One", id: "b1") with { TrackNumber = 1, AlbumId = "bookfolder", ImageTypes = ["Primary"] });
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "01 First Light.strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "02 Second Wind.strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "folder.jpg")).ShouldBeTrue();
+        Directory.EnumerateFiles(music, "*.nfo", SearchOption.AllDirectories).ShouldBeEmpty();
+        File.Exists(Path.Combine(books, "Author X", "Book Y", "01 Chapter One.strm")).ShouldBeTrue();
+        Directory.Exists(Path.Combine(MoviesRoot, "Artist B")).ShouldBeFalse();
+        report.SkippedTypesWithoutFolder.ShouldBeEmpty();
+        report.Written.ShouldBe(5);
+        _client.ImageRequests.ShouldContain((_alice.Id, "bookfolder", "Primary"));
+        _scans.Reported.ShouldContain(Path.Combine(music, "Artist B", "Album Two"));
+    }
+
+    [Fact]
+    public async Task Sync_OwnerHasPartOfAlbum_WholeFriendAlbumSkipped_AndCountedLocal()
+    {
+        _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        _library.Media.Add(new LocalMedia("Audio", "/media/Music/a.flac", null, null, null, null)
+        {
+            Name = "Song One", Album = "Album One", AlbumArtist = "Artist A", TrackNumber = 1,
+        });
+        Offer(Song("Song Three", 3, album: "album one", albumArtist: "ARTIST A"), Song("First Light", 1));
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedLocal.ShouldBe(1);
+        Directory.Exists(Path.Combine(_config.Settings.MusicPlaceholderPath, "ARTIST A")).ShouldBeFalse();
+        File.Exists(Path.Combine(_config.Settings.MusicPlaceholderPath, "Artist B", "Album Two", "01 First Light.strm")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Sync_LastTrackOfAlbumGone_RemovesAlbumFolderWithItsArt()
+    {
+        var music = _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        _client.Images[(_alice.Id, "album2", "Primary")] = [1];
+        Offer(Song("First Light", 1), Song("Other", 1, album: "Album Three") with { AlbumId = "album3" });
+        await _sync.RunAsync(CancellationToken.None);
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "folder.jpg")).ShouldBeTrue();
+
+        Offer(Song("Other", 1, album: "Album Three") with { AlbumId = "album3" });
+        await _sync.RunAsync(CancellationToken.None);
+
+        Directory.Exists(Path.Combine(music, "Artist B", "Album Two")).ShouldBeFalse();
+        File.Exists(Path.Combine(music, "Artist B", "Album Three", "01 Other.strm")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Sync_MusicRootInsideMoviesRoot_Refused()
+    {
+        _config.Settings.MusicPlaceholderPath = Path.Combine(MoviesRoot, "Music");
+        Offer(Bunny());
+
+        Should.Throw<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
+    }
 }

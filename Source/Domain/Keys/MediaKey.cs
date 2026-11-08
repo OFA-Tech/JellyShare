@@ -30,9 +30,9 @@ public static class MediaKey
             var suffix = string.Create(CultureInfo.InvariantCulture, $":s{season}e{episode}");
             AddKeys(keys, item.SeriesProviderIds, _episodeKinds, "ep", suffix);
         }
-        else if (string.Equals(item.Type, "Audio", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(item.Name))
+        else if (string.Equals(item.Type, "Audio", StringComparison.Ordinal) && KeyText.Normalize(item.Name).Length > 0)
         {
-            if (RecordingId(item.ProviderIds) is { } mb)
+            if (item.ProviderIds is not null && Lookup(item.ProviderIds, "MusicBrainzRecording") is { } mb)
             {
                 keys.Add($"track:mb:{mb}");
             }
@@ -42,17 +42,13 @@ public static class MediaKey
             var track = item.TrackNumber?.ToString(CultureInfo.InvariantCulture);
             keys.Add($"track:name:{KeyText.Hash(albumArtist, item.Album, disc, track, item.Name)}");
         }
-        else if (string.Equals(item.Type, "AudioBook", StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(item.Name))
+        else if (string.Equals(item.Type, "AudioBook", StringComparison.Ordinal) && KeyText.Normalize(item.Name).Length > 0)
         {
             keys.Add($"book:name:{KeyText.Hash(item.FolderPath, item.Name)}");
         }
 
         return keys;
     }
-
-    // Jellyfin's file prober only fills MusicBrainzTrack (the release track id); the recording id comes from plugins.
-    private static string? RecordingId(Dictionary<string, string>? providerIds)
-        => providerIds is null ? null : Lookup(providerIds, "MusicBrainzRecording") ?? Lookup(providerIds, "MusicBrainzTrack");
 
     /// <summary>
     /// Trims and lowercases a provider id and validates it against <c>^[a-z0-9_-]{1,32}$</c> or, for a 36-character

@@ -83,6 +83,67 @@ public sealed class PlaceholderPlannerTests
         diff.Writes.ShouldContain(w => w.RelativePath == "Owner Name [tvdbid-153021]/Season 01/Owner Name S01E01.strm");
     }
 
+    private const string Mbid = "b9f3a1c2-5d4e-4f6a-8b7c-0123456789ab";
+
+    [Fact]
+    public void Planner_OwnerHasTrackByMbid_NotWritten()
+    {
+        var friend = TestItems.Track("Hells Bells (Remaster)", mbid: Mbid);
+        var diff = PlaceholderPlanner.Plan([Entry(friend)], new HashSet<string> { "track:mb:" + Mbid }, _noExisting, Relay);
+
+        diff.Writes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Planner_OwnerHasTrackByNames_DifferentCase_NotWritten()
+    {
+        var owner = MediaKey.For(TestItems.Track("HELLS BELLS", albumArtist: "ac dc", album: "back in black")).ToHashSet();
+        var diff = PlaceholderPlanner.Plan([Entry(TestItems.Track("Hells Bells"))], owner, _noExisting, Relay);
+
+        diff.Writes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Planner_AlbumOwnerLacks_WritesTracksWithoutNfo()
+    {
+        var wanted = new[]
+        {
+            Entry(TestItems.Track("First Light", albumArtist: "Artist B", album: "Album Two", track: 1, id: "1")),
+            Entry(TestItems.Track("Second Wind", albumArtist: "Artist B", album: "Album Two", track: 2, id: "2")),
+        };
+        var diff = PlaceholderPlanner.Plan(wanted, _noLocal, _noExisting, Relay);
+
+        diff.Writes.Select(w => w.RelativePath).ShouldBe(["Artist B/Album Two/01 First Light.strm", "Artist B/Album Two/02 Second Wind.strm"]);
+        diff.Writes[0].Content.ShouldBe(PlaceholderPaths.StrmContent(Relay, wanted[0].CanonicalKey));
+    }
+
+    [Fact]
+    public void Planner_OwnerHasAnyTrackOfAlbum_SkipsWholeAlbum()
+    {
+        // Partial albums don't merge in Jellyfin (one album per folder), so a friend's album the owner partly has is left out.
+        var owned = TestItems.Track("Song One", albumArtist: "Artist A", album: "Album One", track: 1);
+        var local = new HashSet<string>(MediaKey.For(owned)) { TitleKey.For(Entry(owned)) };
+        var wanted = new[]
+        {
+            Entry(TestItems.Track("Song Three", albumArtist: "artist a", album: "ALBUM ONE", track: 3, id: "3")),
+            Entry(TestItems.Track("Other", albumArtist: "Artist A", album: "Album Five", track: 1, id: "5")),
+        };
+        var diff = PlaceholderPlanner.Plan(wanted, local, _noExisting, Relay);
+
+        diff.Writes.Select(w => w.RelativePath).ShouldBe(["Artist A/Album Five/01 Other.strm"]);
+        PlaceholderPlanner.IsLocal(wanted[0], local).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Planner_OwnerHasAnyFileOfBook_SkipsWholeBook()
+    {
+        var owned = TestItems.Book("Part 1");
+        var local = new HashSet<string>(MediaKey.For(owned)) { TitleKey.For(Entry(owned)) };
+        var diff = PlaceholderPlanner.Plan([Entry(TestItems.Book("Part 2", id: "b2"))], local, _noExisting, Relay);
+
+        diff.Writes.ShouldBeEmpty();
+    }
+
     [Fact]
     public void Plan_LocalSeriesLookup_WorksByAnySeriesId()
     {

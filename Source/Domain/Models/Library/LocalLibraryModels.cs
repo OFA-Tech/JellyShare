@@ -1,19 +1,33 @@
 namespace JellyShare.Domain.Models.Library;
 
-/// <summary>A local movie or episode, with just what is needed for its keys.</summary>
-/// <param name="Type"><c>Movie</c> or <c>Episode</c>.</param>
+/// <summary>A local movie, episode, track or audiobook file, with just what is needed for its keys.</summary>
+/// <param name="Type"><c>Movie</c>, <c>Episode</c>, <c>Audio</c> or <c>AudioBook</c>.</param>
 /// <param name="Path">The media file path.</param>
 /// <param name="ProviderIds">The item's provider ids.</param>
 /// <param name="SeriesProviderIds">For episodes, the series' provider ids.</param>
 /// <param name="SeasonNumber">For episodes, the season number.</param>
 /// <param name="EpisodeNumber">For episodes, the episode number.</param>
+/// <param name="Name">For audio, the title.</param>
+/// <param name="Album">For tracks, the album.</param>
+/// <param name="AlbumArtist">For tracks, the first album artist.</param>
+/// <param name="Artists">For tracks, the artists.</param>
+/// <param name="DiscNumber">For tracks, the disc number.</param>
+/// <param name="TrackNumber">For tracks, the track number.</param>
+/// <param name="FolderPath">For audiobooks, the folder names below the library root (<c>Author X/Book Y</c>).</param>
 public sealed record LocalMedia(
     string Type,
     string? Path,
     IReadOnlyDictionary<string, string>? ProviderIds,
     IReadOnlyDictionary<string, string>? SeriesProviderIds,
     int? SeasonNumber,
-    int? EpisodeNumber);
+    int? EpisodeNumber,
+    string? Name = null,
+    string? Album = null,
+    string? AlbumArtist = null,
+    IReadOnlyList<string>? Artists = null,
+    int? DiscNumber = null,
+    int? TrackNumber = null,
+    string? FolderPath = null);
 
 /// <summary>A local series.</summary>
 /// <param name="Name">The series title.</param>

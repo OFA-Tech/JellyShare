@@ -1,4 +1,5 @@
 using JellyShare.Application.Features.Catalog;
+using JellyShare.Application.Features.Placeholders;
 using JellyShare.Application.Features.Relay;
 using JellyShare.Application.Features.Streaming;
 using JellyShare.Application.Features.Sync;
@@ -68,6 +69,13 @@ public static class ApplicationSetup
             TimeProvider.System,
             sp.GetRequiredService<ILogger<LocalItemWatcher>>()));
         services.AddHostedService(sp => sp.GetRequiredService<LocalItemWatcher>());
+        services.AddSingleton(sp => new PlaceholderMetadataWriter(
+            sp.GetRequiredService<IPlaceholderMetadata>(),
+            sp.GetRequiredService<IConsumerIndex>(),
+            sp.GetRequiredService<ISettingsProvider>(),
+            TimeProvider.System,
+            sp.GetRequiredService<ILogger<PlaceholderMetadataWriter>>()));
+        services.AddHostedService(sp => sp.GetRequiredService<PlaceholderMetadataWriter>());
 
         services.AddSingleton(new RelaySessions(TimeProvider.System));
         services.AddSingleton<ISyncRunner>(sp => sp.GetRequiredService<SyncService>());

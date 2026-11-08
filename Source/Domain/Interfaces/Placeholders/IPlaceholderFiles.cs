@@ -22,17 +22,19 @@ public interface IPlaceholderFiles
 
     /// <summary>Downloads missing folder images, a few folders at a time, only into folders that still hold a <c>.strm</c>.</summary>
     /// <param name="root">The placeholder root.</param>
-    /// <param name="tops">The folders (relative, first segment).</param>
+    /// <param name="tops">The folders (relative: the first segment, or the album/book folder with <paramref name="folderArt"/>).</param>
     /// <param name="fetcher">Fetches the images.</param>
     /// <param name="parallelism">How many folders are fetched at once.</param>
     /// <param name="ct">The cancellation token.</param>
+    /// <param name="folderArt">Write the Primary image as <c>folder.jpg</c> (audio) instead of <c>poster.jpg</c>/<c>fanart.jpg</c>.</param>
     /// <returns>The images written and the full paths of the folders that got one.</returns>
     Task<(int Images, IReadOnlyList<string> ChangedDirs)> DownloadImagesAsync(
         string root,
         IReadOnlyCollection<string> tops,
         PlaceholderImageFetcher fetcher,
         int parallelism,
-        CancellationToken ct);
+        CancellationToken ct,
+        bool folderArt = false);
 
     /// <summary>Checks that a root may be used (new, empty, or carrying the marker).</summary>
     /// <param name="root">The placeholder root.</param>
@@ -52,9 +54,10 @@ public interface IPlaceholderFiles
 
     /// <summary>Checks whether a movie/series folder holds a placeholder and lacks an image.</summary>
     /// <param name="root">The placeholder root.</param>
-    /// <param name="top">The folder (relative, first segment).</param>
+    /// <param name="top">The folder (relative).</param>
+    /// <param name="folderArt">Check <c>folder.jpg</c> (audio) instead of <c>poster.jpg</c>/<c>fanart.jpg</c>.</param>
     /// <returns><c>true</c> when an image is missing.</returns>
-    bool MissesImages(string root, string top);
+    bool MissesImages(string root, string top, bool folderArt = false);
 
     /// <summary>Lists the placeholder files (<c>.strm</c>/<c>.nfo</c>) under a root with their content hash.</summary>
     /// <param name="root">The placeholder root.</param>

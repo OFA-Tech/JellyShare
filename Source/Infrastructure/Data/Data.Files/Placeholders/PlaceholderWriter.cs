@@ -19,6 +19,8 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
 
     private static readonly (string Type, string FileName)[] _images = [("Primary", "poster.jpg"), ("Backdrop", "fanart.jpg")];
 
+    private static readonly (string Type, string FileName)[] _folderImages = [("Primary", "folder.jpg")];
+
     private readonly ILogger _logger;
 
     /// <summary>Initializes a new instance of the <see cref="PlaceholderWriter"/> class.</summary>
@@ -35,7 +37,7 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
     void IPlaceholderFiles.EnsureRoot(string root) => EnsureRoot(root);
 
     /// <inheritdoc />
-    bool IPlaceholderFiles.MissesImages(string root, string top) => MissesImages(root, top);
+    bool IPlaceholderFiles.MissesImages(string root, string top, bool folderArt) => MissesImages(root, top, folderArt);
 
     /// <inheritdoc />
     IReadOnlyDictionary<string, string> IPlaceholderFiles.ScanExisting(string root) => ScanExisting(root);
@@ -176,6 +178,9 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
                 deletedPaths.Add(rel);
                 changed.Add(Path.GetDirectoryName(full)!);
                 removedTops.Add(TopDir(rel));
+
+                // An emptied album folder of an artist with other albums still holds its folder.jpg.
+                removedTops.Add(rel[..rel.LastIndexOf('/')]);
             }
 
             foreach (var write in diff.Writes)
@@ -363,15 +368,16 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
 
     /// <summary>Checks whether a movie/series folder holds a placeholder and lacks <c>poster.jpg</c> or <c>fanart.jpg</c>.</summary>
     /// <param name="root">The placeholder root.</param>
-    /// <param name="top">The folder (relative, first segment).</param>
+    /// <param name="top">The folder (relative).</param>
+    /// <param name="folderArt">Check <c>folder.jpg</c> (audio) instead.</param>
     /// <returns><c>true</c> when an image is missing.</returns>
-    public static bool MissesImages(string root, string top)
+    public static bool MissesImages(string root, string top, bool folderArt = false)
     {
         var rootFull = Path.GetFullPath(root);
         var topFull = Path.GetFullPath(Path.Combine(rootFull, top));
         return IsStrictlyInside(rootFull, topFull)
             && Directory.Exists(topFull)
-            && _images.Any(i => !File.Exists(Path.Combine(topFull, i.FileName)));
+            && (folderArt ? _folderImages : _images).Any(i => !File.Exists(Path.Combine(topFull, i.FileName)));
     }
 
     /// <summary>
@@ -384,14 +390,17 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
     /// <param name="fetcher">Fetches the images; failures are logged and ignored.</param>
     /// <param name="parallelism">How many folders are fetched at once.</param>
     /// <param name="ct">The cancellation token.</param>
+    /// <param name="folderArt">Write the Primary image as <c>folder.jpg</c> (audio album/book folders) instead.</param>
     /// <returns>The images written and the full paths of the folders that got one.</returns>
     public async Task<(int Images, IReadOnlyList<string> ChangedDirs)> DownloadImagesAsync(
         string root,
         IReadOnlyCollection<string> tops,
         PlaceholderImageFetcher fetcher,
         int parallelism,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool folderArt = false)
     {
+        var imageSet = folderArt ? _folderImages : _images;
         ArgumentNullException.ThrowIfNull(tops);
         ArgumentNullException.ThrowIfNull(fetcher);
         var rootFull = Path.GetFullPath(root);
@@ -406,7 +415,7 @@ public sealed class PlaceholderWriter : IPlaceholderFiles
                 return;
             }
 
-            foreach (var (type, fileName) in _images)
+            foreach (var (type, fileName) in imageSet)
             {
                 var target = Path.Combine(topFull, fileName);
                 if (File.Exists(target) || !await TryDownloadAsync(fetcher, top, type, target, token).ConfigureAwait(false))

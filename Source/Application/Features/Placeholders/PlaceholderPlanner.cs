@@ -37,7 +37,7 @@ public static class PlaceholderPlanner
         var skipped = 0;
 
         var ordered = wanted
-            .Where(e => e.Sources.Count > 0 && !e.Keys.Any(localKeys.Contains))
+            .Where(e => e.Sources.Count > 0 && !IsLocal(e, localKeys))
             .OrderBy(e => e.CanonicalKey, StringComparer.Ordinal);
 
         foreach (var entry in ordered)
@@ -60,6 +60,11 @@ public static class PlaceholderPlanner
             }
 
             desired[strmPath] = PlaceholderPaths.StrmContent(relayBase, entry.CanonicalKey);
+            if (file.Kind is "Audio" or "AudioBook")
+            {
+                continue;
+            }
+
             desired[file.RelativeDir + "/" + file.BaseName + ".nfo"] = isEpisode
                 ? NfoWriter.Episode(item, local?.Name)
                 : NfoWriter.Movie(item);
@@ -99,6 +104,20 @@ public static class PlaceholderPlanner
         }
 
         return new PlaceholderDiff(writes, deletes, touched.ToList(), skipped);
+    }
+
+    /// <summary>
+    /// Tells whether the owner already has an entry: any of its keys, or, for music and audiobooks, any file of its
+    /// album/book (partial albums don't merge in Jellyfin, so the friend's whole album is left out).
+    /// </summary>
+    /// <param name="entry">The merged entry.</param>
+    /// <param name="localKeys">The owner's keys, including album/book title keys.</param>
+    /// <returns><c>true</c> when the owner has it.</returns>
+    public static bool IsLocal(MergedEntry entry, ISet<string> localKeys)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(localKeys);
+        return entry.Keys.Any(localKeys.Contains) || localKeys.Contains(TitleKey.For(entry));
     }
 
     private static bool IsOwned(string path)

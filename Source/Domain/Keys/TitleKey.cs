@@ -1,3 +1,5 @@
+using JellyShare.Domain.Models.Protocol;
+
 namespace JellyShare.Domain.Keys;
 
 /// <summary>
@@ -17,7 +19,15 @@ public static class TitleKey
             return entry.CanonicalKey;
         }
 
-        var item = entry.Sources[0].Item;
+        return ForAudio(entry.Sources[0].Item) ?? entry.CanonicalKey;
+    }
+
+    /// <summary>Returns the album/book key of a track or audiobook file.</summary>
+    /// <param name="item">The item.</param>
+    /// <returns>The key, or <c>null</c> when the item is not audio or names no album/book folder.</returns>
+    public static string? ForAudio(CatalogItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
         if (string.Equals(item.Type, "Audio", StringComparison.Ordinal)
             && KeyText.Normalize(item.Album).Length > 0)
         {
@@ -30,6 +40,6 @@ public static class TitleKey
             return $"book:{KeyText.Hash(item.FolderPath)}";
         }
 
-        return entry.CanonicalKey;
+        return null;
     }
 }

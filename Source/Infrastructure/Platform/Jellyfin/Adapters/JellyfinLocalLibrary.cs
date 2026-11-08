@@ -1,7 +1,9 @@
 using Jellyfin.Data.Enums;
+using JellyShare.Application.Features.Catalog;
 using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Models.Library;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
@@ -30,11 +32,12 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
         });
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
-            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode, BaseItemKind.Audio, BaseItemKind.AudioBook },
             IsVirtualItem = false,
             Recursive = true,
         });
-        return ToSnapshot(seriesItems, items) with { Locations = GetLocations() };
+        var locations = GetLocations();
+        return ToSnapshot(seriesItems, items, locations) with { Locations = locations };
     }
 
     /// <inheritdoc />
@@ -75,7 +78,7 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
             }
         }
 
-        return ToSnapshot(seriesItems, movies.Concat(episodes).ToList());
+        return ToSnapshot(seriesItems, movies.Concat(episodes).ToList(), []);
     }
 
     /// <inheritdoc />
@@ -108,7 +111,7 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
         return query;
     }
 
-    private static LocalLibrarySnapshot ToSnapshot(IReadOnlyList<BaseItem> seriesItems, IReadOnlyList<BaseItem> items)
+    private static LocalLibrarySnapshot ToSnapshot(IReadOnlyList<BaseItem> seriesItems, IReadOnlyList<BaseItem> items, IReadOnlyList<string> locations)
     {
         var seriesById = new Dictionary<Guid, BaseItem>();
         var series = new List<LocalSeriesItem>(seriesItems.Count);
@@ -135,6 +138,24 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
                         parent is null ? null : Copy(parent.ProviderIds),
                         episode.ParentIndexNumber,
                         episode.IndexNumber));
+                    break;
+                case AudioBook book:
+                    media.Add(new LocalMedia("AudioBook", book.Path, Copy(book.ProviderIds), null, null, null)
+                    {
+                        Name = book.Name,
+                        FolderPath = AudiobookFolders.Relative(book.Path, locations),
+                    });
+                    break;
+                case Audio track:
+                    media.Add(new LocalMedia("Audio", track.Path, Copy(track.ProviderIds), null, null, null)
+                    {
+                        Name = track.Name,
+                        Album = track.Album,
+                        AlbumArtist = track.AlbumArtists.Count > 0 ? track.AlbumArtists[0] : null,
+                        Artists = track.Artists.ToArray(),
+                        DiscNumber = track.ParentIndexNumber,
+                        TrackNumber = track.IndexNumber,
+                    });
                     break;
             }
         }

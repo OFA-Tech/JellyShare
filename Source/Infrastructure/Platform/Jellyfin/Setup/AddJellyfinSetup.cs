@@ -1,5 +1,6 @@
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
+using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Interfaces.Platform;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Streaming;
@@ -32,6 +33,7 @@ public static class JellyfinSetup
         services.AddSingleton<ILocalLibrary, JellyfinLocalLibrary>();
         services.AddSingleton<IScanReporter, LibraryMonitorScanReporter>();
         services.AddSingleton<ILocalItemEvents, JellyfinLocalItemEvents>();
+        services.AddSingleton<IPlaceholderMetadata, JellyfinAudioMetadata>();
 
         services.AddSingleton<IPlaceholderLookup, JellyfinPlaceholderLookup>();
         services.AddSingleton<IAdminLibraries, JellyfinAdminLibraries>();

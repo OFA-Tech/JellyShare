@@ -578,7 +578,9 @@ public sealed class LocalItemWatcher : IHostedService, IDisposable
             var locations = snapshot.Locations.Where(l => !string.IsNullOrWhiteSpace(l)).Select(Normalize).ToList();
             foreach (var media in snapshot.Media)
             {
-                if (string.IsNullOrWhiteSpace(media.Path)
+                // shortcut: music and audiobooks follow local changes only at the next full sync (no targeted library query for them yet).
+                if (media.Type is not ("Movie" or "Episode")
+                    || string.IsNullOrWhiteSpace(media.Path)
                     || media.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
                     || PlaceholderPaths.IsPlaceholder(media.Path, cfg))
                 {
