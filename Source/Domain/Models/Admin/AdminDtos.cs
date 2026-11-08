@@ -247,6 +247,12 @@ public sealed record StatusResponse(
 
     /// <summary>Gets the media types this version can share and receive.</summary>
     public IReadOnlyList<MediaType> SupportedTypes { get; init; } = MediaTypes.Supported;
+
+    /// <summary>Gets the music placeholder root.</summary>
+    public PlaceholderRootView Music { get; init; } = new(string.Empty, false, null, null, null);
+
+    /// <summary>Gets the audiobook placeholder root.</summary>
+    public PlaceholderRootView Audiobooks { get; init; } = new(string.Empty, false, null, null, null);
 }
 
 /// <summary>A Jellyfin library, reduced to what the admin page needs.</summary>

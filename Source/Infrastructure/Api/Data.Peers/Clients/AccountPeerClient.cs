@@ -167,18 +167,18 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
                 }
             }
 
-            var items = new List<CatalogItem>();
+            var shared = new List<JfItem>();
             if (requested.Count > 0)
             {
                 error = await PageAsync(
                     peer,
                     string.Join(',', requested.Select(MediaTypes.CatalogItemType)),
-                    "ProviderIds,Overview,MediaSources,DateCreated&EnableImages=true",
+                    "ProviderIds,Overview,MediaSources,DateCreated,ParentId&EnableImages=true",
                     i =>
                     {
                         if (IsShared(i, peer))
                         {
-                            items.Add(Map(i, series));
+                            shared.Add(i);
                         }
                     },
                     ct).ConfigureAwait(false);
@@ -187,6 +187,20 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
                     return Fail(error);
                 }
             }
+
+            var bookFolders = new Dictionary<string, string?>(StringComparer.Ordinal);
+            // One lookup per book folder (through its first file, as a folder's own ancestors leave the folder out).
+            // shortcut: one request per book on every fetch; page the books' Folder items instead if libraries get large.
+            foreach (var book in shared.Where(i => i.Type == "AudioBook" && !string.IsNullOrEmpty(i.ParentId)).DistinctBy(i => i.ParentId))
+            {
+                (bookFolders[book.ParentId!], error) = await BookFolderAsync(peer, book.Id!, ct).ConfigureAwait(false);
+                if (error is not null)
+                {
+                    return Fail(error);
+                }
+            }
+
+            var items = shared.Select(i => Map(i, series, bookFolders)).ToList();
 
             var hash = Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(items)));
             if (string.Equals(hash, etag, StringComparison.Ordinal))
@@ -229,7 +243,9 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
     {
         ArgumentNullException.ThrowIfNull(peer);
         ArgumentNullException.ThrowIfNull(item);
-        var bitRate = item.Media?.BitRate ?? 0;
+        // Audio is never capped or transcoded: the friend's limit is for video.
+        var isAudio = MediaTypes.IsAudio(item.Type);
+        var bitRate = isAudio ? 0 : item.Media?.BitRate ?? 0;
         var limit = bitRate > 0 ? await GetBitrateLimitAsync(peer, ct).ConfigureAwait(false) : 0;
         var transcode = limit > 0 && bitRate > limit;
 
@@ -239,7 +255,7 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
                 CultureInfo.InvariantCulture,
                 $"static=false&container=mkv&videoCodec=h264&audioCodec=aac&videoBitRate={Math.Max(limit - AudioBitRate, MinVideoBitRate)}&audioBitRate={AudioBitRate}&deviceId={DeviceId(peer.Id)}&playSessionId={Guid.NewGuid():N}")
             : "static=true";
-        var uri = PeerUri.Build(peer.BaseUrl, "Videos/" + Uri.EscapeDataString(item.Id) + "/stream?" + query)
+        var uri = PeerUri.Build(peer.BaseUrl, (isAudio ? "Audio/" : "Videos/") + Uri.EscapeDataString(item.Id) + "/stream?" + query)
             ?? throw new InvalidOperationException("invalid base url");
 
         // A GET has no content, so the request message can be disposed once the headers arrived (see PeerClient).
@@ -307,6 +323,28 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
             // The token is already issued; a missing name must not lose it.
             return null;
         }
+    }
+
+    /// <summary>Gets a book file's folder names below its library root (never an absolute path), like <c>AudiobookFolders</c>.</summary>
+    private async Task<(string? Folder, string? Error)> BookFolderAsync(RemotePeer peer, string itemId, CancellationToken ct)
+    {
+        var user = string.IsNullOrEmpty(peer.AccountUserId) ? string.Empty : "?userId=" + Uri.EscapeDataString(peer.AccountUserId);
+        var uri = PeerUri.Build(peer.BaseUrl, "Items/" + Uri.EscapeDataString(itemId) + "/Ancestors" + user);
+        var (ancestors, error) = await GetJsonAsync<List<JfItem?>>(uri!, peer.Id, peer.Token, _catalogTimeout, ct).ConfigureAwait(false);
+        if (ancestors is null)
+        {
+            return (null, error);
+        }
+
+        // Nearest first; the folders between the file and its library are the book's path.
+        var root = ancestors.FindIndex(a => a?.Type == "CollectionFolder");
+        if (root <= 0)
+        {
+            return (null, null);
+        }
+
+        var names = ancestors.Take(root).Select(a => a?.Name).Reverse().ToList();
+        return names.Any(string.IsNullOrWhiteSpace) ? (null, null) : (string.Join('/', names), null);
     }
 
     private async Task<string?> PageAsync(RemotePeer peer, string types, string fields, Action<JfItem> add, CancellationToken ct)
@@ -407,8 +445,13 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
             && i.LocationType != "Virtual"
             && i.MediaSources is [{ Protocol: "File" }, ..];
 
-    private static CatalogItem Map(JfItem i, Dictionary<string, Dictionary<string, string>> series)
+    private static CatalogItem Map(JfItem i, Dictionary<string, Dictionary<string, string>> series, Dictionary<string, string?> bookFolders)
     {
+        if (MediaTypes.IsAudio(i.Type))
+        {
+            return MapAudio(i, bookFolders);
+        }
+
         var source = i.MediaSources![0]!;
         var streams = (source.MediaStreams ?? []).OfType<JfMediaStream>().ToList();
         var video = streams.Find(s => s.Type == "Video");
@@ -442,6 +485,52 @@ public sealed class AccountPeerClient : IPeerClient, IAccountSignIn
             images.ToArray(),
             i.DateCreated ?? DateTime.UnixEpoch,
             i.SeriesId);
+    }
+
+    private static CatalogItem MapAudio(JfItem i, Dictionary<string, string?> bookFolders)
+    {
+        var source = i.MediaSources![0]!;
+        var audio = (source.MediaStreams ?? []).OfType<JfMediaStream>()
+            .Where(s => s.Type == "Audio")
+            .Select(s => new AudioTrack(s.Language, s.Codec, s.Channels, s.DisplayTitle))
+            .ToArray();
+        var isBook = i.Type == "AudioBook";
+        var folder = isBook && i.ParentId is not null ? bookFolders.GetValueOrDefault(i.ParentId) : null;
+
+        // Like a JellyShare provider: a book's art holder is its folder (none directly in the library root), a track's its album.
+        var bookHolder = folder is null ? null : i.ParentId;
+        var holder = isBook ? bookHolder : i.AlbumId;
+        var images = (i.ImageTags?.Keys ?? Enumerable.Empty<string>()).ToList();
+        var holderHasPrimary = isBook ? holder is not null && i.ParentPrimaryImageItemId == holder : i.AlbumPrimaryImageTag is not null;
+        if (holderHasPrimary && !images.Contains("Primary"))
+        {
+            images.Add("Primary");
+        }
+
+        var albumArtist = i.AlbumArtists?.OfType<JfNamedItem>().Select(a => a.Name).FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? i.AlbumArtist;
+        return new CatalogItem(
+            i.Id!,
+            i.Type!,
+            i.Name ?? string.Empty,
+            i.ProductionYear,
+            Ids(i.ProviderIds),
+            null,
+            null,
+            null,
+            null,
+            i.RunTimeTicks,
+            i.Overview,
+            new MediaInfo(source.Container, null, null, null, source.Bitrate, audio, []),
+            images.ToArray(),
+            i.DateCreated ?? DateTime.UnixEpoch,
+            null,
+            i.Album,
+            albumArtist,
+            i.Artists?.OfType<string>().ToArray(),
+            i.ParentIndexNumber,
+            i.IndexNumber,
+            holder,
+            folder);
     }
 
     private static Dictionary<string, string> Ids(Dictionary<string, string?>? ids)

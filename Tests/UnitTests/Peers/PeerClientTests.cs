@@ -37,11 +37,11 @@ public sealed class PeerClientTests
         var peer = Peer();
         await client.FetchCatalogAsync(peer, null, CancellationToken.None);
         peer.AcceptAllTypes = false;
-        peer.AcceptTypes = [MediaType.Shows, MediaType.Music, MediaType.Movies];
+        peer.AcceptTypes = [MediaType.Shows, MediaType.Ebooks, MediaType.Movies];
         await client.FetchCatalogAsync(peer, null, CancellationToken.None);
 
-        // All accepted, and Music accepted but not supported yet: both ask for Movies,Shows.
-        handler.Requests.Select(r => r.RequestUri!.Query).ShouldBe(["?types=Movies,Shows", "?types=Movies,Shows"]);
+        // All accepted asks for every supported type; Ebooks accepted but not supported yet is not asked for.
+        handler.Requests.Select(r => r.RequestUri!.Query).ShouldBe(["?types=Movies,Shows,Music,Audiobooks", "?types=Movies,Shows"]);
     }
 
     [Fact]
@@ -50,7 +50,7 @@ public sealed class PeerClientTests
         var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));
         var peer = Peer();
         peer.AcceptAllTypes = false;
-        peer.AcceptTypes = [MediaType.Music];
+        peer.AcceptTypes = [MediaType.Ebooks];
 
         var result = await client.FetchCatalogAsync(peer, "abc", CancellationToken.None);
 
@@ -73,10 +73,10 @@ public sealed class PeerClientTests
     }
 
     [Theory]
-    [InlineData("https://h/jellyfin", "https://h/jellyfin/JellyShare/v1/catalog?types=Movies,Shows")]
-    [InlineData("https://h/jellyfin/", "https://h/jellyfin/JellyShare/v1/catalog?types=Movies,Shows")]
-    [InlineData("http://h:8101", "http://h:8101/JellyShare/v1/catalog?types=Movies,Shows")]
-    [InlineData(" http://h:8101/ ", "http://h:8101/JellyShare/v1/catalog?types=Movies,Shows")]
+    [InlineData("https://h/jellyfin", "https://h/jellyfin/JellyShare/v1/catalog?types=Movies,Shows,Music,Audiobooks")]
+    [InlineData("https://h/jellyfin/", "https://h/jellyfin/JellyShare/v1/catalog?types=Movies,Shows,Music,Audiobooks")]
+    [InlineData("http://h:8101", "http://h:8101/JellyShare/v1/catalog?types=Movies,Shows,Music,Audiobooks")]
+    [InlineData(" http://h:8101/ ", "http://h:8101/JellyShare/v1/catalog?types=Movies,Shows,Music,Audiobooks")]
     public async Task PeerClient_JoinsBaseUrlKeepingSubPath(string baseUrl, string expected)
     {
         var (client, handler) = Create(new FakeHandler(_ => Json(MinimalCatalog)));

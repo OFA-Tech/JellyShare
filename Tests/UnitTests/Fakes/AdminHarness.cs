@@ -28,6 +28,8 @@ internal sealed class AdminHarness : IDisposable
         Saver = new FakeSaver(Config);
         Config.Settings.MoviesPlaceholderPath = Tmp.Sub("ph", "Movies");
         Config.Settings.ShowsPlaceholderPath = Tmp.Sub("ph", "Shows");
+        Config.Settings.MusicPlaceholderPath = Tmp.Sub("ph", "Music");
+        Config.Settings.AudiobooksPlaceholderPath = Tmp.Sub("ph", "Audiobooks");
         Index = new ConsumerIndexFiles(() => Tmp.Sub("data"));
         PeerStates = PeerStateStore.InDataFolder(() => Tmp.Sub("data"));
 

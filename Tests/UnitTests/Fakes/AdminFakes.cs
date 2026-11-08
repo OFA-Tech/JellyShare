@@ -34,12 +34,14 @@ internal sealed class FakeLibraries : IAdminLibraries
     public static readonly Guid MoviesId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     public static readonly Guid ShowsId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     public static readonly Guid MusicId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    public static readonly Guid BooksId = Guid.Parse("44444444-4444-4444-4444-444444444444");
 
     public List<LibraryInfo> Libraries { get; } = new()
     {
         new(MoviesId, "Movies", "movies", ["/media/Movies"], false),
         new(ShowsId, "Shows", "tvshows", ["/media/Shows"], true),
         new(MusicId, "Music", "music", ["/media/Music"], false),
+        new(BooksId, "Books", "books", ["/media/Books"], false),
     };
 
     public List<(string Library, string Path)> Added { get; } = new();

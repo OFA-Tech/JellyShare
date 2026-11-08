@@ -433,7 +433,8 @@ async function typesCheck(browser) {
     check('the Share tab has a "Default sharing" card with ticks', found);
     if (!found) return;
     const all7 = ['Movies', 'Shows', 'Music', 'Audiobooks', 'Ebooks', 'Collections', 'LiveTv'];
-    const unsupported = ['Music', 'Audiobooks', 'Ebooks', 'Collections', 'LiveTv'];
+    const supported = ['Movies', 'Shows', 'Music', 'Audiobooks'];
+    const unsupported = ['Ebooks', 'Collections', 'LiveTv'];
     const allBox = ds.locator('input:not([data-type])');
     check('7 ticks', await ds.locator('input[data-type]').count() === 7);
     check('"All media types" is on', await allBox.isChecked());
@@ -443,8 +444,11 @@ async function typesCheck(browser) {
     check('the account note appears once', (await a.locator('#JellySharePage').innerText()).split('apply to invitations').length === 2);
 
     await allBox.uncheck();
-    check('after unticking All Movies and Shows are editable, the rest stay locked',
-      !(await tick(ds, 'Movies').isDisabled()) && !(await tick(ds, 'Shows').isDisabled()) && (await Promise.all(unsupported.map(t => tick(ds, t).isDisabled()))).every(Boolean));
+    check('after unticking All Movies, Shows, Music and Audiobooks are editable, the rest stay locked',
+      (await Promise.all(supported.map(t => tick(ds, t).isDisabled()))).every(d => !d) && (await Promise.all(unsupported.map(t => tick(ds, t).isDisabled()))).every(Boolean));
+    check('the Audiobooks tick is labelled "Audiobooks & podcasts"', (await ds.innerText()).includes('Audiobooks & podcasts'));
+    await tick(ds, 'Music').uncheck();
+    await tick(ds, 'Audiobooks').uncheck();
     await tick(ds, 'Shows').uncheck();
     await tick(ds, 'Movies').uncheck();
     await ds.locator('button:has-text("Save")').click();
@@ -468,7 +472,7 @@ async function typesCheck(browser) {
     await a.click('#js-dismiss-token');
     await create.locator('select').selectOption('list');
     await tick(create, 'Shows').check();
-    await tick(create, 'Movies').uncheck();
+    for (const t of ['Movies', 'Music', 'Audiobooks']) await tick(create, t).uncheck();
     await a.fill('#js-new-name', 'types check custom');
     await a.click('#js-create-share');
     await a.waitForSelector('#js-created:not(.js-hidden)', { timeout: 15000 });
@@ -501,7 +505,9 @@ async function typesCheck(browser) {
     check('a peer starts on "Everything they share" with every tick locked', (await peer.locator('select').inputValue()) === 'all' && (await peer.locator('option').allInnerTexts()).join('|') === 'Everything they share|Only:' && (await flags(peer, all7)).every(f => f.endsWith('on/locked')));
     check('the receive row is labelled "Receive"', (await peer.innerText()).includes('Receive'));
     await peer.locator('select').selectOption('list');
-    check('Only: unlocks Movies and Shows', !(await tick(peer, 'Movies').isDisabled()) && !(await tick(peer, 'Shows').isDisabled()));
+    check('Only: unlocks Movies, Shows, Music and Audiobooks', (await Promise.all(supported.map(t => tick(peer, t).isDisabled()))).every(d => !d));
+    await tick(peer, 'Music').uncheck();
+    await tick(peer, 'Audiobooks').uncheck();
     await tick(peer, 'Shows').uncheck();
     await tick(peer, 'Movies').uncheck();
     await peer.locator('button:has-text("Save")').click();
@@ -515,10 +521,55 @@ async function typesCheck(browser) {
     check('Only Movies persists after a reload', (await peer2.locator('select').inputValue()) === 'list' && (await flags(peer2, ['Movies', 'Shows'])).join() === 'Movies:on,Shows:off');
     const p = ((await status()).peers ?? (await status()).Peers)[0];
     log('peer acceptAllTypes =', JSON.stringify(p.acceptAllTypes ?? p.AcceptAllTypes), '; acceptTypes =', JSON.stringify(p.acceptTypes ?? p.AcceptTypes));
+    const roots = a.locator('#js-roots');
+    for (const label of ['Music', 'Audiobooks & podcasts']) {
+      const card = roots.locator('.js-card', { hasText: label + ' placeholder folder' });
+      check(`Setup shows the ${label} folder with "Add to library"`, await card.count() === 1 && await card.locator('button:has-text("Add to library")').count() === 1);
+    }
+    await shot(a, 'media-types-setup');
     await a.click('#JellySharePage .js-tab[data-tab="share"]');
     await shot(a, 'media-types');
   } finally {
     await rest('alice', 'POST', configUrl, snapshot, admin).then(() => log('alice configuration restored'), e => log('RESTORE FAILED:', e.message));
+  }
+  await skippedNoteCheck(a, admin, status);
+}
+
+// bob's share for alice is widened to every type for one alice sync: alice's Music and Audiobooks folders are not in a
+// library, so the sync skips them and the Setup card says to set the folder up first. bob is restored and alice re-synced.
+async function skippedNoteCheck(a, admin, status) {
+  const bobAdmin = await adminToken('bob');
+  const configUrl = `/Plugins/${PLUGIN_ID}/Configuration`;
+  const bobSnapshot = await rest('bob', 'GET', configUrl, undefined, bobAdmin);
+  const syncAlice = async () => {
+    const lastOf = s => JSON.stringify(s.lastSync ?? s.LastSync ?? null);
+    const before = lastOf(await status());
+    await rest('alice', 'POST', '/JellyShare/v1/admin/sync', undefined, admin);
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      const s = await status();
+      if (!(s.syncRunning ?? s.SyncRunning) && lastOf(s) !== before) return s;
+    }
+    throw new Error('alice sync did not finish');
+  };
+  try {
+    const widened = structuredClone(bobSnapshot);
+    widened.Shares.filter(s => s.Name === 'alice').forEach(s => { s.UseDefaultTypes = true; });
+    await rest('bob', 'POST', configUrl, widened, bobAdmin);
+    const s = await syncAlice();
+    const last = s.lastSync ?? s.LastSync;
+    const skipped = last?.skippedTypesWithoutFolder ?? last?.SkippedTypesWithoutFolder ?? [];
+    log('lastSync.skippedTypesWithoutFolder =', JSON.stringify(skipped));
+    check('alice\'s sync skipped Music and Audiobooks (no folder in a library)', skipped.join() === 'Music,Audiobooks');
+    await reopen(a, SERVERS.alice.url, 'receive');
+    const note = a.locator('#js-roots .js-msg', { hasText: 'set up the folder first' });
+    const text = await note.count() === 1 ? await note.innerText() : '';
+    log('note:', text);
+    check('Setup says to set up the folder first for Music and Audiobooks & podcasts', text.includes('Music') && text.includes('Audiobooks & podcasts'));
+    await shot(a, 'media-types-skipped');
+  } finally {
+    await rest('bob', 'POST', configUrl, bobSnapshot, bobAdmin).then(() => log('bob configuration restored'), e => log('RESTORE FAILED:', e.message));
+    await syncAlice().then(() => log('alice re-synced'), e => log('alice re-sync failed:', e.message));
   }
 }
 

@@ -57,6 +57,8 @@ public sealed class AdminControllerTests : IDisposable
         _saver = new FakeSaver(_config);
         _config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
         _index = new ConsumerIndexFiles(() => _tmp.Sub("data"));
         var services = new ServiceCollection();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -220,7 +222,7 @@ public sealed class AdminControllerTests : IDisposable
     public void DefaultSharing_IsInStatus_AndCanBeChanged()
     {
         Status().DefaultSharing.All.ShouldBeTrue();
-        Status().SupportedTypes.ShouldBe([MediaType.Movies, MediaType.Shows]);
+        Status().SupportedTypes.ShouldBe([MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks]);
 
         var view = Value<DefaultSharingView>(Run(_c.UpdateDefaultSharing(new DefaultSharingRequest(false, [MediaType.Music, MediaType.Movies]), CancellationToken.None)));
 
@@ -733,7 +735,7 @@ public sealed class AdminControllerTests : IDisposable
         s.Shows.Path.ShouldBe(_config.Current.ShowsPlaceholderPath);
         s.Movies.Attached.ShouldBeFalse();
         s.Shows.Attached.ShouldBeFalse();
-        s.Libraries.Count.ShouldBe(3);
+        s.Libraries.Count.ShouldBe(4);
     }
 
     [Fact]
@@ -784,8 +786,23 @@ public sealed class AdminControllerTests : IDisposable
         _libs.Added.ShouldHaveSingleItem().ShouldBe(("Shows", _config.Current.ShowsPlaceholderPath));
     }
 
+    [Fact]
+    public async Task Attach_MusicAndAudiobooks_AddTheirOwnRoots_AndShowInStatus()
+    {
+        await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Music"), CancellationToken.None);
+        await _c.Attach(new AttachLibraryRequest(FakeLibraries.BooksId, "audiobooks"), CancellationToken.None);
+        (await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Audiobooks"), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+
+        _libs.Added.ShouldBe([("Music", _config.Current.MusicPlaceholderPath), ("Books", _config.Current.AudiobooksPlaceholderPath)]);
+        var s = Status();
+        s.Music.Attached.ShouldBeTrue();
+        s.Music.LibraryName.ShouldBe("Music");
+        s.Audiobooks.Attached.ShouldBeTrue();
+        s.Audiobooks.LibraryName.ShouldBe("Books");
+    }
+
     [Theory]
-    [InlineData("Music")]
+    [InlineData("Ebooks")]
     [InlineData("")]
     [InlineData("../../etc")]
     [InlineData(null)]

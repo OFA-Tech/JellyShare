@@ -509,21 +509,31 @@
 
     // ---- receive tab ----
 
+    var LIBRARY_KINDS = { Movies: 'movies', Shows: 'tvshows', Music: 'music', Audiobooks: 'books' };
+
+    function typeLabel(type) {
+        var t = TYPES.filter(function (x) {
+            return x[0] === type;
+        })[0];
+        return t ? t[1] : type;
+    }
+
     function attachControl(type, root) {
+        var label = typeLabel(type);
         var box = el('div', { class: 'js-card' }, [
-            el('h4', { text: type + ' placeholder folder' }),
+            el('h4', { text: label + ' placeholder folder' }),
             el('p', {}, [el('code', { text: root.path })])
         ]);
         if (root.attached) {
             box.appendChild(el('p', { text: 'Added to the library "' + root.libraryName + '".' }));
             return box;
         }
-        var kind = type === 'Movies' ? 'movies' : 'tvshows';
+        var kind = LIBRARY_KINDS[type];
         var libs = ((status && status.libraries) || []).filter(function (l) {
             return l.collectionType === kind;
         });
         if (!libs.length) {
-            box.appendChild(el('p', { class: 'js-muted', text: 'Create a ' + type + ' library in Dashboard > Libraries first, then come back here.' }));
+            box.appendChild(el('p', { class: 'js-muted', text: 'Create a ' + label + ' library in Dashboard > Libraries first, then come back here.' }));
             return box;
         }
         var select = el('select', {}, libs.map(function (l) {
@@ -531,7 +541,7 @@
         }));
         var button = btn('Add to library', 'primary', function () {
             busy(button, api('POST', 'libraries/attach', { libraryId: select.value, type: type })).then(function () {
-                showMessage('ok', 'Added the ' + type + ' folder. Jellyfin is scanning the library now.');
+                showMessage('ok', 'Added the ' + label + ' folder. Jellyfin is scanning the library now.');
                 return refresh();
             }).catch(fail);
         });
@@ -552,6 +562,13 @@
         }
         holder.appendChild(attachControl('Movies', status.movies));
         holder.appendChild(attachControl('Shows', status.shows));
+        holder.appendChild(attachControl('Music', status.music));
+        holder.appendChild(attachControl('Audiobooks', status.audiobooks));
+        var skipped = (status.lastSync && status.lastSync.skippedTypesWithoutFolder) || [];
+        if (skipped.length) {
+            holder.appendChild(el('div', { class: 'js-msg warn', text: 'The last sync skipped ' +
+                skipped.map(typeLabel).join(', ') + ' from peers: set up the folder first (add it to a library above).' }));
+        }
         var warning = $('js-grouping-warning');
         if (status.shows.attached && status.shows.automaticSeriesGrouping === false) {
             warning.textContent = 'The library "' + status.shows.libraryName + '" has "Automatically merge series that are spread across multiple folders" turned off. ' +

@@ -70,6 +70,8 @@ public sealed class GetStatusQueryHandler : IQueryHandler<GetStatusQuery, Status
             SyncError = _sync.LastError,
             DefaultSharing = AdminRules.DefaultSharing(cfg),
             SupportedTypes = MediaTypes.Supported,
+            Music = AdminRules.RootView(cfg.MusicPlaceholderPath, libraries),
+            Audiobooks = AdminRules.RootView(cfg.AudiobooksPlaceholderPath, libraries),
         }));
     }
 }

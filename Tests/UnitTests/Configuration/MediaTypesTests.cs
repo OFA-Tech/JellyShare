@@ -10,13 +10,11 @@ public sealed class MediaTypesTests
         => new(id, "lib", collectionType, Array.Empty<string>(), false);
 
     [Fact]
-    public void All_IsEveryTypeInEnumOrder_AndSupportedIsMoviesAndShows()
+    public void All_IsEveryTypeInEnumOrder_AndSupportedIsVideoAndAudio()
     {
         MediaTypes.All.ShouldBe(Enum.GetValues<MediaType>());
         MediaTypes.All.Count.ShouldBe(7);
-        MediaTypes.Supported.ShouldBe(new[] { MediaType.Movies, MediaType.Shows });
-        MediaTypes.Receivable.ShouldBe(new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks });
-        MediaTypes.ProviderSupported.ShouldBe(new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks });
+        MediaTypes.Supported.ShouldBe(new[] { MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks });
     }
 
     [Theory]

@@ -48,7 +48,7 @@ public static class SourceSelector
             .Where(s => s.Item is not null)
             .Select(s => byId.TryGetValue(s.PeerId, out var peer) ? new RelaySource(peer, s.Item) : null)
             .OfType<RelaySource>()
-            .Where(s => s.Peer.Enabled && MediaTypes.IsReceived(s.Peer, s.Item.Type))
+            .Where(s => s.Peer.Enabled && MediaTypes.IsRequested(s.Peer, s.Item.Type))
             .OrderBy(s => IsFailing(states, s.Peer.Id))
             .ThenBy(s => s.Peer.Priority)
             .ThenBy(s => s.Peer.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)

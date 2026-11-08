@@ -412,7 +412,7 @@ public sealed class SyncService : ISyncRunner
         // Every .strm/.nfo the plugin wrote under a root is its own to delete, so a root must never be (or contain, or
         // sit inside) one of the owner's library folders, and must be the plugin's own folder.
         var locations = _localIndex.LibraryLocations();
-        var roots = MediaTypes.Receivable.Select(t => (Type: t, Root: PlaceholderPaths.RootOf(cfg, t))).ToList();
+        var roots = MediaTypes.Supported.Select(t => (Type: t, Root: PlaceholderPaths.RootOf(cfg, t))).ToList();
         foreach (var (type, root) in roots)
         {
             if (string.IsNullOrWhiteSpace(root))
@@ -515,7 +515,7 @@ public sealed class SyncService : ISyncRunner
 
             contributing[peer.Id] = peer;
             // Also applied to a cached catalog: it may predate a change of what this peer is accepted for.
-            sources.AddRange(catalog.Items.Where(item => MediaTypes.IsReceived(peer, item.Type)).Select(item => (peer.Id, item)));
+            sources.AddRange(catalog.Items.Where(item => MediaTypes.IsRequested(peer, item.Type)).Select(item => (peer.Id, item)));
         }
 
         var index = MergeIndex.Build(sources);
@@ -532,7 +532,7 @@ public sealed class SyncService : ISyncRunner
         var withoutFolder = new List<MediaType>();
         var results = new List<(PlaceholderWriteResult Write, int Skipped, ImageJob? Images)>();
         var libraries = new Lazy<IReadOnlyList<LibraryInfo>>(_libraries.List);
-        foreach (var type in MediaTypes.Receivable)
+        foreach (var type in MediaTypes.Supported)
         {
             var entries = index.Entries.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == type).ToList();
             var root = PlaceholderPaths.RootOf(cfg, type);

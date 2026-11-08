@@ -192,7 +192,7 @@ public sealed class AccountPeerClientTests
         var (client, handler) = Create(new FakeHandler(r => Server(r)));
         var peer = Peer();
         peer.AcceptAllTypes = false;
-        peer.AcceptTypes = [MediaType.Movies, MediaType.Music];
+        peer.AcceptTypes = [MediaType.Movies, MediaType.Ebooks];
 
         var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
 
@@ -209,7 +209,7 @@ public sealed class AccountPeerClientTests
         var (client, handler) = Create(new FakeHandler(r => Server(r)));
         var peer = Peer();
         peer.AcceptAllTypes = false;
-        peer.AcceptTypes = [MediaType.Music];
+        peer.AcceptTypes = [MediaType.Ebooks];
 
         var result = await client.FetchCatalogAsync(peer, null, CancellationToken.None);
 
@@ -279,7 +279,7 @@ public sealed class AccountPeerClientTests
               {"Id":"virtual","Type":"Episode","Name":"Missing","LocationType":"Virtual","MediaSources":[{"Protocol":"File"}]},
               {"Id":"none","Type":"Movie","Name":"No sources"},
               {"Id":"empty","Type":"Movie","Name":"Empty sources","MediaSources":[]},
-              {"Id":"audio","Type":"Audio","Name":"Song","MediaSources":[{"Protocol":"File"}]}
+              {"Id":"ebook","Type":"Book","Name":"Not a supported type","MediaSources":[{"Protocol":"File"}]}
             ],"TotalRecordCount":6}
             """;
         var (client, _) = Create(new FakeHandler(r => Server(r, items)));
@@ -561,6 +561,113 @@ public sealed class AccountPeerClientTests
         var ex = await Should.ThrowAsync<HttpRequestException>(() => client.OpenStreamAsync(Peer(), TestItem(null), null, CancellationToken.None));
 
         ex.Message.ShouldNotContain(Token, Case.Sensitive);
+    }
+
+    private const string AudioItems = """
+        {"Items":[
+          {"Id":"a1","Type":"Audio","Name":"Song Two","ProductionYear":2001,"ProviderIds":{"MusicBrainzRecording":"rec-2"},
+           "RunTimeTicks":200000000,"LocationType":"FileSystem","DateCreated":"2026-10-30T00:00:00Z",
+           "Album":"Album One","AlbumId":"al1","AlbumArtist":"Artist A","AlbumArtists":[{"Name":"Artist A","Id":"ar1"},{"Name":"Artist Z","Id":"ar2"}],
+           "Artists":["Artist A","Guest"],"IndexNumber":2,"ParentIndexNumber":1,"ParentId":"al1","AlbumPrimaryImageTag":"t9",
+           "ImageTags":{},"BackdropImageTags":[],
+           "MediaSources":[{"Protocol":"File","Container":"flac","Bitrate":99332,"MediaStreams":[
+             {"Type":"Audio","Codec":"flac","Channels":1,"DisplayTitle":"FLAC - Mono"}]}]},
+          {"Id":"b1","Type":"AudioBook","Name":"Chapter One","ProviderIds":{},"LocationType":"FileSystem","DateCreated":"2026-10-30T00:00:00Z",
+           "Album":"Book Y","AlbumArtist":"Author X","AlbumArtists":[{"Name":"Author X","Id":"ar3"}],"Artists":["Author X"],
+           "IndexNumber":1,"ParentIndexNumber":1,"ParentId":"f2","ParentPrimaryImageItemId":"f2","ImageTags":{},"BackdropImageTags":[],
+           "MediaSources":[{"Protocol":"File","Container":"mp3","Bitrate":64000,"MediaStreams":[]}]},
+          {"Id":"b2","Type":"AudioBook","Name":"Chapter Two","ProviderIds":{},"LocationType":"FileSystem","DateCreated":"2026-10-30T00:00:00Z",
+           "Album":"Book Y","IndexNumber":2,"ParentId":"f2","ImageTags":{},"BackdropImageTags":[],
+           "MediaSources":[{"Protocol":"File","Container":"mp3","Bitrate":64000,"MediaStreams":[]}]},
+          {"Id":"b3","Type":"AudioBook","Name":"Loose","ProviderIds":{},"LocationType":"FileSystem","DateCreated":"2026-10-30T00:00:00Z",
+           "ParentId":"lib","ImageTags":{},"BackdropImageTags":[],
+           "MediaSources":[{"Protocol":"File","Container":"mp3","Bitrate":64000,"MediaStreams":[]}]}
+        ],"TotalRecordCount":4,"StartIndex":0}
+        """;
+
+    private static HttpResponseMessage AudioServer(HttpRequestMessage r)
+    {
+        var path = r.RequestUri!.AbsolutePath;
+        if (path.EndsWith("/Items/b1/Ancestors", StringComparison.Ordinal))
+        {
+            return Json("""
+                [{"Id":"f2","Type":"Folder","Name":"Book Y"},{"Id":"f1","Type":"Folder","Name":"Author X"},
+                 {"Id":"lib","Type":"CollectionFolder","Name":"Audiobooks"},{"Id":"root","Type":"UserRootFolder","Name":"Media Folders"}]
+                """);
+        }
+
+        if (path.EndsWith("/Items/b3/Ancestors", StringComparison.Ordinal))
+        {
+            return Json("""[{"Id":"lib","Type":"CollectionFolder","Name":"Audiobooks"},{"Id":"root","Type":"UserRootFolder","Name":"Media Folders"}]""");
+        }
+
+        return Server(r, AudioItems);
+    }
+
+    [Fact]
+    public async Task Account_Audio_MapsAlbumFields()
+    {
+        var (client, handler) = Create(new FakeHandler(AudioServer));
+
+        var result = await client.FetchCatalogAsync(Peer(), null, CancellationToken.None);
+
+        result.Ok.ShouldBeTrue(result.Error);
+        var items = result.Catalog!.Items;
+        var track = items.Single(i => i.Id == "a1");
+        track.Type.ShouldBe("Audio");
+        track.Album.ShouldBe("Album One");
+        track.AlbumArtist.ShouldBe("Artist A");
+        track.Artists.ShouldBe(["Artist A", "Guest"]);
+        track.AlbumId.ShouldBe("al1");
+        track.TrackNumber.ShouldBe(2);
+        track.DiscNumber.ShouldBe(1);
+        track.SeasonNumber.ShouldBeNull();
+        track.EpisodeNumber.ShouldBeNull();
+        track.ProviderIds["MusicBrainzRecording"].ShouldBe("rec-2");
+        track.RunTimeTicks.ShouldBe(200000000);
+        track.Media.Container.ShouldBe("flac");
+        track.Media.BitRate.ShouldBe(99332);
+        track.Media.Audio.ShouldHaveSingleItem().Codec.ShouldBe("flac");
+        track.ImageTypes.ShouldBe(["Primary"]);
+        track.FolderPath.ShouldBeNull();
+
+        var book = items.Single(i => i.Id == "b1");
+        book.Type.ShouldBe("AudioBook");
+        book.FolderPath.ShouldBe("Author X/Book Y");
+        book.AlbumId.ShouldBe("f2");
+        book.Album.ShouldBe("Book Y");
+        book.AlbumArtist.ShouldBe("Author X");
+        book.ImageTypes.ShouldBe(["Primary"]);
+        book.TrackNumber.ShouldBe(1);
+        items.Single(i => i.Id == "b2").FolderPath.ShouldBe("Author X/Book Y");
+
+        // A book file directly in the library root has no folder (as on a JellyShare provider).
+        var loose = items.Single(i => i.Id == "b3");
+        loose.FolderPath.ShouldBeNull();
+        loose.AlbumId.ShouldBeNull();
+        loose.ImageTypes.ShouldBeEmpty();
+
+        // One parent lookup per book folder, not per file; no absolute path is ever asked for.
+        handler.Requests.Where(x => x.RequestUri!.AbsolutePath.EndsWith("/Ancestors", StringComparison.Ordinal))
+            .Select(x => x.RequestUri!.PathAndQuery).ShouldBe(["/jellyfin/Items/b1/Ancestors?userId=u1", "/jellyfin/Items/b3/Ancestors?userId=u1"]);
+        ItemRequests(handler, "Movie,Episode,Audio,AudioBook").ShouldHaveSingleItem().RequestUri!.Query.ShouldNotContain("Path", Case.Sensitive);
+        foreach (var r in handler.Requests)
+        {
+            r.RequestUri!.ToString().ShouldNotContain(Token, Case.Sensitive);
+        }
+    }
+
+    [Fact]
+    public async Task Account_Audio_StreamsStaticAudio_EvenOverBitrateLimit()
+    {
+        var (client, handler) = Create(new FakeHandler(r => Server(r, bitrateLimit: 64000)));
+        var track = TestItems.Movie("x") with { Id = "a1", Type = "Audio", Media = new MediaInfo("flac", null, null, null, 1000000, [], []) };
+
+        using var response = await client.OpenStreamAsync(Peer(), track, "bytes=10-", CancellationToken.None);
+
+        var r = handler.Requests.ShouldHaveSingleItem();
+        r.RequestUri!.ToString().ShouldBe("https://h/jellyfin/Audio/a1/stream?static=true");
+        r.Headers.Range!.ToString().ShouldBe("bytes=10-");
     }
 
     private static CatalogItem TestItem(int? bitRate)
