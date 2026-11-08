@@ -10,6 +10,15 @@
 
 **Spec:** `docs/specs/2026-11-08-media-types-design.md` (read it first; its "Calls made after the builder check" section is binding).
 
+## Amendment after Task 1 (2026-11-08, owner: "go with your recommendation")
+
+Task 1 stopped: on 12.4 an audio `.strm` gets no artist/album (tags are read from the `.strm` file itself; no track `.nfo`) and never plays (Jellyfin follows a `.strm` URL only for video). Writing track metadata through Jellyfin's item API after a scan **does** group correctly (friend's track joins the owner's artist; a missing album shows as one album in order). Partial albums can't merge.
+
+New order:
+1. Tasks 2–5 as written (types, settings, share/receive filters, admin page) with `MediaTypes.Supported` = Movies, Shows; Music/Audiobooks show "coming later".
+2. **Task 5b — playback spike for approach A′**: from plugin code, make an audio placeholder item play through the relay (e.g. an `IMediaSourceProvider` that offers an Http/IsRemote source pointing at the relay, plus the PlaybackInfo filter dropping the `.strm` source, plus an action filter on `Audio/{id}/stream|universal` for clients that skip PlaybackInfo). Prove: web client plays a music `.strm` and an audiobook `.strm`; `Audio/{id}/universal` and `/stream?static=true` return audio bytes (ffprobe); no token/key in any URL or file. Record in `docs/spike-results.md`.
+3. If 5b works: Tasks 6–10 with A′ — Task 8 also writes track metadata (artist, album artist, album, track/disc number) to the placeholder items after each scan, and writes only albums the owner lacks entirely. If 5b fails: stop Music/Audiobooks for this release (README says "coming later") and report; channels (B) become a separate project.
+
 ## Global Constraints
 
 - Only `JellyShare.Jellyfin` references Jellyfin/MediaBrowser/ASP.NET; interfaces and enums live in Domain; handlers/requests follow the existing architecture tests.
