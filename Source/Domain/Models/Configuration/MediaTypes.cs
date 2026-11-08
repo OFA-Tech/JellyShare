@@ -35,6 +35,12 @@ public static class MediaTypes
         _ => null,
     };
 
+    /// <summary>Tells whether a catalog item type is audio (a music track or an audiobook file).</summary>
+    /// <param name="catalogItemType">The catalog item type.</param>
+    /// <returns><c>true</c> for <c>Audio</c> and <c>AudioBook</c>.</returns>
+    public static bool IsAudio(string? catalogItemType)
+        => catalogItemType is not null && Of(catalogItemType) is MediaType.Music or MediaType.Audiobooks;
+
     /// <summary>Maps a media type to its catalog item type (the reverse of <see cref="Of"/>).</summary>
     /// <param name="type">The media type.</param>
     /// <returns>The catalog item type.</returns>

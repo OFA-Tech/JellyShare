@@ -74,7 +74,7 @@ public sealed class JellyfinAudioMetadata : IPlaceholderMetadata
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<PlaceholderTrack> ReadTracks(IReadOnlyList<string> roots)
+    public PlaceholderAudio ReadTracks(IReadOnlyList<string> roots)
     {
         ArgumentNullException.ThrowIfNull(roots);
         var prefixes = roots.Select(r => Path.TrimEndingDirectorySeparator(Path.GetFullPath(r)) + Path.DirectorySeparatorChar).ToList();
@@ -90,13 +90,25 @@ public sealed class JellyfinAudioMetadata : IPlaceholderMetadata
             Recursive = true,
         });
 
+        var cfg = _config.Current;
         var tracks = new List<PlaceholderTrack>();
+        var ownerArtists = new List<string>();
         foreach (var audio in items.OfType<Audio>())
         {
             var path = audio.Path;
-            if (string.IsNullOrEmpty(path)
-                || !path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
-                || !prefixes.Any(p => path.StartsWith(p, comparison)))
+            if (string.IsNullOrEmpty(path))
+            {
+                continue;
+            }
+
+            if (!path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase) && !PlaceholderPaths.IsPlaceholder(path, cfg))
+            {
+                ownerArtists.AddRange(audio.AlbumArtists ?? []);
+                ownerArtists.AddRange(audio.Artists ?? []);
+                continue;
+            }
+
+            if (!path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase) || !prefixes.Any(p => path.StartsWith(p, comparison)))
             {
                 continue;
             }
@@ -109,7 +121,7 @@ public sealed class JellyfinAudioMetadata : IPlaceholderMetadata
             }
         }
 
-        return tracks;
+        return new PlaceholderAudio(tracks, ownerArtists);
     }
 
     /// <inheritdoc />

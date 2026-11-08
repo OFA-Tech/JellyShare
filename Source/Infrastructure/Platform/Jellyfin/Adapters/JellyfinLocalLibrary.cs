@@ -111,7 +111,7 @@ public sealed class JellyfinLocalLibrary : ILocalLibrary
         return query;
     }
 
-    private static LocalLibrarySnapshot ToSnapshot(IReadOnlyList<BaseItem> seriesItems, IReadOnlyList<BaseItem> items, IReadOnlyList<string> locations)
+    internal static LocalLibrarySnapshot ToSnapshot(IReadOnlyList<BaseItem> seriesItems, IReadOnlyList<BaseItem> items, IReadOnlyList<string> locations)
     {
         var seriesById = new Dictionary<Guid, BaseItem>();
         var series = new List<LocalSeriesItem>(seriesItems.Count);

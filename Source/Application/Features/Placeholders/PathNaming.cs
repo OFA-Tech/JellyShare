@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Rules;
@@ -74,8 +75,9 @@ public static class PathNaming
     /// <summary>Computes the placeholder location of a merged entry.</summary>
     /// <param name="e">The merged entry; the first source provides the names.</param>
     /// <param name="localSeries">The owner's local series, if the owner already has this series.</param>
+    /// <param name="ownerArtists">The owner's artist names (<see cref="OwnerArtists.Build"/>), used instead of the friend's spelling.</param>
     /// <returns>The placeholder location.</returns>
-    public static PlaceholderFile ForEntry(MergedEntry e, LocalSeries? localSeries = null)
+    public static PlaceholderFile ForEntry(MergedEntry e, LocalSeries? localSeries = null, IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         ArgumentNullException.ThrowIfNull(e);
         var item = e.Sources[0].Item;
@@ -84,9 +86,9 @@ public static class PathNaming
             return ForEpisode(e, item, localSeries);
         }
 
-        if (item.Type is "Audio" or "AudioBook")
+        if (MediaTypes.IsAudio(item.Type))
         {
-            return ForAudio(item);
+            return ForAudio(item, ownerArtists);
         }
 
         var name = Safe(item.Name);
@@ -147,7 +149,7 @@ public static class PathNaming
 
     // No .nfo for audio (Jellyfin has no track nfo reader): the plugin writes the item's metadata after the scan.
     // Jellyfin makes one album per folder, so every track of an album shares its folder.
-    private static PlaceholderFile ForAudio(CatalogItem item)
+    private static PlaceholderFile ForAudio(CatalogItem item, IReadOnlyDictionary<string, string>? ownerArtists)
     {
         var disc = item.DiscNumber is > 1 ? string.Create(CultureInfo.InvariantCulture, $"{item.DiscNumber}-") : string.Empty;
         var baseName = item.TrackNumber is { } track
@@ -155,7 +157,8 @@ public static class PathNaming
             : Safe(item.Name);
         if (string.Equals(item.Type, "Audio", StringComparison.Ordinal))
         {
-            var artist = Safe(TrackMetadataRules.AlbumArtist(item) ?? "Unknown Artist");
+            var albumArtist = TitleKey.AlbumArtistOf(item);
+            var artist = Safe(albumArtist is null ? "Unknown Artist" : OwnerArtists.Resolve(ownerArtists, albumArtist));
             var album = Safe(string.IsNullOrWhiteSpace(item.Album) ? "Unknown Album" : item.Album);
             return new PlaceholderFile(artist + "/" + album, baseName, "Audio");
         }

@@ -138,6 +138,26 @@ public sealed class PathNamingTests
     }
 
     [Fact]
+    public void PathNaming_OwnerHasTheArtist_UsesOwnersSpelling()
+    {
+        var owner = OwnerArtists.Build(["Beyoncé", "AC/DC"]);
+
+        PathNaming.ForEntry(Entry(TestItems.Track("Halo", albumArtist: "Beyonce", album: "I Am")), null, owner).RelativeDir.ShouldBe("Beyoncé/I Am");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "ACDC ", album: "X")), null, owner).RelativeDir.ShouldBe("ACDC/X");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "ac dc", album: "X")), null, owner).RelativeDir.ShouldBe("AC-DC/X");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "Other", album: "X")), null, owner).RelativeDir.ShouldBe("Other/X");
+    }
+
+    [Fact]
+    public void PathNaming_BlankAlbumArtist_UsesFirstArtist_LikeTheAlbumKey()
+    {
+        var item = TestItems.Track("Song", albumArtist: "  ", album: "X") with { Artists = ["Solo"] };
+
+        PathNaming.ForEntry(Entry(item)).RelativeDir.ShouldBe("Solo/X");
+        TitleKey.For(Entry(item)).ShouldBe(TitleKey.For(Entry(item with { AlbumArtist = "Solo" })));
+    }
+
+    [Fact]
     public void PathNaming_Audio_SecondDiscPrefixesDisc_MissingNamesFallBack()
     {
         PathNaming.ForEntry(Entry(TestItems.Track("Song", disc: 2, track: 3))).BaseName.ShouldBe("2-03 Song");

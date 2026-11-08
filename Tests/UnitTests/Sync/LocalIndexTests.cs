@@ -57,6 +57,7 @@ public sealed class LocalIndexTests
         result.KeysOf(MediaType.Audiobooks).ShouldContain(TitleKey.For(new MergedEntry("x", ["x"], [(TestItems.PeerA, TestItems.Book("Other Chapter"))])));
         result.MovieKeys.ShouldBeEmpty();
         result.EpisodeKeys.ShouldBeEmpty();
+        result.Artists.ShouldBe(new Dictionary<string, string> { ["artist a"] = "Artist A" });
     }
 
     [Fact]

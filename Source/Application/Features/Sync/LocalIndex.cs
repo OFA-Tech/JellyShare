@@ -130,6 +130,7 @@ public sealed class LocalIndex : ILocalIndex
         var snapshot = ReadLibrary(scope);
 
         var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys)>();
+        var artistNames = new List<string?>();
         foreach (var media in snapshot.Media)
         {
             if (string.IsNullOrWhiteSpace(media.Path)
@@ -138,6 +139,9 @@ public sealed class LocalIndex : ILocalIndex
             {
                 continue;
             }
+
+            artistNames.Add(media.AlbumArtist);
+            artistNames.AddRange(media.Artists ?? []);
 
             var keys = IndexKeysFor(media);
             if (keys.Count > 0 && (onlyKeys is null || keys.Any(onlyKeys.Contains)))
@@ -200,7 +204,10 @@ public sealed class LocalIndex : ILocalIndex
             }
         }
 
-        return new LocalIndexResult(byType, BuildSeries(snapshot.Series, cfg), unverified, missing);
+        return new LocalIndexResult(byType, BuildSeries(snapshot.Series, cfg), unverified, missing)
+        {
+            Artists = OwnerArtists.Build(artistNames),
+        };
     }
 
 

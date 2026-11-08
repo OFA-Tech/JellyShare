@@ -22,7 +22,8 @@ internal static class TestSync
         IRelayBase relay,
         Func<string> dataDir,
         TimeProvider clock,
-        ILogger<SyncService> logger)
+        ILogger<SyncService> logger,
+        IAdminLibraries? libraries = null)
         => new(
             config,
             client,
@@ -35,6 +36,7 @@ internal static class TestSync
             new PlaceholderLedgerStore(dataDir),
             new PendingScanStore(dataDir, NullLogger<PendingScanStore>.Instance),
             new PlaceholderWriter(logger),
+            libraries ?? new FakeLibraries(),
             clock,
             logger);
 }

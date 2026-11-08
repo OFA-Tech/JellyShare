@@ -31,7 +31,7 @@ public static class TitleKey
         if (string.Equals(item.Type, "Audio", StringComparison.Ordinal)
             && KeyText.Normalize(item.Album).Length > 0)
         {
-            return $"album:name:{KeyText.Hash(item.AlbumArtist ?? item.Artists?.FirstOrDefault(), item.Album)}";
+            return $"album:name:{KeyText.Hash(AlbumArtistOf(item), item.Album)}";
         }
 
         if (string.Equals(item.Type, "AudioBook", StringComparison.Ordinal)
@@ -41,5 +41,19 @@ public static class TitleKey
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Gets the album artist of a track: its own, else its first artist; a name without letters or digits counts as
+    /// missing. Keys, folder names and written metadata all use this one rule.
+    /// </summary>
+    /// <param name="item">The item.</param>
+    /// <returns>The name, or <c>null</c> when the item names none.</returns>
+    public static string? AlbumArtistOf(CatalogItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return KeyText.Normalize(item.AlbumArtist).Length > 0
+            ? item.AlbumArtist
+            : item.Artists?.FirstOrDefault(a => KeyText.Normalize(a).Length > 0);
     }
 }

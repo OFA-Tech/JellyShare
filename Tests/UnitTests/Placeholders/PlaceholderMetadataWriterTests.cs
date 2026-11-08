@@ -54,6 +54,20 @@ public sealed class PlaceholderMetadataWriterTests : IDisposable
     }
 
     [Fact]
+    public async Task Run_OwnerHasTheArtist_WritesOwnersSpelling()
+    {
+        _library.OwnerArtists.Add("ARTIST B");
+        var id = Guid.NewGuid();
+        Add(id, "First Light", 1);
+
+        await _writer.RunAsync(CancellationToken.None);
+
+        var written = _library.Written.ShouldHaveSingleItem().ShouldHaveSingleItem().Metadata;
+        written.AlbumArtists.ShouldBe(["ARTIST B"]);
+        written.Artists.ShouldBe(["ARTIST B"]);
+    }
+
+    [Fact]
     public async Task Run_PlaceholderWithoutIndexEntry_IsLeftAlone()
     {
         _library.Tracks[Guid.NewGuid()] = new PlaceholderTrack(Guid.NewGuid(), "track:name:unknown", _scanned);
@@ -119,11 +133,13 @@ public sealed class PlaceholderMetadataWriterTests : IDisposable
             });
         }
 
-        public IReadOnlyList<PlaceholderTrack> ReadTracks(IReadOnlyList<string> roots)
+        public List<string> OwnerArtists { get; } = new();
+
+        public PlaceholderAudio ReadTracks(IReadOnlyList<string> roots)
         {
             Roots.Clear();
             Roots.AddRange(roots);
-            return Tracks.Values.ToList();
+            return new PlaceholderAudio(Tracks.Values.ToList(), OwnerArtists.ToList());
         }
 
         public Task WriteAsync(IReadOnlyList<PlaceholderTrack> tracks, CancellationToken ct)

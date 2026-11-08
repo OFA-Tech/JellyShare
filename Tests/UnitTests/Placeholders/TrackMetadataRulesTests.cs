@@ -29,6 +29,24 @@ public sealed class TrackMetadataRulesTests
     }
 
     [Fact]
+    public void Wanted_OwnerHasTheArtists_UsesOwnersSpelling()
+    {
+        var item = TestItems.Track("Halo", albumArtist: "Beyonce", album: "I Am") with { Artists = ["Beyonce", "BEYONCÉ", "Guest"] };
+
+        var wanted = TrackMetadataRules.Wanted(PathNamingTests.Entry(item), OwnerArtists.Build(["Beyoncé"]));
+
+        wanted.AlbumArtists.ShouldBe(["Beyoncé"]);
+        wanted.Artists.ShouldBe(["Beyoncé", "Guest"]);
+    }
+
+    [Fact]
+    public void OwnerArtists_TwoSpellings_PicksTheSameOneEveryTime()
+    {
+        OwnerArtists.Build(["beyonce", "Beyoncé"]).ShouldBe(OwnerArtists.Build(["Beyoncé", "beyonce"]));
+        OwnerArtists.Build(["?!", " ", null]).ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Wanted_AudioBook_KeepsItsChapterNumber()
     {
         var wanted = TrackMetadataRules.Wanted(PathNamingTests.Entry(TestItems.Book("Chapter Two") with { TrackNumber = 2 }));

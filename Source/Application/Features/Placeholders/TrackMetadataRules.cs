@@ -1,6 +1,5 @@
 using JellyShare.Domain.Keys;
 using JellyShare.Domain.Models.Placeholders;
-using JellyShare.Domain.Models.Protocol;
 
 namespace JellyShare.Application.Features.Placeholders;
 
@@ -9,13 +8,14 @@ public static class TrackMetadataRules
 {
     /// <summary>Gets the metadata an entry's placeholder item should carry (from the first source, like its path).</summary>
     /// <param name="entry">The merged entry.</param>
+    /// <param name="ownerArtists">The owner's artist names (<see cref="OwnerArtists.Build"/>), used instead of the friend's spelling.</param>
     /// <returns>The wanted metadata, locked.</returns>
-    public static TrackMetadata Wanted(MergedEntry entry)
+    public static TrackMetadata Wanted(MergedEntry entry, IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var item = entry.Sources[0].Item;
-        var artists = Names(item.Artists);
-        var albumArtist = AlbumArtist(item);
+        var artists = Names(item.Artists).Select(a => OwnerArtists.Resolve(ownerArtists, a)).Distinct(StringComparer.Ordinal).ToList();
+        var albumArtist = TitleKey.AlbumArtistOf(item) is { } own ? OwnerArtists.Resolve(ownerArtists, own) : null;
         return new TrackMetadata(
             item.Name,
             artists.Count > 0 || albumArtist is null ? artists : [albumArtist],
@@ -53,12 +53,6 @@ public static class TrackMetadataRules
             && a.ParentIndexNumber == b.ParentIndexNumber
             && a.Locked == b.Locked;
     }
-
-    /// <summary>Gets the album artist of a track: its own, else its first artist; <c>null</c> when it names none.</summary>
-    /// <param name="item">The catalog item.</param>
-    /// <returns>The name.</returns>
-    internal static string? AlbumArtist(CatalogItem item)
-        => string.IsNullOrWhiteSpace(item.AlbumArtist) ? Names(item.Artists).FirstOrDefault() : item.AlbumArtist;
 
     private static List<string> Names(IEnumerable<string>? names)
         => names?.Where(n => KeyText.Normalize(n).Length > 0).ToList() ?? [];

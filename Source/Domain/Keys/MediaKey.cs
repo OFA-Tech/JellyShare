@@ -37,7 +37,7 @@ public static class MediaKey
                 keys.Add($"track:mb:{mb}");
             }
 
-            var albumArtist = item.AlbumArtist ?? item.Artists?.FirstOrDefault();
+            var albumArtist = TitleKey.AlbumArtistOf(item);
             var disc = item.DiscNumber?.ToString(CultureInfo.InvariantCulture);
             var track = item.TrackNumber?.ToString(CultureInfo.InvariantCulture);
             keys.Add($"track:name:{KeyText.Hash(albumArtist, item.Album, disc, track, item.Name)}");

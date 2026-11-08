@@ -57,6 +57,7 @@ public static class ApplicationSetup
             sp.GetRequiredService<IPlaceholderLedgerStore>(),
             sp.GetRequiredService<IPendingScanStore>(),
             sp.GetRequiredService<IPlaceholderFiles>(),
+            sp.GetRequiredService<IAdminLibraries>(),
             TimeProvider.System,
             sp.GetRequiredService<ILogger<SyncService>>()));
         services.AddSingleton(sp => new LocalItemWatcher(

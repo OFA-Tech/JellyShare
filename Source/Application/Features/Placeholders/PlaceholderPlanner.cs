@@ -1,4 +1,5 @@
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Rules;
@@ -19,13 +20,15 @@ public static class PlaceholderPlanner
     /// <param name="existing">Relative path (forward slashes) to content hash of files currently on disk.</param>
     /// <param name="relayBase">The loopback relay base URL.</param>
     /// <param name="localSeries">Series the owner already has, keyed <c>tvdb:{id}</c>/<c>imdb:{id}</c>/<c>tmdb:{id}</c> (lowercase ids).</param>
+    /// <param name="ownerArtists">The owner's artist names (<see cref="OwnerArtists.Build"/>), used in music folder names.</param>
     /// <returns>The diff. Images, the <c>.jellyshare</c> marker and empty directories are the writer's concern.</returns>
     public static PlaceholderDiff Plan(
         IEnumerable<MergedEntry> wanted,
         ISet<string> localKeys,
         IReadOnlyDictionary<string, string> existing,
         string relayBase,
-        IReadOnlyDictionary<string, LocalSeries>? localSeries = null)
+        IReadOnlyDictionary<string, LocalSeries>? localSeries = null,
+        IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         ArgumentNullException.ThrowIfNull(wanted);
         ArgumentNullException.ThrowIfNull(localKeys);
@@ -46,7 +49,7 @@ public static class PlaceholderPlanner
             var isEpisode = string.Equals(item.Type, "Episode", StringComparison.Ordinal);
             var seriesIds = isEpisode ? PathNaming.SeriesIds(entry) : null;
             var local = seriesIds is null ? null : LocalSeries.Find(localSeries, seriesIds);
-            var file = PathNaming.ForEntry(entry, local);
+            var file = PathNaming.ForEntry(entry, local, ownerArtists);
             if (!PathNaming.IsSafeRelative(file.RelativeDir, file.BaseName))
             {
                 skipped++;
@@ -60,7 +63,7 @@ public static class PlaceholderPlanner
             }
 
             desired[strmPath] = PlaceholderPaths.StrmContent(relayBase, entry.CanonicalKey);
-            if (file.Kind is "Audio" or "AudioBook")
+            if (MediaTypes.IsAudio(file.Kind))
             {
                 continue;
             }

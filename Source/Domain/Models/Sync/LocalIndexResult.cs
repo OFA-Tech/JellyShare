@@ -30,6 +30,9 @@ public sealed record LocalIndexResult(
     {
     }
 
+    /// <summary>Gets the owner's artist names (of their own tracks), keyed by the normalized name.</summary>
+    public IReadOnlyDictionary<string, string> Artists { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Gets the keys of local movies.</summary>
     public ISet<string> MovieKeys => KeysOf(MediaType.Movies);
 

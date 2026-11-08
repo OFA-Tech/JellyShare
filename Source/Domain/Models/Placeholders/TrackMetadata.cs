@@ -24,3 +24,8 @@ public sealed record TrackMetadata(
 /// <param name="Key">The key from its <c>.strm</c> relay URL.</param>
 /// <param name="Metadata">Its metadata (current when read, wanted when written).</param>
 public sealed record PlaceholderTrack(Guid ItemId, string Key, TrackMetadata Metadata);
+
+/// <summary>What one read of the library gives the metadata writer.</summary>
+/// <param name="Tracks">The audio placeholder items.</param>
+/// <param name="OwnerArtists">The artist and album artist names of the owner's own (non-placeholder) audio.</param>
+public sealed record PlaceholderAudio(IReadOnlyList<PlaceholderTrack> Tracks, IReadOnlyList<string> OwnerArtists);

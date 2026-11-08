@@ -13,10 +13,13 @@ public interface IPlaceholderMetadata
     /// <returns>Disposing unsubscribes.</returns>
     IDisposable SubscribeAdded(Action handler);
 
-    /// <summary>Reads the audio placeholder items (relay <c>.strm</c> files) under the given roots.</summary>
+    /// <summary>
+    /// Reads the audio placeholder items (relay <c>.strm</c> files) under the given roots, and the owner's own artist
+    /// names (so placeholders use the owner's spelling).
+    /// </summary>
     /// <param name="roots">The placeholder roots.</param>
-    /// <returns>The items with their key and current metadata.</returns>
-    IReadOnlyList<PlaceholderTrack> ReadTracks(IReadOnlyList<string> roots);
+    /// <returns>The items with their key and current metadata, and the owner's artist names.</returns>
+    PlaceholderAudio ReadTracks(IReadOnlyList<string> roots);
 
     /// <summary>Writes the metadata on the items and locks it against Jellyfin's probe, then groups their artists and albums.</summary>
     /// <param name="tracks">The items with the metadata to write.</param>

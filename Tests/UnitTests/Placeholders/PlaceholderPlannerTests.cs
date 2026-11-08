@@ -118,6 +118,20 @@ public sealed class PlaceholderPlannerTests
     }
 
     [Fact]
+    public void Planner_OwnerHasTheArtist_FolderUsesOwnersSpelling()
+    {
+        var diff = PlaceholderPlanner.Plan(
+            [Entry(TestItems.Track("Halo", albumArtist: "Beyonce", album: "I Am", track: 1))],
+            _noLocal,
+            _noExisting,
+            Relay,
+            null,
+            OwnerArtists.Build(["Beyoncé"]));
+
+        diff.Writes.ShouldHaveSingleItem().RelativePath.ShouldBe("Beyoncé/I Am/01 Halo.strm");
+    }
+
+    [Fact]
     public void Planner_OwnerHasAnyTrackOfAlbum_SkipsWholeAlbum()
     {
         // Partial albums don't merge in Jellyfin (one album per folder), so a friend's album the owner partly has is left out.

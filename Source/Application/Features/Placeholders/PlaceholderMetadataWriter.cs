@@ -89,10 +89,12 @@ public sealed class PlaceholderMetadataWriter : IHostedService, IDisposable
             }
 
             var writes = new List<PlaceholderTrack>();
-            foreach (var track in _metadata.ReadTracks(roots))
+            var audio = _metadata.ReadTracks(roots);
+            var owner = OwnerArtists.Build(audio.OwnerArtists);
+            foreach (var track in audio.Tracks)
             {
                 if (_index.Find(track.Key) is { Sources.Count: > 0 } entry
-                    && TrackMetadataRules.ToWrite(track.Metadata, TrackMetadataRules.Wanted(entry)) is { } wanted)
+                    && TrackMetadataRules.ToWrite(track.Metadata, TrackMetadataRules.Wanted(entry, owner)) is { } wanted)
                 {
                     writes.Add(track with { Metadata = wanted });
                 }
