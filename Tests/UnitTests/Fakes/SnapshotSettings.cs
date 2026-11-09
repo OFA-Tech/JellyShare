@@ -25,10 +25,13 @@ internal abstract class SnapshotSettings : ISettingsProvider
         Settings.Peers = saved.Peers;
         Settings.MoviesPlaceholderPath = saved.MoviesPlaceholderPath;
         Settings.ShowsPlaceholderPath = saved.ShowsPlaceholderPath;
+        Settings.MusicPlaceholderPath = saved.MusicPlaceholderPath;
+        Settings.AudiobooksPlaceholderPath = saved.AudiobooksPlaceholderPath;
         Settings.SyncIntervalHours = saved.SyncIntervalHours;
         Settings.PresenceSweepSeconds = saved.PresenceSweepSeconds;
         Settings.MaxConcurrentTranscodes = saved.MaxConcurrentTranscodes;
         Settings.RelayBaseOverride = saved.RelayBaseOverride;
+        Settings.DefaultShareTypes = saved.DefaultShareTypes;
     }
 
     private static JellyShareSettings Snapshot(JellyShareSettings source) => new()
@@ -37,9 +40,12 @@ internal abstract class SnapshotSettings : ISettingsProvider
         Peers = source.Peers,
         MoviesPlaceholderPath = source.MoviesPlaceholderPath,
         ShowsPlaceholderPath = source.ShowsPlaceholderPath,
+        MusicPlaceholderPath = source.MusicPlaceholderPath,
+        AudiobooksPlaceholderPath = source.AudiobooksPlaceholderPath,
         SyncIntervalHours = source.SyncIntervalHours,
         PresenceSweepSeconds = source.PresenceSweepSeconds,
         MaxConcurrentTranscodes = source.MaxConcurrentTranscodes,
         RelayBaseOverride = source.RelayBaseOverride,
+        DefaultShareTypes = source.DefaultShareTypes,
     };
 }

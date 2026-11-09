@@ -29,10 +29,10 @@ internal sealed class JellyfinPlaybackStopper : IPlaybackStopper
     }
 
     /// <inheritdoc />
-    public async Task<int> StopTitleAsync(string canonicalKey, string message, CancellationToken ct)
+    public async Task<int> StopTitleAsync(string titleKey, string message, CancellationToken ct)
     {
         var playing = _sessions.Sessions
-            .Where(s => s.NowPlayingItem is { } item && string.Equals(_lookup.Find(item.Id)?.CanonicalKey, canonicalKey, StringComparison.Ordinal))
+            .Where(s => s.NowPlayingItem is { } item && string.Equals(_lookup.Find(item.Id)?.StreamKey, titleKey, StringComparison.Ordinal))
             .Select(s => s.Id)
             .ToList();
         var stopped = 0;
@@ -54,7 +54,7 @@ internal sealed class JellyfinPlaybackStopper : IPlaybackStopper
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "JellyShare: could not stop {Key} in session {Session}", canonicalKey, sessionId);
+                _logger.LogWarning(ex, "JellyShare: could not stop {Key} in session {Session}", titleKey, sessionId);
             }
         }
 

@@ -27,6 +27,8 @@ SERVERS = [
 LIBRARIES = [
     ("Movies", "movies", "/media/Movies", ["Movie"]),
     ("Shows", "tvshows", "/media/Shows", ["Series", "Season", "Episode"]),
+    ("Music", "music", "/media/Music", ["MusicArtist", "MusicAlbum", "Audio"]),
+    ("Audiobooks", "books", "/media/Audiobooks", ["AudioBook", "Book"]),
 ]
 
 

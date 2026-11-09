@@ -61,7 +61,7 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        _placeholders.Items[Placeholder] = new PlaceholderMedia(Key, 1_312_543);
+        _placeholders.Items[Placeholder] = new PlaceholderMedia(Key, 1_312_543, null, TestItems.Movie("Sintel", tmdb: "10378", id: "alice-item"));
         _config.Settings.Peers.Add(new RemotePeer { Id = TestItems.PeerA, Name = "alice", BaseUrl = "http://alice:8096", Token = "t", Kind = PeerKind.Account, MaxStreams = 1 });
         _index.Entries[Key] = new MergedEntry(
             Key,
@@ -359,6 +359,118 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
         _sessions.ActiveTitles(TestItems.PeerA).ShouldBe(new[] { OtherKey });
     }
 
+    private static readonly Guid _track = Guid.Parse("44444444-0000-0000-0000-000000000004");
+
+    private string AddTrack()
+    {
+        var item = TestItems.Track("Hells Bells", id: "alice-track");
+        var entry = MergeIndex.Build(new[] { (TestItems.PeerA, item) }).Entries.Single();
+        _index.Entries[entry.CanonicalKey] = entry;
+        _placeholders.Items[_track] = new PlaceholderMedia(entry.CanonicalKey, 1_312_543, TitleKey.For(entry), item);
+        return TitleKey.For(entry);
+    }
+
+    private static string RelaySourceId => AudioRelaySourceProvider.SourceId(_track);
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("?mediaSourceId=")]
+    [InlineData("?mediaSourceId=44444444000000000000000000000004")]
+    [InlineData("?mediaSourceId=44444444-0000-0000-0000-000000000004")]
+    public async Task AudioStream_AudioPlaceholder_UsesRelaySource(string query)
+    {
+        AddTrack();
+
+        var args = await Get<StreamArgs>("/Audio/" + _track + "/stream" + query);
+
+        args.MediaSourceId.ShouldBe(RelaySourceId);
+    }
+
+    [Fact]
+    public async Task AudioStream_OtherSourceId_Unchanged()
+    {
+        AddTrack();
+
+        (await Get<StreamArgs>("/Audio/" + _track + "/stream.mp3?mediaSourceId=abc")).MediaSourceId.ShouldBe("abc");
+    }
+
+    [Fact]
+    public async Task AudioStream_NonPlaceholder_Unchanged()
+    {
+        AddTrack();
+
+        (await Get<StreamArgs>("/Audio/" + Local + "/stream")).MediaSourceId.ShouldBeNull();
+        (await Get<StreamArgs>("/Audio/" + Local + "/universal")).EnableRedirection.ShouldBe(true);
+    }
+
+    [Fact]
+    public async Task AudioStream_VideoPlaceholder_Unchanged()
+    {
+        (await Get<StreamArgs>("/Audio/" + Placeholder + "/stream")).MediaSourceId.ShouldBeNull();
+        (await Get<StreamArgs>("/Audio/" + Placeholder + "/universal")).EnableRedirection.ShouldBe(true);
+    }
+
+    [Fact]
+    public async Task Universal_AudioPlaceholder_UsesRelaySourceWithoutRedirection()
+    {
+        AddTrack();
+
+        var args = await Get<StreamArgs>("/Audio/" + _track + "/universal?enableRedirection=true");
+
+        args.MediaSourceId.ShouldBe(RelaySourceId);
+        args.EnableRedirection.ShouldBe(false);
+    }
+
+    [Fact]
+    public async Task Hls_AudioPlaceholder_UsesRelaySource()
+    {
+        AddTrack();
+
+        (await Get<StreamArgs>("/Audio/" + _track + "/main.m3u8")).MediaSourceId.ShouldBe(RelaySourceId);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_AudioPlaceholder_UsesRelaySource()
+    {
+        AddTrack();
+
+        var info = await Post(_track, Body());
+
+        info.PlaySessionId.ShouldBe(RelaySourceId);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_VideoPlaceholder_KeepsMediaSourceId()
+    {
+        var info = await Post(Placeholder, Body());
+
+        info.PlaySessionId.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_AudioPlaceholder_NoForcedTranscode()
+    {
+        AddTrack();
+
+        var info = await Post(_track, Body(maxStreamingBitrate: 1_000_000));
+
+        var source = info.MediaSources.ShouldHaveSingleItem();
+        source.SupportsDirectStream.ShouldBeTrue();
+        source.TranscodingUrl.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_StopOldest_StopsByTitleKey()
+    {
+        var album = AddTrack();
+        _config.Settings.Peers[0].LimitAction = StreamLimitAction.StopOldest;
+        _sessions.Touch(album, TestItems.PeerA);
+
+        await Post(Placeholder, Body());
+
+        _stopper.Calls.ShouldHaveSingleItem().Key.ShouldBe(album);
+    }
+
     [Fact]
     public async Task PlaybackInfo_NotPlaceholder_Unaffected()
     {
@@ -388,9 +500,9 @@ public sealed class PlaybackInfoFilterTests : IAsyncLifetime
 
         public List<(string Key, string Message)> Calls { get; } = new();
 
-        public Task<int> StopTitleAsync(string canonicalKey, string message, CancellationToken ct)
+        public Task<int> StopTitleAsync(string titleKey, string message, CancellationToken ct)
         {
-            Calls.Add((canonicalKey, message));
+            Calls.Add((titleKey, message));
             return Fail ? Task.FromException<int>(new InvalidOperationException("client gone")) : Task.FromResult(0);
         }
     }
@@ -439,6 +551,9 @@ public sealed class FakePlaybackInfoDto
     public bool? EnableDirectStream { get; set; }
 }
 
+/// <summary>The stream arguments an audio action received.</summary>
+public sealed record StreamArgs(string? MediaSourceId, bool? EnableRedirection);
+
 /// <summary>Same routes and parameter names as Jellyfin 12.4's MediaInfoController / item endpoints.</summary>
 [Route("")]
 [SuppressMessage("Performance", "CA1822:Mark members as static", Justification = "MVC actions must be instance methods.")]
@@ -462,6 +577,7 @@ public sealed class FakeMediaInfoController : ControllerBase
         [FromQuery] int? maxStreamingBitrate,
         [FromQuery] bool? enableDirectPlay,
         [FromQuery] bool? enableDirectStream,
+        [FromQuery] string? mediaSourceId,
         [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] FakePlaybackInfoDto? playbackInfoDto)
     {
         maxStreamingBitrate ??= playbackInfoDto?.MaxStreamingBitrate ?? playbackInfoDto?.DeviceProfile?.MaxStreamingBitrate;
@@ -473,8 +589,25 @@ public sealed class FakeMediaInfoController : ControllerBase
         return new PlaybackInfoResponse
         {
             MediaSources = new[] { Source(itemId, enableDirectPlay.Value, enableDirectStream.Value, transcodingUrl) },
+            PlaySessionId = mediaSourceId, // echoes the argument the action received
         };
     }
+
+    [HttpGet("Audio/{itemId}/stream")]
+    public ActionResult<StreamArgs> GetAudioStream([FromRoute] Guid itemId, [FromQuery] bool? @static, [FromQuery] string? mediaSourceId)
+        => new StreamArgs(mediaSourceId, null);
+
+    [HttpGet("Audio/{itemId}/stream.{container}")]
+    public ActionResult<StreamArgs> GetAudioStreamByContainer([FromRoute] Guid itemId, [FromRoute] string container, [FromQuery] string? mediaSourceId)
+        => new StreamArgs(mediaSourceId, null);
+
+    [HttpGet("Audio/{itemId}/universal")]
+    public ActionResult<StreamArgs> GetUniversalAudioStream([FromRoute] Guid itemId, [FromQuery] string? mediaSourceId, [FromQuery] bool enableRedirection = true)
+        => new StreamArgs(mediaSourceId, enableRedirection);
+
+    [HttpGet("Audio/{itemId}/main.m3u8")]
+    public ActionResult<StreamArgs> GetVariantHlsAudioPlaylist([FromRoute] Guid itemId, [FromQuery] string? mediaSourceId)
+        => new StreamArgs(mediaSourceId, null);
 
     [HttpGet("Users/{userId}/Items/{itemId}")]
     public ActionResult<BaseItemDto> GetItem([FromRoute] Guid userId, [FromRoute] Guid itemId)
@@ -507,15 +640,19 @@ public sealed class FakeMediaInfoController : ControllerBase
     private static BaseItemDto Dto(Guid itemId)
         => new() { Id = itemId, MediaSources = new[] { Source(itemId, true, true, null) } };
 
+    // Items not in _paths (extra placeholders a test registers) look like the relay placeholder.
     private static MediaSourceInfo Source(Guid itemId, bool directPlay, bool directStream, string? transcodingUrl)
-        => new()
+    {
+        var path = _paths.GetValueOrDefault(itemId, PlaybackInfoFilterTests.RelayUrl);
+        return new()
         {
             Id = itemId.ToString("N"),
-            Path = _paths[itemId],
-            Protocol = _paths[itemId].StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
+            Path = path,
+            Protocol = path.StartsWith("http", StringComparison.Ordinal) ? MediaProtocol.Http : MediaProtocol.File,
             SupportsDirectPlay = directPlay,
             SupportsDirectStream = directStream,
             SupportsTranscoding = true,
             TranscodingUrl = transcodingUrl,
         };
+    }
 }

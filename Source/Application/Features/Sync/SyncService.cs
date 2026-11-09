@@ -1,6 +1,8 @@
 using System.Diagnostics.CodeAnalysis;
+using JellyShare.Application.Features.Admin;
 using JellyShare.Application.Features.Placeholders;
 using JellyShare.Application.Features.Relay;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Library;
@@ -10,6 +12,7 @@ using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Interfaces.Sync;
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Admin;
 using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Peers;
@@ -44,6 +47,7 @@ public sealed class SyncService : ISyncRunner
     private readonly IPlaceholderLedgerStore _ledgerStore;
     private readonly IPendingScanStore _pendingScans;
     private readonly IPlaceholderFiles _writer;
+    private readonly IAdminLibraries _libraries;
     private readonly TimeProvider _clock;
     private readonly ILogger<SyncService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -71,6 +75,7 @@ public sealed class SyncService : ISyncRunner
     /// <param name="ledgerStore">The persisted placeholder ledger.</param>
     /// <param name="pendingScans">The persisted pending scan list.</param>
     /// <param name="placeholders">The placeholder roots on disk.</param>
+    /// <param name="libraries">The libraries on this server (is a music/audiobook root in a library of its type).</param>
     /// <param name="clock">The clock.</param>
     /// <param name="logger">The logger.</param>
     public SyncService(
@@ -85,6 +90,7 @@ public sealed class SyncService : ISyncRunner
         IPlaceholderLedgerStore ledgerStore,
         IPendingScanStore pendingScans,
         IPlaceholderFiles placeholders,
+        IAdminLibraries libraries,
         TimeProvider clock,
         ILogger<SyncService> logger)
     {
@@ -99,6 +105,7 @@ public sealed class SyncService : ISyncRunner
         _ledgerStore = ledgerStore;
         _pendingScans = pendingScans;
         _writer = placeholders;
+        _libraries = libraries;
         _clock = clock;
         _logger = logger;
     }
@@ -282,7 +289,7 @@ public sealed class SyncService : ISyncRunner
         var dirs = new List<string>();
         foreach (var job in jobs)
         {
-            var (count, changed) = await _writer.DownloadImagesAsync(job.Root, job.Tops, job.Fetch, ImageParallelism, ct).ConfigureAwait(false);
+            var (count, changed) = await _writer.DownloadImagesAsync(job.Root, job.Tops, job.Fetch, ImageParallelism, ct, job.FolderArt).ConfigureAwait(false);
             images += count;
             dirs.AddRange(changed);
         }
@@ -371,8 +378,8 @@ public sealed class SyncService : ISyncRunner
             .ToDictionary(g => g.Key, g => g.First());
 
         var relay = _relayBase.Current;
-        var movies = affected.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
-        var episodes = affected.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
+        var movies = affected.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Movies).ToList();
+        var episodes = affected.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == MediaType.Shows).ToList();
         var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
         var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct, targeted: true).ConfigureAwait(false);
         var (scanned, _) = ReportScans();
@@ -405,7 +412,8 @@ public sealed class SyncService : ISyncRunner
         // Every .strm/.nfo the plugin wrote under a root is its own to delete, so a root must never be (or contain, or
         // sit inside) one of the owner's library folders, and must be the plugin's own folder.
         var locations = _localIndex.LibraryLocations();
-        foreach (var (label, root) in new[] { ("movie", cfg.MoviesPlaceholderPath), ("show", cfg.ShowsPlaceholderPath) })
+        var roots = MediaTypes.Supported.Select(t => (Type: t, Root: PlaceholderPaths.RootOf(cfg, t))).ToList();
+        foreach (var (type, root) in roots)
         {
             if (string.IsNullOrWhiteSpace(root))
             {
@@ -414,9 +422,7 @@ public sealed class SyncService : ISyncRunner
 
             foreach (var location in locations)
             {
-                if (string.IsNullOrWhiteSpace(location)
-                    || SamePath(location, cfg.MoviesPlaceholderPath)
-                    || SamePath(location, cfg.ShowsPlaceholderPath))
+                if (string.IsNullOrWhiteSpace(location) || roots.Any(r => SamePath(location, r.Root)))
                 {
                     continue;
                 }
@@ -424,7 +430,7 @@ public sealed class SyncService : ISyncRunner
                 if (RootsOverlap(root, location))
                 {
                     throw new InvalidOperationException(
-                        $"JellyShare: the {label} placeholder folder '{root}' overlaps the library folder '{location}'. "
+                        $"JellyShare: the {Label(type)} placeholder folder '{root}' overlaps the library folder '{location}'. "
                         + "Choose a new, empty folder outside your media folders.");
                 }
             }
@@ -435,11 +441,42 @@ public sealed class SyncService : ISyncRunner
             }
         }
 
-        if (RootsOverlap(cfg.MoviesPlaceholderPath, cfg.ShowsPlaceholderPath))
+        for (var i = 0; i < roots.Count; i++)
         {
-            // Each planner owns every .strm/.nfo under its root, so shared roots would delete each other's files.
-            throw new InvalidOperationException("JellyShare: the movie and show placeholder folders must be separate, non-nested folders");
+            for (var j = i + 1; j < roots.Count; j++)
+            {
+                if (RootsOverlap(roots[i].Root, roots[j].Root))
+                {
+                    // Each planner owns every .strm/.nfo under its root, so shared roots would delete each other's files.
+                    throw new InvalidOperationException(
+                        $"JellyShare: the {Label(roots[i].Type)} and {Label(roots[j].Type)} placeholder folders must be separate, non-nested folders");
+                }
+            }
         }
+    }
+
+    private static string Label(MediaType type) => type switch
+    {
+        MediaType.Movies => "movie",
+        MediaType.Shows => "show",
+        MediaType.Music => "music",
+        MediaType.Audiobooks => "audiobook",
+        _ => type.ToString().ToLowerInvariant(),
+    };
+
+    // Movies and shows keep their old rule (any folder); music and audiobooks need a library of their own type, or
+    // Jellyfin would never read the placeholders as tracks/books.
+    private static bool InItsLibrary(MediaType type, string root, Lazy<IReadOnlyList<LibraryInfo>> libraries)
+    {
+        var collection = type switch
+        {
+            MediaType.Music => "music",
+            MediaType.Audiobooks => "books",
+            _ => null,
+        };
+        return collection is null
+            || libraries.Value.Any(l => string.Equals(l.CollectionType, collection, StringComparison.OrdinalIgnoreCase)
+                && l.Locations.Any(loc => AdminRules.SamePath(loc, root)));
     }
 
     private async Task<(SyncReport Report, IReadOnlyList<ImageJob> Images)> RunCoreAsync(CancellationToken ct)
@@ -477,7 +514,8 @@ public sealed class SyncService : ISyncRunner
             }
 
             contributing[peer.Id] = peer;
-            sources.AddRange(catalog.Items.Where(item => item.Type is "Movie" or "Episode").Select(item => (peer.Id, item)));
+            // Also applied to a cached catalog: it may predate a change of what this peer is accepted for.
+            sources.AddRange(catalog.Items.Where(item => MediaTypes.IsRequested(peer, item.Type)).Select(item => (peer.Id, item)));
         }
 
         var index = MergeIndex.Build(sources);
@@ -490,13 +528,34 @@ public sealed class SyncService : ISyncRunner
         }
 
         var relay = _relayBase.Current;
-        var movies = index.Entries.Where(e => e.Sources[0].Item.Type == "Movie").ToList();
-        var episodes = index.Entries.Where(e => e.Sources[0].Item.Type == "Episode").ToList();
-        var skippedLocal = movies.Count(e => e.Keys.Any(local.MovieKeys.Contains))
-            + episodes.Count(e => e.Keys.Any(local.EpisodeKeys.Contains));
+        var skippedLocal = 0;
+        var withoutFolder = new List<MediaType>();
+        var results = new List<(PlaceholderWriteResult Write, int Skipped, ImageJob? Images)>();
+        var libraries = new Lazy<IReadOnlyList<LibraryInfo>>(_libraries.List);
+        foreach (var type in MediaTypes.Supported)
+        {
+            var entries = index.Entries.Where(e => MediaTypes.Of(e.Sources[0].Item.Type) == type).ToList();
+            var root = PlaceholderPaths.RootOf(cfg, type);
+            if (string.IsNullOrWhiteSpace(root) || !InItsLibrary(type, root, libraries))
+            {
+                // Nothing is written or deleted for the type: its placeholders stay until the folder is set up.
+                if (entries.Count > 0)
+                {
+                    withoutFolder.Add(type);
+                }
 
-        var movieResult = await ApplyAsync(movies, local.MovieKeys, null, cfg.MoviesPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
-        var showResult = await ApplyAsync(episodes, local.EpisodeKeys, local.Series, cfg.ShowsPlaceholderPath, relay, contributing, ct).ConfigureAwait(false);
+                continue;
+            }
+
+            var keys = local.KeysOf(type);
+            skippedLocal += entries.Count(e => PlaceholderPlanner.IsLocal(e, keys));
+            results.Add(await ApplyAsync(entries, keys, type == MediaType.Shows ? local.Series : null, root, relay, contributing, ct, ownerArtists: local.Artists).ConfigureAwait(false));
+        }
+
+        if (withoutFolder.Count > 0)
+        {
+            _logger.LogWarning("JellyShare sync: no placeholder folder is set for {Types}; those titles were skipped", MediaTypes.Format(withoutFolder));
+        }
 
         _mergedIndex.Save(index.Entries, now);
         _merged = index.Entries.ToList();
@@ -509,11 +568,12 @@ public sealed class SyncService : ISyncRunner
             index.Entries.Count,
             index.UnmatchedCount,
             skippedLocal,
-            movieResult.Write.Written + showResult.Write.Written,
-            movieResult.Write.Deleted + showResult.Write.Deleted,
+            results.Sum(r => r.Write.Written),
+            results.Sum(r => r.Write.Deleted),
             errors)
         {
-            Skipped = movieResult.Skipped + showResult.Skipped,
+            Skipped = results.Sum(r => r.Skipped),
+            SkippedTypesWithoutFolder = withoutFolder,
             Conflicts = index.ConflictCount,
             Scanned = scanned,
             PendingScans = pending,
@@ -521,10 +581,14 @@ public sealed class SyncService : ISyncRunner
             MissingLocalFiles = local.MissingFiles,
             FinishedUtc = _clock.GetUtcNow(),
         };
-        return (report, Jobs(movieResult.Images, showResult.Images));
+        return (report, Jobs([.. results.Select(r => r.Images)]));
     }
 
-    private sealed record ImageJob(string Root, IReadOnlyList<string> Tops, PlaceholderImageFetcher Fetch);
+    /// <param name="Root">The full placeholder root.</param>
+    /// <param name="Tops">The image folders (relative).</param>
+    /// <param name="Fetch">Fetches an image of a folder.</param>
+    /// <param name="FolderArt"><c>folder.jpg</c> in album/book folders instead of a poster and fanart per title folder.</param>
+    private sealed record ImageJob(string Root, IReadOnlyList<string> Tops, PlaceholderImageFetcher Fetch, bool FolderArt);
 
     private async Task<CatalogResponse?> FetchAsync(
         RemotePeer peer,
@@ -625,7 +689,8 @@ public sealed class SyncService : ISyncRunner
         string relay,
         Dictionary<Guid, RemotePeer> peers,
         CancellationToken ct,
-        bool targeted = false)
+        bool targeted = false,
+        IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         if (string.IsNullOrWhiteSpace(root))
         {
@@ -679,7 +744,7 @@ public sealed class SyncService : ISyncRunner
                 }
             }
 
-            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
+            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries, ownerArtists);
             diff = diff with
             {
                 Writes = diff.Writes
@@ -701,7 +766,7 @@ public sealed class SyncService : ISyncRunner
                 }
             }
 
-            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries);
+            diff = PlaceholderPlanner.Plan(entries, localKeys, existing, relay, localSeries, ownerArtists);
         }
 
         void Record(PlaceholderWriteResult done)
@@ -719,7 +784,8 @@ public sealed class SyncService : ISyncRunner
             SaveLedger(ledger);
         }
 
-        var imageSources = ImageSources(entries, localSeries);
+        var imageSources = ImageSources(entries, localSeries, ownerArtists);
+        var folderArt = entries.Count > 0 && MediaTypes.IsAudio(entries[0].Sources[0].Item.Type);
 
         async Task<Stream?> Fetch(string topDir, string imageType, CancellationToken token)
         {
@@ -761,13 +827,17 @@ public sealed class SyncService : ISyncRunner
 
         Record(result);
         EnqueueScans(result.ChangedDirs);
-        var tops = new List<string>(result.NewStrmTops);
+        // Audio art goes in the album/book folder (the .strm's own folder), video art in the title's top folder.
+        var newFolders = folderArt
+            ? result.WrittenPaths.Keys.Where(p => p.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)).Select(p => p[..p.LastIndexOf('/')]).Distinct(StringComparer.Ordinal).ToList()
+            : result.NewStrmTops;
+        var tops = new List<string>(newFolders);
         if (!targeted)
         {
             // Folders still missing an image (peer had none, or a download failed) get a bounded retry each full sync,
             // rotating through them so one stubborn folder never starves the rest.
             var missing = imageSources.Keys
-                .Where(t => !result.NewStrmTops.Contains(t) && _writer.MissesImages(rootFull, t))
+                .Where(t => !newFolders.Contains(t) && _writer.MissesImages(rootFull, t, folderArt))
                 .Order(StringComparer.Ordinal)
                 .ToList();
             if (missing.Count > 0)
@@ -780,22 +850,24 @@ public sealed class SyncService : ISyncRunner
             }
         }
 
-        return (result, diff.Skipped, tops.Count == 0 ? null : new ImageJob(rootFull, tops, Fetch));
+        return (result, diff.Skipped, tops.Count == 0 ? null : new ImageJob(rootFull, tops, Fetch, folderArt));
     }
 
     private static Dictionary<string, List<(Guid PeerId, string ItemId, string[]? Types)>> ImageSources(
         IReadOnlyList<MergedEntry> entries,
-        IReadOnlyDictionary<string, LocalSeries>? localSeries)
+        IReadOnlyDictionary<string, LocalSeries>? localSeries,
+        IReadOnlyDictionary<string, string>? ownerArtists)
     {
         var map = new Dictionary<string, List<(Guid, string, string[]?)>>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
             var first = entry.Sources[0].Item;
             var isEpisode = first.Type == "Episode";
+            var isAudio = MediaTypes.IsAudio(first.Type);
             var local = isEpisode ? LocalSeries.Find(localSeries, PathNaming.SeriesIds(entry)) : null;
-            var dir = PathNaming.ForEntry(entry, local).RelativeDir;
+            var dir = PathNaming.ForEntry(entry, local, ownerArtists).RelativeDir;
             var slash = dir.IndexOf('/', StringComparison.Ordinal);
-            var top = slash < 0 ? dir : dir[..slash];
+            var top = isAudio || slash < 0 ? dir : dir[..slash];
             if (!map.TryGetValue(top, out var list))
             {
                 list = new List<(Guid, string, string[]?)>();
@@ -804,7 +876,12 @@ public sealed class SyncService : ISyncRunner
 
             foreach (var (peerId, item) in entry.Sources)
             {
+                // Audio art is the album's (or the book folder's) Primary image.
                 var id = isEpisode ? item.SeriesId : item.Id;
+                if (isAudio)
+                {
+                    id = item.AlbumId ?? item.Id;
+                }
                 if (!string.IsNullOrWhiteSpace(id) && !list.Any(c => c.Item1 == peerId && c.Item2 == id))
                 {
                     list.Add((peerId, id, isEpisode ? null : item.ImageTypes));

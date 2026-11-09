@@ -1,4 +1,5 @@
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Rules;
@@ -19,13 +20,15 @@ public static class PlaceholderPlanner
     /// <param name="existing">Relative path (forward slashes) to content hash of files currently on disk.</param>
     /// <param name="relayBase">The loopback relay base URL.</param>
     /// <param name="localSeries">Series the owner already has, keyed <c>tvdb:{id}</c>/<c>imdb:{id}</c>/<c>tmdb:{id}</c> (lowercase ids).</param>
+    /// <param name="ownerArtists">The owner's artist names (<see cref="OwnerArtists.Build"/>), used in music folder names.</param>
     /// <returns>The diff. Images, the <c>.jellyshare</c> marker and empty directories are the writer's concern.</returns>
     public static PlaceholderDiff Plan(
         IEnumerable<MergedEntry> wanted,
         ISet<string> localKeys,
         IReadOnlyDictionary<string, string> existing,
         string relayBase,
-        IReadOnlyDictionary<string, LocalSeries>? localSeries = null)
+        IReadOnlyDictionary<string, LocalSeries>? localSeries = null,
+        IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         ArgumentNullException.ThrowIfNull(wanted);
         ArgumentNullException.ThrowIfNull(localKeys);
@@ -37,7 +40,7 @@ public static class PlaceholderPlanner
         var skipped = 0;
 
         var ordered = wanted
-            .Where(e => e.Sources.Count > 0 && !e.Keys.Any(localKeys.Contains))
+            .Where(e => e.Sources.Count > 0 && !IsLocal(e, localKeys))
             .OrderBy(e => e.CanonicalKey, StringComparer.Ordinal);
 
         foreach (var entry in ordered)
@@ -46,7 +49,7 @@ public static class PlaceholderPlanner
             var isEpisode = string.Equals(item.Type, "Episode", StringComparison.Ordinal);
             var seriesIds = isEpisode ? PathNaming.SeriesIds(entry) : null;
             var local = seriesIds is null ? null : LocalSeries.Find(localSeries, seriesIds);
-            var file = PathNaming.ForEntry(entry, local);
+            var file = PathNaming.ForEntry(entry, local, ownerArtists);
             if (!PathNaming.IsSafeRelative(file.RelativeDir, file.BaseName))
             {
                 skipped++;
@@ -60,6 +63,11 @@ public static class PlaceholderPlanner
             }
 
             desired[strmPath] = PlaceholderPaths.StrmContent(relayBase, entry.CanonicalKey);
+            if (MediaTypes.IsAudio(file.Kind))
+            {
+                continue;
+            }
+
             desired[file.RelativeDir + "/" + file.BaseName + ".nfo"] = isEpisode
                 ? NfoWriter.Episode(item, local?.Name)
                 : NfoWriter.Movie(item);
@@ -99,6 +107,20 @@ public static class PlaceholderPlanner
         }
 
         return new PlaceholderDiff(writes, deletes, touched.ToList(), skipped);
+    }
+
+    /// <summary>
+    /// Tells whether the owner already has an entry: any of its keys, or, for music and audiobooks, any file of its
+    /// album/book (partial albums don't merge in Jellyfin, so the friend's whole album is left out).
+    /// </summary>
+    /// <param name="entry">The merged entry.</param>
+    /// <param name="localKeys">The owner's keys, including album/book title keys.</param>
+    /// <returns><c>true</c> when the owner has it.</returns>
+    public static bool IsLocal(MergedEntry entry, ISet<string> localKeys)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(localKeys);
+        return entry.Keys.Any(localKeys.Contains) || localKeys.Contains(TitleKey.For(entry));
     }
 
     private static bool IsOwned(string path)

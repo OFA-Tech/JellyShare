@@ -39,12 +39,12 @@ public sealed class FederationControllerCatalogTests : IDisposable
             Name = "bob",
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = new List<Guid> { _lib },
+            UseDefaultTypes = true,
         });
 
         _source.Items.Add((_lib, Movie(_movieId, "/media/Movies/A/A.mkv")));
         _source.Items.Add((_lib, Episode(_episodeId, _seriesId, "/media/Shows/S/Season 01/S.mkv")));
-        _source.Items.Add((Guid.NewGuid(), Movie(_outsideId, "/media/Other/B.mkv")));
+        _source.Items.Add((Guid.NewGuid(), Photo(_outsideId, "/media/Photos/B.jpg")));
     }
 
     public void Dispose()
@@ -64,6 +64,9 @@ public sealed class FederationControllerCatalogTests : IDisposable
             return Make(id, "Movie", null);
         })
         { DateModified = _modified };
+
+    private static LocalItem Photo(Guid id, string path)
+        => new(id, "Photo", path, null, () => Make(id, "Photo", null)) { DateModified = _modified };
 
     private LocalItem Episode(Guid id, Guid seriesId, string path)
         => new(id, "Episode", path, seriesId, () =>
@@ -93,7 +96,7 @@ public sealed class FederationControllerCatalogTests : IDisposable
 
     private FederationController Controller(string? token, Action<HttpContext>? tweak = null)
     {
-        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
+        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, new FakeLibraries(), _ => true);
         var controller = new FederationController(FederationSender.Create(new FakeIdentity(), builder, _config, _tokens), builder, _source, _config, _tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
         var http = new DefaultHttpContext();
         if (token is not null)
@@ -147,6 +150,19 @@ public sealed class FederationControllerCatalogTests : IDisposable
         catalog.Items.Count.ShouldBe(2);
         catalog.Items.ShouldNotContain(i => i.Id == _outsideId.ToString("N"));
         controller.Response.Headers.ETag.ToString().ShouldBe("\"" + catalog.Etag + "\"");
+    }
+
+    [Theory]
+    [InlineData("Movies", 1)]
+    [InlineData("Shows", 1)]
+    [InlineData("Movies,Shows", 2)]
+    [InlineData("Music", 0)]
+    [InlineData(null, 2)]
+    public async Task Catalog_TypesQuery_ReachesTheQuery(string? types, int expected)
+    {
+        var result = (await Controller(_token).Catalog(types)).ShouldBeOfType<OkObjectResult>();
+
+        result.Value.ShouldBeOfType<CatalogResponse>().Items.Count.ShouldBe(expected);
     }
 
     [Fact]

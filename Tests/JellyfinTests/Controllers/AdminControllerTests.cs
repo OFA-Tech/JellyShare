@@ -57,6 +57,8 @@ public sealed class AdminControllerTests : IDisposable
         _saver = new FakeSaver(_config);
         _config.Settings.MoviesPlaceholderPath = _tmp.Sub("ph", "Movies");
         _config.Settings.ShowsPlaceholderPath = _tmp.Sub("ph", "Shows");
+        _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
         _index = new ConsumerIndexFiles(() => _tmp.Sub("data"));
         var services = new ServiceCollection();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -68,6 +70,7 @@ public sealed class AdminControllerTests : IDisposable
         services.AddSingleton<IAccountSignIn>(new FakeAccountSignIn());
         services.AddSingleton<ISyncRunner>(_sync);
         services.AddSingleton<IConsumerIndex>(_index);
+        services.AddSingleton<JellyShare.Domain.Interfaces.Storage.IPeerStateStore>(PeerStateStore.InDataFolder(() => _tmp.Sub("data")));
         services.AddSingleton<IAdminLibraries>(_libs);
         services.AddSingleton<IPlaceholderFiles>(new PlaceholderWriter());
         services.AddSingleton<IServerIdentity>(new FakeIdentity());
@@ -167,7 +170,7 @@ public sealed class AdminControllerTests : IDisposable
         share.MaxStreams.ShouldBe(3);
         share.MaxBitrate.ShouldBe(8_000_000);
         share.Enabled.ShouldBeTrue();
-        share.LibraryIds.ShouldBe([FakeLibraries.MoviesId]);
+        share.UseDefaultTypes.ShouldBe(true);
         _tokens.Verify(created.Token, _config.Current.Shares).ShouldNotBeNull();
         (_saver.Saves >= 1).ShouldBeTrue();
         _saver.Saved!.Shares.ShouldHaveSingleItem().Id.ShouldBe(created.Id);
@@ -207,12 +210,27 @@ public sealed class AdminControllerTests : IDisposable
     }
 
     [Fact]
-    public void CreateShare_UnknownLibrary_IsBadRequest()
+    public void CreateShare_CustomWithoutTypes_IsBadRequest()
     {
-        var result = Run(_c.CreateShare(new CreateShareRequest("bob", [Guid.NewGuid()], 2, null), CancellationToken.None));
+        var result = Run(_c.CreateShare(new CreateShareRequest("bob", null, 2, null, false, []), CancellationToken.None));
 
         result.ShouldBeOfType<BadRequestObjectResult>();
         _config.Current.Shares.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void DefaultSharing_IsInStatus_AndCanBeChanged()
+    {
+        Status().DefaultSharing.All.ShouldBeTrue();
+        Status().SupportedTypes.ShouldBe([MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks]);
+
+        var view = Value<DefaultSharingView>(Run(_c.UpdateDefaultSharing(new DefaultSharingRequest(false, [MediaType.Music, MediaType.Movies]), CancellationToken.None)));
+
+        view.All.ShouldBeFalse();
+        view.Types.ShouldBe([MediaType.Movies, MediaType.Music]);
+        Status().DefaultSharing.Types.ShouldBe(view.Types);
+        Status().DefaultSharing.All.ShouldBeFalse();
+        Run(_c.UpdateDefaultSharing(null!, CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -222,17 +240,20 @@ public sealed class AdminControllerTests : IDisposable
     }
 
     [Fact]
-    public void UpdateShare_ChangesNameLibrariesLimitsEnabled_KeepsToken()
+    public void UpdateShare_ChangesNameTypesLimitsEnabled_KeepsToken()
     {
         var created = CreateShare();
         var hashBefore = _config.Current.Shares[0].TokenHash;
 
-        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", [FakeLibraries.ShowsId, FakeLibraries.MoviesId], 5, 4_000_000, false), CancellationToken.None));
+        var result = Run(_c.UpdateShare(created.Id, new UpdateShareRequest("bobby", null, 5, 4_000_000, false, false, [MediaType.Shows]), CancellationToken.None));
 
         var view = Value<ShareView>(result);
         var share = _config.Current.Shares.Single();
         share.Name.ShouldBe("bobby");
-        share.LibraryIds.ShouldBe([FakeLibraries.ShowsId, FakeLibraries.MoviesId]);
+        share.UseDefaultTypes.ShouldBe(false);
+        share.Types.ShouldBe([MediaType.Shows]);
+        view.UseDefaultTypes.ShouldBeFalse();
+        view.Types.ShouldBe([MediaType.Shows]);
         share.MaxStreams.ShouldBe(5);
         share.MaxBitrate.ShouldBe(4_000_000);
         share.Enabled.ShouldBeFalse();
@@ -714,7 +735,7 @@ public sealed class AdminControllerTests : IDisposable
         s.Shows.Path.ShouldBe(_config.Current.ShowsPlaceholderPath);
         s.Movies.Attached.ShouldBeFalse();
         s.Shows.Attached.ShouldBeFalse();
-        s.Libraries.Count.ShouldBe(3);
+        s.Libraries.Count.ShouldBe(4);
     }
 
     [Fact]
@@ -765,8 +786,23 @@ public sealed class AdminControllerTests : IDisposable
         _libs.Added.ShouldHaveSingleItem().ShouldBe(("Shows", _config.Current.ShowsPlaceholderPath));
     }
 
+    [Fact]
+    public async Task Attach_MusicAndAudiobooks_AddTheirOwnRoots_AndShowInStatus()
+    {
+        await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Music"), CancellationToken.None);
+        await _c.Attach(new AttachLibraryRequest(FakeLibraries.BooksId, "audiobooks"), CancellationToken.None);
+        (await _c.Attach(new AttachLibraryRequest(FakeLibraries.MusicId, "Audiobooks"), CancellationToken.None)).ShouldBeOfType<BadRequestObjectResult>();
+
+        _libs.Added.ShouldBe([("Music", _config.Current.MusicPlaceholderPath), ("Books", _config.Current.AudiobooksPlaceholderPath)]);
+        var s = Status();
+        s.Music.Attached.ShouldBeTrue();
+        s.Music.LibraryName.ShouldBe("Music");
+        s.Audiobooks.Attached.ShouldBeTrue();
+        s.Audiobooks.LibraryName.ShouldBe("Books");
+    }
+
     [Theory]
-    [InlineData("Music")]
+    [InlineData("Ebooks")]
     [InlineData("")]
     [InlineData("../../etc")]
     [InlineData(null)]

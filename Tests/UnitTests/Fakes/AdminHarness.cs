@@ -10,6 +10,7 @@ using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Interfaces.Peers;
 using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Interfaces.Platform;
+using JellyShare.Domain.Interfaces.Storage;
 using JellyShare.Domain.Interfaces.Sync;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -27,7 +28,10 @@ internal sealed class AdminHarness : IDisposable
         Saver = new FakeSaver(Config);
         Config.Settings.MoviesPlaceholderPath = Tmp.Sub("ph", "Movies");
         Config.Settings.ShowsPlaceholderPath = Tmp.Sub("ph", "Shows");
+        Config.Settings.MusicPlaceholderPath = Tmp.Sub("ph", "Music");
+        Config.Settings.AudiobooksPlaceholderPath = Tmp.Sub("ph", "Audiobooks");
         Index = new ConsumerIndexFiles(() => Tmp.Sub("data"));
+        PeerStates = PeerStateStore.InDataFolder(() => Tmp.Sub("data"));
 
         var services = new ServiceCollection();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
@@ -39,6 +43,7 @@ internal sealed class AdminHarness : IDisposable
         services.AddSingleton<IAccountSignIn>(Accounts);
         services.AddSingleton<ISyncRunner>(Sync);
         services.AddSingleton<IConsumerIndex>(Index);
+        services.AddSingleton<IPeerStateStore>(PeerStates);
         services.AddSingleton<IAdminLibraries>(Libraries);
         services.AddSingleton<IPlaceholderFiles>(new PlaceholderWriter());
         services.AddSingleton<IServerIdentity>(new FakeIdentity());
@@ -65,6 +70,8 @@ internal sealed class AdminHarness : IDisposable
     public FakeLibraries Libraries { get; } = new();
 
     public ConsumerIndexFiles Index { get; }
+
+    public PeerStateStore PeerStates { get; }
 
     public ISender Sender => _services.GetRequiredService<ISender>();
 

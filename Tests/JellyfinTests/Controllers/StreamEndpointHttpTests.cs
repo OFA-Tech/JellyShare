@@ -27,6 +27,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
     private static readonly Guid _lib = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
     private static readonly Guid _movieId = Guid.Parse("00000001-0000-0000-0000-000000000001");
     private static readonly Guid _cappedId = Guid.Parse("00000001-0000-0000-0000-000000000002");
+    private static readonly Guid _trackId = Guid.Parse("00000005-0000-0000-0000-000000000001");
 
     private readonly string _tempDir = Path.Combine(Path.GetTempPath(), "jellyshare-test-" + Guid.NewGuid().ToString("N"));
     private readonly FakeConfig _config = new();
@@ -42,13 +43,17 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         await File.WriteAllBytesAsync(file, Enumerable.Range(0, 4096).Select(i => (byte)(i % 251)).ToArray());
         var (token, hash) = _tokens.Create();
         _token = token;
-        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, LibraryIds = new List<Guid> { _lib } });
+        _config.Settings.Shares.Add(new PeerShare { Id = Guid.NewGuid(), Name = "bob", TokenHash = hash, UseDefaultTypes = true });
 
         var source = new FakeSource();
         source.Items.Add((_lib, new LocalItem(_movieId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[_movieId] = new StreamInfo("Movie", "Movie", file, 1_000_000);
         source.Items.Add((_lib, new LocalItem(_cappedId, "Movie", file, null, () => throw new InvalidOperationException())));
         source.Streams[_cappedId] = new StreamInfo("Movie", "Capped", file, 50_000_000);
+        var track = Path.Combine(_tempDir, "t.flac");
+        await File.WriteAllBytesAsync(track, Enumerable.Range(0, 2048).Select(i => (byte)(i % 241)).ToArray());
+        source.Items.Add((_lib, new LocalItem(_trackId, "Audio", track, null, () => throw new InvalidOperationException())));
+        source.Streams[_trackId] = new StreamInfo("Audio", "Track", track, 5_000_000);
         _config.Settings.Shares[0].MaxBitrate = 2_000_000;
         _config.Settings.Shares[0].MaxStreams = 1;
 
@@ -62,7 +67,7 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         builder.Services.AddSingleton(new StreamLimiter(TimeProvider.System));
         builder.Services.AddSingleton<ILocalItemSource>(source);
         builder.Services.AddSingleton(FakeCapped.Create());
-        builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, _ => true));
+        builder.Services.AddSingleton(sp => new CatalogBuilder(source, new FakeIdentity(), _config, new FakeLibraries(), _ => true));
         builder.Services.AddDispatcherSetup();
         _app = builder.Build();
         _app.MapControllers();
@@ -134,6 +139,21 @@ public sealed class StreamEndpointHttpTests : IAsyncLifetime
         string.Join(",", response.Headers.AcceptRanges).ShouldBe("none");
         response.Content.Headers.ContentRange.ShouldBeNull();
         (await response.Content.ReadAsByteArrayAsync()).ShouldBe(FakeFfmpegRunner.Payload);
+    }
+
+    [Fact]
+    public async Task Audio_OverCap_GetWithRange_Returns206OfTheFile()
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, "/JellyShare/v1/stream/" + _trackId.ToString("N"));
+        request.Headers.Add("X-JellyShare-Token", _token);
+        request.Headers.Range = new RangeHeaderValue(1000, 1999);
+
+        var response = await _client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.PartialContent);
+        response.Content.Headers.ContentRange!.ToString().ShouldBe("bytes 1000-1999/2048");
+        response.Content.Headers.ContentType!.MediaType.ShouldBe("audio/flac");
+        (await response.Content.ReadAsByteArrayAsync()).Length.ShouldBe(1000);
     }
 
     [Fact]

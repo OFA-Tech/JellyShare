@@ -26,6 +26,8 @@ public sealed class PluginConfigurationXmlTests
               </LibraryIds>
               <MaxStreams>2</MaxStreams>
               <MaxBitrate xsi:nil="true" />
+              <UseDefaultTypes xsi:nil="true" />
+              <Types />
             </PeerShare>
             <PeerShare>
               <Id>11111111-2222-3333-4444-666666666666</Id>
@@ -35,6 +37,11 @@ public sealed class PluginConfigurationXmlTests
               <LibraryIds />
               <MaxStreams>5</MaxStreams>
               <MaxBitrate>8000000</MaxBitrate>
+              <UseDefaultTypes>false</UseDefaultTypes>
+              <Types>
+                <MediaType>Movies</MediaType>
+                <MediaType>Music</MediaType>
+              </Types>
             </PeerShare>
           </Shares>
           <Peers>
@@ -50,6 +57,8 @@ public sealed class PluginConfigurationXmlTests
               <AccountUserId />
               <MaxStreams>1</MaxStreams>
               <LimitAction>Refuse</LimitAction>
+              <AcceptAllTypes>true</AcceptAllTypes>
+              <AcceptTypes />
             </RemotePeer>
             <RemotePeer>
               <Id>99999999-8888-7777-6666-444444444444</Id>
@@ -63,14 +72,23 @@ public sealed class PluginConfigurationXmlTests
               <AccountUserId>0123456789abcdef0123456789abcdef</AccountUserId>
               <MaxStreams>3</MaxStreams>
               <LimitAction>StopOldest</LimitAction>
+              <AcceptAllTypes>false</AcceptAllTypes>
+              <AcceptTypes>
+                <MediaType>Shows</MediaType>
+              </AcceptTypes>
             </RemotePeer>
           </Peers>
           <MoviesPlaceholderPath>/config/plugins/JellyShare.Jellyfin/placeholders/Movies</MoviesPlaceholderPath>
           <ShowsPlaceholderPath>/config/plugins/JellyShare.Jellyfin/placeholders/Shows</ShowsPlaceholderPath>
+          <MusicPlaceholderPath>/config/plugins/JellyShare.Jellyfin/placeholders/Music</MusicPlaceholderPath>
+          <AudiobooksPlaceholderPath>/config/plugins/JellyShare.Jellyfin/placeholders/Audiobooks</AudiobooksPlaceholderPath>
           <SyncIntervalHours>6</SyncIntervalHours>
           <PresenceSweepSeconds>60</PresenceSweepSeconds>
           <MaxConcurrentTranscodes>4</MaxConcurrentTranscodes>
           <RelayBaseOverride>http://127.0.0.1:8096</RelayBaseOverride>
+          <DefaultShareTypes>
+            <MediaType>Movies</MediaType>
+          </DefaultShareTypes>
         </PluginConfiguration>
         """;
 
@@ -98,6 +116,13 @@ public sealed class PluginConfigurationXmlTests
         account.MaxStreams.ShouldBe(3);
         account.LimitAction.ShouldBe(StreamLimitAction.StopOldest);
         cfg.RelayBaseOverride.ShouldBe("http://127.0.0.1:8096");
+        cfg.DefaultShareTypes.ShouldBe(new[] { MediaType.Movies });
+        cfg.Shares[0].UseDefaultTypes.ShouldBeNull();
+        cfg.Shares[1].UseDefaultTypes.ShouldBe(false);
+        cfg.Shares[1].Types.ShouldBe(new[] { MediaType.Movies, MediaType.Music });
+        cfg.Peers[0].AcceptAllTypes.ShouldBeTrue();
+        account.AcceptAllTypes.ShouldBeFalse();
+        account.AcceptTypes.ShouldBe(new[] { MediaType.Shows });
 
         using var writer = new StringWriter();
         serializer.Serialize(writer, cfg);
@@ -130,5 +155,80 @@ public sealed class PluginConfigurationXmlTests
         peer.Kind.ShouldBe(PeerKind.Token);
         peer.MaxStreams.ShouldBe(1);
         peer.LimitAction.ShouldBe(StreamLimitAction.Refuse);
+    }
+
+    private static PluginConfiguration Load(string xml)
+    {
+        var serializer = new XmlSerializer(typeof(PluginConfiguration));
+        using var reader = XmlReader.Create(new StringReader(xml), new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null });
+        return (PluginConfiguration)serializer.Deserialize(reader)!;
+    }
+
+    [Fact]
+    public void ShareXmlFrom020_LoadsWithUseDefaultTypesNull_AndLibraryIdsKept()
+    {
+        const string xml = """
+            <PluginConfiguration>
+              <Shares>
+                <PeerShare>
+                  <Id>11111111-2222-3333-4444-555555555555</Id>
+                  <Name>bob</Name>
+                  <TokenHash>0000000000000000000000000000000000000000000000000000000000000000</TokenHash>
+                  <Enabled>true</Enabled>
+                  <LibraryIds>
+                    <guid>aaaaaaaa-0000-0000-0000-000000000001</guid>
+                  </LibraryIds>
+                  <MaxStreams>2</MaxStreams>
+                </PeerShare>
+              </Shares>
+            </PluginConfiguration>
+            """;
+
+        var share = Load(xml).Shares.ShouldHaveSingleItem();
+
+        share.UseDefaultTypes.ShouldBeNull();
+        share.Types.ShouldBeEmpty();
+        share.LibraryIds.ShouldBe(new[] { Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001") });
+    }
+
+    [Fact]
+    public void PeerXmlFrom020_LoadsAcceptingAllTypes()
+    {
+        const string xml = """
+            <PluginConfiguration>
+              <Peers>
+                <RemotePeer>
+                  <Id>99999999-8888-7777-6666-555555555555</Id>
+                  <Name>bob</Name>
+                  <BaseUrl>http://bob:8096</BaseUrl>
+                  <Token>js1_not-a-real-token</Token>
+                  <Kind>Account</Kind>
+                </RemotePeer>
+              </Peers>
+            </PluginConfiguration>
+            """;
+
+        var peer = Load(xml).Peers.ShouldHaveSingleItem();
+
+        peer.AcceptAllTypes.ShouldBeTrue();
+        peer.AcceptTypes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void DefaultShareTypesAbsent_LoadsNull()
+    {
+        Load("<PluginConfiguration />").DefaultShareTypes.ShouldBeNull();
+    }
+
+    [Fact]
+    public void DefaultShareTypesSaved_RoundTripsWithoutDuplicates()
+    {
+        var serializer = new XmlSerializer(typeof(PluginConfiguration));
+        using var writer = new StringWriter();
+        serializer.Serialize(writer, new PluginConfiguration { DefaultShareTypes = new[] { MediaType.Movies, MediaType.Music } });
+
+        var copy = Load(writer.ToString());
+
+        copy.DefaultShareTypes.ShouldBe(new[] { MediaType.Movies, MediaType.Music });
     }
 }

@@ -543,6 +543,29 @@ public sealed class RelayControllerTests
     }
 
     [Fact]
+    public async Task Play_AccountPeerOneSlot_TwoTracksOfOneAlbumShareIt()
+    {
+        var alice = _config.Current.Peers[0];
+        alice.Kind = PeerKind.Account;
+        alice.MaxStreams = 1;
+        void Add(string key, CatalogItem item) => _index.Entries[key] = new MergedEntry(key, new[] { key }, new List<(Guid, CatalogItem)> { (_a, item) });
+        Add("track:1", TestItems.Track("Hells Bells", track: 1, id: "t1"));
+        Add("track:2", TestItems.Track("Shoot to Thrill", track: 2, id: "t2"));
+        Add("track:3", TestItems.Track("Thunderstruck", album: "The Razors Edge", id: "t3"));
+        Host("alice", _ => Video(new byte[] { 1 }));
+
+        var first = Context();
+        StatusOf(await CreateController(first).Play("track:1"), first).ShouldBe(200);
+        var sameAlbum = Context();
+        StatusOf(await CreateController(sameAlbum).Play("track:2"), sameAlbum).ShouldBe(200);
+        var otherAlbum = Context();
+        StatusOf(await CreateController(otherAlbum).Play("track:3"), otherAlbum).ShouldBe(503);
+
+        _upstream.Select(r => r.RequestUri!.AbsolutePath).ShouldBe(["/JellyShare/v1/stream/t1", "/JellyShare/v1/stream/t2"]);
+        _sessions.ActiveTitles(_a).ShouldHaveSingleItem();
+    }
+
+    [Fact]
     public async Task Play_AllFull_Is503StreamLimit()
     {
         foreach (var peer in _config.Current.Peers)

@@ -128,6 +128,70 @@ public sealed class PathNamingTests
         PathNaming.ForEntry(entry).RelativeDir.ShouldBe("Evil");
     }
 
+    [Fact]
+    public void PathNaming_ArtistWithSlash_IsSafe()
+    {
+        var file = PathNaming.ForEntry(Entry(TestItems.Track("Hells Bells", albumArtist: "AC/DC", album: "Back in Black", track: 1)));
+
+        file.ShouldBe(new PlaceholderFile("AC-DC/Back in Black", "01 Hells Bells", "Audio"));
+        PathNaming.IsSafeRelative(file.RelativeDir, file.BaseName).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void PathNaming_OwnerHasTheArtist_UsesOwnersSpelling()
+    {
+        var owner = OwnerArtists.Build(["Beyoncé", "AC/DC"]);
+
+        PathNaming.ForEntry(Entry(TestItems.Track("Halo", albumArtist: "Beyonce", album: "I Am")), null, owner).RelativeDir.ShouldBe("Beyoncé/I Am");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "ACDC ", album: "X")), null, owner).RelativeDir.ShouldBe("ACDC/X");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "ac dc", album: "X")), null, owner).RelativeDir.ShouldBe("AC-DC/X");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", albumArtist: "Other", album: "X")), null, owner).RelativeDir.ShouldBe("Other/X");
+    }
+
+    [Fact]
+    public void PathNaming_BlankAlbumArtist_UsesFirstArtist_LikeTheAlbumKey()
+    {
+        var item = TestItems.Track("Song", albumArtist: "  ", album: "X") with { Artists = ["Solo"] };
+
+        PathNaming.ForEntry(Entry(item)).RelativeDir.ShouldBe("Solo/X");
+        TitleKey.For(Entry(item)).ShouldBe(TitleKey.For(Entry(item with { AlbumArtist = "Solo" })));
+    }
+
+    [Fact]
+    public void PathNaming_Audio_SecondDiscPrefixesDisc_MissingNamesFallBack()
+    {
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", disc: 2, track: 3))).BaseName.ShouldBe("2-03 Song");
+        PathNaming.ForEntry(Entry(TestItems.Track("Song", track: null))).BaseName.ShouldBe("Song");
+
+        var bare = TestItems.Track("Song", albumArtist: null, album: null) with { Artists = ["Solo"] };
+        PathNaming.ForEntry(Entry(bare)).RelativeDir.ShouldBe("Solo/Unknown Album");
+        PathNaming.ForEntry(Entry(bare with { Artists = null })).RelativeDir.ShouldBe("Unknown Artist/Unknown Album");
+    }
+
+    [Fact]
+    public void PathNaming_Audiobook_KeepsFolderSegments()
+    {
+        var file = PathNaming.ForEntry(Entry(TestItems.Book("Chapter: One", folderPath: "Author X/Book Y") with { TrackNumber = 1 }));
+
+        file.ShouldBe(new PlaceholderFile("Author X/Book Y", "01 Chapter- One", "AudioBook"));
+        PathNaming.ForEntry(Entry(TestItems.Book("Chapter Two", folderPath: "Author X/Book Y"))).BaseName.ShouldBe("Chapter Two");
+    }
+
+    [Fact]
+    public void PathNaming_Audiobook_UnsafeOrMissingFolder()
+    {
+        PathNaming.ForEntry(Entry(TestItems.Book("Part", folderPath: "../../etc/Book"))).RelativeDir.ShouldBe("Untitled/Untitled/etc/Book");
+        PathNaming.ForEntry(Entry(TestItems.Book("Lone Book", folderPath: null))).RelativeDir.ShouldBe("Lone Book");
+    }
+
+    [Fact]
+    public void PathNaming_Audiobook_DeepFolder_KeepsFirstSixSegments()
+        => PathNaming.ForEntry(Entry(TestItems.Book("Part", folderPath: "a/b/c/d/e/f/g/h"))).RelativeDir.ShouldBe("a/b/c/d/e/f");
+
+    [Fact]
+    public void PathNaming_SymbolOnlyAlbumAndArtist_KeepTheirNames()
+        => PathNaming.ForEntry(Entry(TestItems.Track("One", albumArtist: "!!!", album: "÷"))).RelativeDir.ShouldBe("!!!/÷");
+
     internal static MergedEntry Entry(CatalogItem item)
     {
         var keys = MediaKey.For(item);

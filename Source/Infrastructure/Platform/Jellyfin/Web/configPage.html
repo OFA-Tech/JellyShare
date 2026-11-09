@@ -32,13 +32,14 @@
         #JellySharePage .js-muted { opacity: .7; }
         #JellySharePage code { background: rgba(0,0,0,.3); border-radius: .2em; padding: .1em .35em; word-break: break-all; }
         #JellySharePage .js-stats span { display: inline-block; margin-right: 1.2em; }
+        #JellySharePage .js-types { align-items: center; display: flex; flex-wrap: wrap; }
         #JellySharePage .js-hidden { display: none !important; }
     </style>
 
     <div data-role="content">
         <div class="content-primary">
             <h2 class="sectionTitle">JellyShare</h2>
-            <p class="js-muted">Share movies and shows with friends' Jellyfin servers, and receive theirs. <span id="js-server"></span></p>
+            <p class="js-muted">Share movies, shows, music and audiobooks with friends' Jellyfin servers, and receive theirs. <span id="js-server"></span></p>
             <div id="js-message" class="js-msg js-hidden" role="status"></div>
 
             <div class="js-tabs" role="tablist">
@@ -58,6 +59,12 @@
                 </div>
 
                 <div class="js-card">
+                    <h3>Default sharing</h3>
+                    <p class="js-muted">The media types an invitation offers when you choose "Use the default". Friends who sign in with a Jellyfin user you made see what that user's library access allows; these ticks apply to invitations.</p>
+                    <div id="js-default-sharing"></div>
+                </div>
+
+                <div class="js-card">
                     <h3>New invitation</h3>
                     <div class="js-row">
                         <div class="js-field grow">
@@ -73,10 +80,7 @@
                             <input type="number" id="js-new-mbps" min="0.1" step="0.1" placeholder="no limit">
                         </div>
                     </div>
-                    <div class="js-field">
-                        <span>Libraries they may see</span>
-                        <div id="js-new-libs"></div>
-                    </div>
+                    <div id="js-new-types"></div>
                     <p><button type="button" class="js-btn primary" id="js-create-share">Create invitation</button></p>
                 </div>
 
@@ -87,7 +91,7 @@
             <div id="js-tab-receive" class="js-hidden">
                 <div class="js-card" id="js-setup">
                     <h3>Setup</h3>
-                    <p>JellyShare puts the peers' titles into two folders it owns. Add each folder to your existing library of the same kind, so they appear next to your own movies and shows.</p>
+                    <p>JellyShare puts the peers' titles into folders it owns, one per media type. Add each folder to your existing library of the same kind, so they appear next to your own movies, shows, music and audiobooks.</p>
                     <div id="js-roots"></div>
                     <div id="js-grouping-warning" class="js-msg warn js-hidden"></div>
                     <div class="js-msg warn">
@@ -149,6 +153,7 @@
                             </select>
                         </div>
                     </div>
+                    <div id="js-peer-types"></div>
                     <p class="js-muted js-hidden" id="js-peer-account-note">Use an account made for you on their server. The password is used once to sign in and is not stored; only the sign-in session is kept.</p>
                     <p>
                         <button type="button" class="js-btn" id="js-peer-test">Test connection</button>

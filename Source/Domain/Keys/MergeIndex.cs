@@ -16,7 +16,7 @@ public sealed record MergedEntry(
 /// </summary>
 public sealed class MergeIndex
 {
-    private static readonly string[] _kindPreference = ["tmdb", "imdb", "tvdb"];
+    private static readonly string[] _kindPreference = ["tmdb", "imdb", "tvdb", "mb", "name"];
 
     private readonly Dictionary<string, MergedEntry> _byKey;
 
@@ -126,10 +126,11 @@ public sealed class MergeIndex
         return new MergeIndex(entries, byKey, unmatched + conflicts, conflicts);
     }
 
+    // Name hashes are not ids: peers spell the same track differently, and a shared id then bridges both hashes.
     private static bool HasConflictingIds(List<string> keys)
     {
         var kinds = new HashSet<string>(StringComparer.Ordinal);
-        return keys.Exists(key => !kinds.Add(MediaKey.KindOf(key)));
+        return keys.Exists(key => MediaKey.KindOf(key) is var kind && kind != "name" && !kinds.Add(kind));
     }
 
     /// <summary>Finds the entry containing a key.</summary>

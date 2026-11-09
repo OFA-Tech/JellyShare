@@ -27,6 +27,26 @@ internal static class TestItems
             id, "Movie", name, 2020, ids, null, null, null, null, null, null, _emptyMedia, [], DateTime.UnixEpoch);
     }
 
+    public static CatalogItem Track(
+        string name,
+        string? albumArtist = "AC/DC",
+        string? album = "Back in Black",
+        int? disc = 1,
+        int? track = 1,
+        string? mbid = null,
+        string id = "t1")
+        => new(
+            id, "Audio", name, 1980,
+            mbid is null ? new Dictionary<string, string>() : new Dictionary<string, string> { ["MusicBrainzRecording"] = mbid },
+            null, null, null, null, null, null, _emptyMedia, [], DateTime.UnixEpoch,
+            Album: album, AlbumArtist: albumArtist, DiscNumber: disc, TrackNumber: track);
+
+    public static CatalogItem Book(string name, string? folderPath = "Author X/Book Y", string id = "b1")
+        => new(
+            id, "AudioBook", name, 2010, new Dictionary<string, string>(),
+            null, null, null, null, null, null, _emptyMedia, [], DateTime.UnixEpoch,
+            FolderPath: folderPath);
+
     public static CatalogItem Episode(
         string series,
         Dictionary<string, string>? seriesIds,

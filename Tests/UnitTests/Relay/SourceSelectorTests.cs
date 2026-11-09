@@ -1,6 +1,7 @@
 using JellyShare.Application.Features.Relay;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Keys;
@@ -52,6 +53,19 @@ public sealed class SourceSelectorTests
 
         // _a peer that failed its last sync may be back already: it is still tried, after the healthy ones.
         order.Select(s => s.Peer.Id).ShouldBe(new[] { _a, _c });
+    }
+
+    [Fact]
+    public void SourceSelector_SkipsPeerNotAcceptingType()
+    {
+        var onlyShows = Peer(_a, "alice");
+        onlyShows.AcceptAllTypes = false;
+        onlyShows.AcceptTypes = [MediaType.Shows];
+        var peers = new[] { onlyShows, Peer(_b, "bob", priority: 1) };
+
+        var order = SourceSelector.Order(Entry(_a, _b), peers, NoState());
+
+        order.Select(s => s.Peer.Id).ShouldBe(new[] { _b });
     }
 
     [Fact]

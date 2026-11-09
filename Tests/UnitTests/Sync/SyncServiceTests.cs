@@ -2,6 +2,7 @@ using System.Globalization;
 using JellyShare.Application.Features.Sync;
 using JellyShare.Data.Files.Placeholders;
 using JellyShare.Data.Files.Stores;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Exceptions;
 using JellyShare.Domain.Models.Placeholders;
 using JellyShare.Domain.Models.Configuration;
@@ -26,6 +27,7 @@ public sealed class SyncServiceTests : IDisposable
     private readonly HashSet<string> _missing = new(StringComparer.Ordinal);
     private readonly FakeScans _scans = new();
     private readonly MutableClock _clock = new();
+    private readonly FakeLibraries _libraries = new();
     private readonly RemotePeer _alice = new() { Id = TestItems.PeerA, Name = "alice", BaseUrl = "http://alice", Token = "t" };
     private readonly SyncService _sync;
 
@@ -36,7 +38,7 @@ public sealed class SyncServiceTests : IDisposable
         _config.Settings.Peers.Add(_alice);
         var index = new LocalIndex(_library, _config, FakeLocalLibrary.Exists(p => !_missing.Contains(p)));
         _sync = TestSync.Create(
-            _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance);
+            _config, _client, index, _scans, new FixedRelay(), () => _tmp.Sub("data"), _clock, NullLogger<SyncService>.Instance, _libraries);
     }
 
     private string MoviesRoot => _config.Current.MoviesPlaceholderPath;
@@ -276,6 +278,42 @@ public sealed class SyncServiceTests : IDisposable
         movie.Sources[0].Item.Media.BitRate.ShouldBe(1312543);
         movie.Sources[0].Item.Name.ShouldBe("Big Buck Bunny");
         entries[0].Sources[0].Item.SeriesId.ShouldBe("s1");
+    }
+
+    [Fact]
+    public async Task Sync_PeerStopsAcceptingType_RemovesOnlyThatTypeFromThatPeer()
+    {
+        var bob = new RemotePeer { Id = TestItems.PeerB, Name = "bob", BaseUrl = "http://bob", Token = "t" };
+        _config.Settings.Peers.Add(bob);
+        _client.Catalogs[_alice.Id] = _ => FakePeerClient.Ok(Bunny(), Pioneer(1, 1));
+        _client.Catalogs[bob.Id] = _ => FakePeerClient.Ok(Bunny(), Pioneer(1, 1));
+        await _sync.RunAsync(CancellationToken.None);
+
+        // The cached catalog (not modified) still holds A's episode: the accept list alone drops it.
+        _alice.AcceptAllTypes = false;
+        _alice.AcceptTypes = [MediaType.Movies];
+        _client.Catalogs[_alice.Id] = _ => new PeerFetchResult(false, true, null, null);
+        await _sync.RunAsync(CancellationToken.None);
+
+        var entries = MergedIndexStore.Load(Path.Combine(DataDir, "merged-index.json"))!.ToEntries();
+        entries.Single(e => e.CanonicalKey == "movie:tmdb:10378").Sources.Select(s => s.PeerId).ShouldBe([_alice.Id, bob.Id], ignoreOrder: true);
+        entries.Single(e => e.CanonicalKey == "ep:tvdb:153021:s1e1").Sources.Select(s => s.PeerId).ShouldBe([bob.Id]);
+        File.Exists(Path.Combine(ShowsRoot, PioneerDir, "Season 01", "Pioneer One S01E01.strm")).ShouldBeTrue();
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Sync_OnlyAcceptedTypeIsUnsupported_DropsTheTitlesWithoutAnError()
+    {
+        Offer(Bunny());
+        await _sync.RunAsync(CancellationToken.None);
+
+        _alice.AcceptAllTypes = false;
+        _alice.AcceptTypes = [MediaType.Music];
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        MoviePlaceholder(BunnyDir).ShouldBeFalse();
+        report.PeerErrors.ShouldBeEmpty();
     }
 
     [Fact]
@@ -755,5 +793,166 @@ public sealed class SyncServiceTests : IDisposable
 
         maxInside.ShouldBe(1);
         _client.Fetches.Count.ShouldBe(2);
+    }
+
+    private static CatalogItem Song(string name, int track, string album = "Album Two", string albumArtist = "Artist B")
+        => TestItems.Track(name, albumArtist: albumArtist, album: album, track: track, id: "t" + track) with { AlbumId = "album2", ImageTypes = ["Primary"] };
+
+    private string AttachedMusicRoot()
+    {
+        var root = _config.Settings.MusicPlaceholderPath = _tmp.Sub("ph", "Music");
+        var i = _libraries.Libraries.FindIndex(l => l.CollectionType == "music");
+        _libraries.Libraries[i] = _libraries.Libraries[i] with { Locations = [.. _libraries.Libraries[i].Locations, root] };
+        return root;
+    }
+
+    private string AttachedBooksRoot()
+    {
+        var root = _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
+        _libraries.Libraries.Add(new(Guid.NewGuid(), "Audiobooks", "books", [root], false));
+        return root;
+    }
+
+    [Fact]
+    public async Task Sync_MusicRootNotInAMusicLibrary_SkippedAndReported_ExistingPlaceholdersKept()
+    {
+        var music = AttachedMusicRoot();
+        Offer(Bunny(), Song("First Light", 1));
+        await _sync.RunAsync(CancellationToken.None);
+        var strm = Path.Combine(music, "Artist B", "Album Two", "01 First Light.strm");
+        File.Exists(strm).ShouldBeTrue();
+
+        // Detached from the music library and moved into a movies library: still not "set up" for music.
+        var i = _libraries.Libraries.FindIndex(l => l.CollectionType == "music");
+        _libraries.Libraries[i] = _libraries.Libraries[i] with { Locations = ["/media/Music"] };
+        _libraries.Libraries[0] = _libraries.Libraries[0] with { Locations = ["/media/Movies", music] };
+        Offer(Bunny(), Song("Second Wind", 2));
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedTypesWithoutFolder.ShouldBe([MediaType.Music]);
+        File.Exists(strm).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "02 Second Wind.strm")).ShouldBeFalse();
+        report.Deleted.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Sync_AudiobooksRootNotInABooksLibrary_NothingWritten()
+    {
+        var books = _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
+        Offer(TestItems.Book("Chapter One"));
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedTypesWithoutFolder.ShouldBe([MediaType.Audiobooks]);
+        Directory.Exists(books).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Sync_MoviesRootNotInALibrary_StillWritten()
+    {
+        _libraries.Libraries.Clear();
+        Offer(Bunny());
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.SkippedTypesWithoutFolder.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Sync_OwnerHasTheArtist_FriendAlbumUsesOwnersSpelling()
+    {
+        var music = AttachedMusicRoot();
+        _library.Media.Add(new LocalMedia("Audio", "/media/Music/own.flac", null, null, null, null)
+        {
+            Name = "Crazy in Love", Album = "Dangerously in Love", AlbumArtist = "Beyoncé", Artists = ["Beyoncé"], TrackNumber = 1,
+        });
+        _client.Images[(_alice.Id, "album2", "Primary")] = [1];
+        Offer(Song("Halo", 1, album: "I Am", albumArtist: "Beyonce"));
+
+        await _sync.RunAsync(CancellationToken.None);
+
+        File.Exists(Path.Combine(music, "Beyoncé", "I Am", "01 Halo.strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Beyoncé", "I Am", "folder.jpg")).ShouldBeTrue();
+        Directory.Exists(Path.Combine(music, "Beyonce")).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Sync_MusicWithoutFolder_SkippedAndReported()
+    {
+        _config.Settings.MusicPlaceholderPath = string.Empty;
+        _config.Settings.AudiobooksPlaceholderPath = _tmp.Sub("ph", "Audiobooks");
+        Offer(Bunny(), Song("First Light", 1));
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedTypesWithoutFolder.ShouldBe([MediaType.Music]);
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        report.Written.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Sync_MusicAndMoviesFromOnePeer_EachInItsRoot()
+    {
+        var music = AttachedMusicRoot();
+        var books = AttachedBooksRoot();
+        _client.Images[(_alice.Id, "album2", "Primary")] = [1, 2, 3];
+        Offer(Bunny(), Song("First Light", 1), Song("Second Wind", 2), TestItems.Book("Chapter One", id: "b1") with { TrackNumber = 1, AlbumId = "bookfolder", ImageTypes = ["Primary"] });
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        MoviePlaceholder(BunnyDir).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "01 First Light.strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "02 Second Wind.strm")).ShouldBeTrue();
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "folder.jpg")).ShouldBeTrue();
+        Directory.EnumerateFiles(music, "*.nfo", SearchOption.AllDirectories).ShouldBeEmpty();
+        File.Exists(Path.Combine(books, "Author X", "Book Y", "01 Chapter One.strm")).ShouldBeTrue();
+        Directory.Exists(Path.Combine(MoviesRoot, "Artist B")).ShouldBeFalse();
+        report.SkippedTypesWithoutFolder.ShouldBeEmpty();
+        report.Written.ShouldBe(5);
+        _client.ImageRequests.ShouldContain((_alice.Id, "bookfolder", "Primary"));
+        _scans.Reported.ShouldContain(Path.Combine(music, "Artist B", "Album Two"));
+    }
+
+    [Fact]
+    public async Task Sync_OwnerHasPartOfAlbum_WholeFriendAlbumSkipped_AndCountedLocal()
+    {
+        AttachedMusicRoot();
+        _library.Media.Add(new LocalMedia("Audio", "/media/Music/a.flac", null, null, null, null)
+        {
+            Name = "Song One", Album = "Album One", AlbumArtist = "Artist A", TrackNumber = 1,
+        });
+        Offer(Song("Song Three", 3, album: "album one", albumArtist: "ARTIST A"), Song("First Light", 1));
+
+        var report = await _sync.RunAsync(CancellationToken.None);
+
+        report.SkippedLocal.ShouldBe(1);
+        Directory.Exists(Path.Combine(_config.Settings.MusicPlaceholderPath, "ARTIST A")).ShouldBeFalse();
+        File.Exists(Path.Combine(_config.Settings.MusicPlaceholderPath, "Artist B", "Album Two", "01 First Light.strm")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Sync_LastTrackOfAlbumGone_RemovesAlbumFolderWithItsArt()
+    {
+        var music = AttachedMusicRoot();
+        _client.Images[(_alice.Id, "album2", "Primary")] = [1];
+        Offer(Song("First Light", 1), Song("Other", 1, album: "Album Three") with { AlbumId = "album3" });
+        await _sync.RunAsync(CancellationToken.None);
+        File.Exists(Path.Combine(music, "Artist B", "Album Two", "folder.jpg")).ShouldBeTrue();
+
+        Offer(Song("Other", 1, album: "Album Three") with { AlbumId = "album3" });
+        await _sync.RunAsync(CancellationToken.None);
+
+        Directory.Exists(Path.Combine(music, "Artist B", "Album Two")).ShouldBeFalse();
+        File.Exists(Path.Combine(music, "Artist B", "Album Three", "01 Other.strm")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Sync_MusicRootInsideMoviesRoot_Refused()
+    {
+        _config.Settings.MusicPlaceholderPath = Path.Combine(MoviesRoot, "Music");
+        Offer(Bunny());
+
+        Should.Throw<InvalidOperationException>(() => _sync.RunAsync(CancellationToken.None));
     }
 }

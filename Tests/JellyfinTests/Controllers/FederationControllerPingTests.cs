@@ -23,7 +23,7 @@ public sealed class FederationControllerPingTests
         var identity = new FakeServerIdentity(name);
         var config = new FakeConfig();
         var source = new FakeSource();
-        var catalog = new CatalogBuilder(source, identity, config);
+        var catalog = new CatalogBuilder(source, identity, config, new FakeLibraries());
         var tokens = new ShareTokenService();
         return new FederationController(FederationSender.Create(identity, catalog, config, tokens), catalog, source, config, tokens, new StreamLimiter(TimeProvider.System), FakeCapped.Create(), Microsoft.Extensions.Logging.Abstractions.NullLogger<FederationController>.Instance);
     }

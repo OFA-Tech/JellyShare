@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using JellyShare.Domain.Keys;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Library;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Rules;
@@ -17,6 +18,7 @@ public sealed record PlaceholderFile(string RelativeDir, string BaseName, string
 public static class PathNaming
 {
     private const int MaxLength = 120;
+    private const int MaxBookDepth = 6;
 
     private static readonly HashSet<string> _reserved = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -74,14 +76,20 @@ public static class PathNaming
     /// <summary>Computes the placeholder location of a merged entry.</summary>
     /// <param name="e">The merged entry; the first source provides the names.</param>
     /// <param name="localSeries">The owner's local series, if the owner already has this series.</param>
+    /// <param name="ownerArtists">The owner's artist names (<see cref="OwnerArtists.Build"/>), used instead of the friend's spelling.</param>
     /// <returns>The placeholder location.</returns>
-    public static PlaceholderFile ForEntry(MergedEntry e, LocalSeries? localSeries = null)
+    public static PlaceholderFile ForEntry(MergedEntry e, LocalSeries? localSeries = null, IReadOnlyDictionary<string, string>? ownerArtists = null)
     {
         ArgumentNullException.ThrowIfNull(e);
         var item = e.Sources[0].Item;
         if (string.Equals(item.Type, "Episode", StringComparison.Ordinal))
         {
             return ForEpisode(e, item, localSeries);
+        }
+
+        if (MediaTypes.IsAudio(item.Type))
+        {
+            return ForAudio(item, ownerArtists);
         }
 
         var name = Safe(item.Name);
@@ -138,6 +146,31 @@ public static class PathNaming
         var episode = (item.EpisodeNumber ?? 0).ToString("00", CultureInfo.InvariantCulture);
         var seriesDir = tag.Length == 0 ? seriesName : seriesName + " " + tag;
         return new PlaceholderFile($"{seriesDir}/Season {season}", $"{seriesName} S{season}E{episode}", "Episode");
+    }
+
+    // No .nfo for audio (Jellyfin has no track nfo reader): the plugin writes the item's metadata after the scan.
+    // Jellyfin makes one album per folder, so every track of an album shares its folder.
+    private static PlaceholderFile ForAudio(CatalogItem item, IReadOnlyDictionary<string, string>? ownerArtists)
+    {
+        var disc = item.DiscNumber is > 1 ? string.Create(CultureInfo.InvariantCulture, $"{item.DiscNumber}-") : string.Empty;
+        var baseName = item.TrackNumber is { } track
+            ? string.Create(CultureInfo.InvariantCulture, $"{disc}{track:00} {Safe(item.Name)}")
+            : Safe(item.Name);
+        if (string.Equals(item.Type, "Audio", StringComparison.Ordinal))
+        {
+            var albumArtist = TitleKey.AlbumArtistOf(item);
+            var artist = Safe(albumArtist is null ? "Unknown Artist" : OwnerArtists.Resolve(ownerArtists, albumArtist));
+            var album = Safe(string.IsNullOrWhiteSpace(item.Album) ? "Unknown Album" : item.Album);
+            return new PlaceholderFile(artist + "/" + album, baseName, "Audio");
+        }
+
+        // The folder path comes from the peer: keep only its first MaxBookDepth segments so it cannot nest without end.
+        var folders = (item.FolderPath ?? string.Empty)
+            .Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(MaxBookDepth)
+            .Select(Safe)
+            .ToList();
+        return new PlaceholderFile(folders.Count == 0 ? Safe(item.Name) : string.Join('/', folders), baseName, "AudioBook");
     }
 
     private static string SeriesTag(Dictionary<string, string> ids, LocalSeries? local)

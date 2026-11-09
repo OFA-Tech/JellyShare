@@ -54,7 +54,7 @@ public sealed class FederationControllerStreamTests : IDisposable
             Name = "bob",
             TokenHash = hash,
             Enabled = true,
-            LibraryIds = new List<Guid> { _lib },
+            UseDefaultTypes = true,
             MaxStreams = 1,
         });
 
@@ -66,7 +66,7 @@ public sealed class FederationControllerStreamTests : IDisposable
         AddItem(_lib, _movie2Id, "Movie", _movie2File, null);
         AddItem(_lib, _episodeId, "Episode", Path.Combine(_tempDir, "e.mkv"), _seriesId);
         File.WriteAllBytes(Path.Combine(_tempDir, "e.mkv"), new byte[10]);
-        AddItem(Guid.NewGuid(), _outsideId, "Movie", _movieFile, null);
+        AddItem(Guid.NewGuid(), _outsideId, "Photo", _movieFile, null);
     }
 
     public void Dispose()
@@ -95,7 +95,7 @@ public sealed class FederationControllerStreamTests : IDisposable
 
     private FederationController AbortableController(string? token, string method, CancellationToken aborted)
     {
-        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, _ => true);
+        var builder = new CatalogBuilder(_source, new FakeIdentity(), _config, new FakeLibraries(), _ => true);
         _capped ??= new CappedStreamService(_encoder, _runner, _clock, _cappedLogger);
         var controller = new FederationController(FederationSender.Create(new FakeIdentity(), builder, _config, _tokens), builder, _source, _config, _tokens, _limiter, _capped, _logger);
         var http = new DefaultHttpContext();
@@ -747,6 +747,76 @@ public sealed class FederationControllerStreamTests : IDisposable
         line.ShouldContain("bob", Case.Sensitive);
         line.ShouldContain("Name of 00000001", Case.Sensitive);
         line.ShouldNotContain(_token, Case.Sensitive);
+    }
+
+    private Guid AddTrack(int n, Guid? titleId, string type = "Audio", string extension = ".mp3", long? bitrate = 320_000)
+    {
+        var id = Guid.Parse($"00000005-0000-0000-0000-{n:D12}");
+        var file = Path.Combine(_tempDir, $"track{n}{extension}");
+        File.WriteAllBytes(file, new byte[64]);
+        AddItem(_lib, id, type, file, titleId);
+        _source.Streams[id] = new StreamInfo(type, "Track " + n, file, bitrate, null, titleId);
+        return id;
+    }
+
+    [Fact]
+    public void Stream_AudioOverShareCap_IsServedDirect_NotTranscoded()
+    {
+        _config.Settings.Shares[0].MaxBitrate = 100_000;
+        var track = AddTrack(1, Guid.NewGuid());
+
+        var result = Controller(_token).Stream(track.ToString("N"));
+
+        var file = result.ShouldBeOfType<PhysicalFileResult>();
+        file.ContentType.ShouldBe("audio/mpeg");
+        file.EnableRangeProcessing.ShouldBeTrue();
+        _runner.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Stream_AudioWithUnknownBitrate_UnderCap_IsServedDirect()
+    {
+        _config.Settings.Shares[0].MaxBitrate = 100_000;
+        var track = AddTrack(1, null, bitrate: null);
+
+        Controller(_token).Stream(track.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+    }
+
+    [Theory]
+    [InlineData(".flac", "audio/flac")]
+    [InlineData(".m4b", "audio/mp4")]
+    [InlineData(".opus", "audio/ogg")]
+    [InlineData(".xyzunknown", "application/octet-stream")]
+    public void Stream_AudioContentTypeFromExtension(string extension, string contentType)
+    {
+        var track = AddTrack(1, null, "AudioBook", extension);
+
+        Controller(_token).Stream(track.ToString("N")).ShouldBeOfType<PhysicalFileResult>().ContentType.ShouldBe(contentType);
+    }
+
+    [Fact]
+    public void Stream_AudioTracksOfOneAlbum_ShareOneLease()
+    {
+        var albumA = Guid.NewGuid();
+        var track1 = AddTrack(1, albumA);
+        var track2 = AddTrack(2, albumA);
+        var otherAlbum = AddTrack(3, Guid.NewGuid());
+
+        Controller(_token).Stream(track1.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(track2.ToString("N")).ShouldBeOfType<PhysicalFileResult>();
+        Controller(_token).Stream(otherAlbum.ToString("N")).ShouldBeAssignableTo<ObjectResult>().StatusCode.ShouldBe(429);
+        _limiter.Active(_config.Current.Shares[0].Id).ShouldBe(1);
+    }
+
+    [Fact]
+    public void Stream_AudioNotShared_404()
+    {
+        var share = _config.Settings.Shares[0];
+        share.UseDefaultTypes = false;
+        share.Types = new List<MediaType> { MediaType.Movies, MediaType.Shows };
+        var track = AddTrack(1, null);
+
+        Controller(_token).Stream(track.ToString("N")).ShouldBeOfType<NotFoundResult>();
     }
 
     [Fact]

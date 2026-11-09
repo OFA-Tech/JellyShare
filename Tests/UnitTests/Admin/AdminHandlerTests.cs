@@ -3,6 +3,7 @@ using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Protocol;
 using JellyShare.Domain.Models.Requests.Admin;
 using JellyShare.Domain.Models.Requests.Sync;
+using JellyShare.Domain.Models.Sync;
 using JellyShare.UnitTests.Fakes;
 
 namespace JellyShare.UnitTests.Admin;
@@ -38,7 +39,24 @@ public sealed class AdminHandlerTests : IDisposable
         status.Shows.Attached.ShouldBeFalse();
         status.SyncRunning.ShouldBeTrue();
         status.SyncError.ShouldBe("boom");
-        status.Libraries.Count.ShouldBe(3);
+        status.Libraries.Count.ShouldBe(4);
+    }
+
+    [Fact]
+    public async Task Status_HasMusicAndAudiobooksRoots()
+    {
+        _h.Libraries.Libraries[2] = _h.Libraries.Libraries[2] with { Locations = [_h.Config.Settings.MusicPlaceholderPath] };
+        _h.Sync.LastReport = new SyncReport(0, 0, 0, 0, 0, []) { SkippedTypesWithoutFolder = [MediaType.Audiobooks] };
+
+        var status = (await _h.Send(new GetStatusQuery())).Value;
+
+        status.Music.Path.ShouldBe(_h.Config.Settings.MusicPlaceholderPath);
+        status.Music.Attached.ShouldBeTrue();
+        status.Music.LibraryId.ShouldBe(FakeLibraries.MusicId);
+        status.Audiobooks.Path.ShouldBe(_h.Config.Settings.AudiobooksPlaceholderPath);
+        status.Audiobooks.Attached.ShouldBeFalse();
+        status.LastSync!.SkippedTypesWithoutFolder.ShouldBe([MediaType.Audiobooks]);
+        status.SupportedTypes.ShouldBe([MediaType.Movies, MediaType.Shows, MediaType.Music, MediaType.Audiobooks]);
     }
 
     // ---- start sync ----
@@ -80,10 +98,36 @@ public sealed class AdminHandlerTests : IDisposable
     [Fact]
     public async Task Attach_UnknownType_FailsValidation()
     {
-        var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Music"));
+        var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MoviesId, "Ebooks"));
 
         result.Error.Type.ShouldBe(ErrorType.Validation);
-        result.Error.Description.ShouldBe("Type must be Movies or Shows.");
+        result.Error.Description.ShouldBe("Type must be Movies, Shows, Music or Audiobooks.");
+    }
+
+    [Fact]
+    public async Task Attach_Music_AddsToMusicLibrary()
+    {
+        var result = await _h.Send(new AttachLibraryCommand(FakeLibraries.MusicId, "music"));
+
+        result.IsSuccess.ShouldBeTrue(result.IsSuccess ? null : result.Error.Description);
+        result.Value.Attached.ShouldBeTrue();
+        _h.Libraries.Added.ShouldHaveSingleItem().ShouldBe(("Music", _h.Config.Settings.MusicPlaceholderPath));
+        File.Exists(Path.Combine(_h.Config.Settings.MusicPlaceholderPath, ".jellyshare")).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Attach_Audiobooks_RejectsNonBooksLibrary()
+    {
+        var wrong = await _h.Send(new AttachLibraryCommand(FakeLibraries.MusicId, "Audiobooks"));
+
+        wrong.Error.Type.ShouldBe(ErrorType.Validation);
+        wrong.Error.Description.ShouldBe("'Music' is not an Audiobooks library.");
+        _h.Libraries.Added.ShouldBeEmpty();
+
+        var right = await _h.Send(new AttachLibraryCommand(FakeLibraries.BooksId, "Audiobooks"));
+
+        right.Value.Attached.ShouldBeTrue();
+        _h.Libraries.Added.ShouldHaveSingleItem().ShouldBe(("Books", _h.Config.Settings.AudiobooksPlaceholderPath));
     }
 
     [Fact]

@@ -3,22 +3,23 @@ using JellyShare.Domain.Interfaces.Library;
 using JellyShare.Domain.Interfaces.Messaging;
 using JellyShare.Domain.Interfaces.Placeholders;
 using JellyShare.Domain.Models.Admin;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Requests.Admin;
 using JellyShare.Domain.Results;
 using Microsoft.Extensions.Logging;
 
 namespace JellyShare.Application.Features.Admin;
 
-/// <summary>Only <c>Movies</c> and <c>Shows</c> can be attached (checked before anything is read).</summary>
+/// <summary>Only <c>Movies</c>, <c>Shows</c>, <c>Music</c> and <c>Audiobooks</c> can be attached (checked before anything is read).</summary>
 public sealed class AttachLibraryCommandValidator : IValidator<AttachLibraryCommand>
 {
     /// <inheritdoc />
     public Error? Validate(AttachLibraryCommand request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        return AttachLibraryCommandHandler.IsMovies(request.Type) || AttachLibraryCommandHandler.IsShows(request.Type)
+        return AttachLibraryCommandHandler.TypeOf(request.Type) is not null
             ? null
-            : Error.Validation("Library.InvalidType", "Type must be Movies or Shows.");
+            : Error.Validation("Library.InvalidType", "Type must be Movies, Shows, Music or Audiobooks.");
     }
 }
 
@@ -50,17 +51,22 @@ public sealed class AttachLibraryCommandHandler : ICommandHandler<AttachLibraryC
         _logger = logger;
     }
 
-    internal static bool IsMovies(string? type) => string.Equals(type, "Movies", StringComparison.OrdinalIgnoreCase);
-
-    internal static bool IsShows(string? type) => string.Equals(type, "Shows", StringComparison.OrdinalIgnoreCase);
+    /// <summary>Gets the attachable type named by the request, its library collection type and its placeholder root.</summary>
+    internal static (string Name, string CollectionType, Func<JellyShareSettings, string> Root)? TypeOf(string? type) => type?.ToUpperInvariant() switch
+    {
+        "MOVIES" => ("Movies", "movies", c => c.MoviesPlaceholderPath),
+        "SHOWS" => ("Shows", "tvshows", c => c.ShowsPlaceholderPath),
+        "MUSIC" => ("Music", "music", c => c.MusicPlaceholderPath),
+        "AUDIOBOOKS" => ("Audiobooks", "books", c => c.AudiobooksPlaceholderPath),
+        _ => null,
+    };
 
     /// <inheritdoc />
     public async Task<Result<PlaceholderRootView>> Handle(AttachLibraryCommand request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var isMovies = IsMovies(request.Type);
-        var cfg = _config.Current;
-        var root = isMovies ? cfg.MoviesPlaceholderPath : cfg.ShowsPlaceholderPath;
+        var type = TypeOf(request.Type) ?? throw new ArgumentException("Unknown type.", nameof(request));
+        var root = type.Root(_config.Current);
         if (string.IsNullOrWhiteSpace(root))
         {
             return Error.Validation("Library.RootNotConfigured", "The placeholder folder is not configured.");
@@ -73,10 +79,10 @@ public sealed class AttachLibraryCommandHandler : ICommandHandler<AttachLibraryC
             return Error.NotFound("Library.NotFound", "Library not found.");
         }
 
-        var expected = isMovies ? "movies" : "tvshows";
-        if (!string.Equals(library.CollectionType, expected, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(library.CollectionType, type.CollectionType, StringComparison.OrdinalIgnoreCase))
         {
-            return Error.Validation("Library.WrongType", $"'{library.Name}' is not a {(isMovies ? "Movies" : "Shows")} library.");
+            var article = type.Name.StartsWith('A') ? "an" : "a";
+            return Error.Validation("Library.WrongType", $"'{library.Name}' is not {article} {type.Name} library.");
         }
 
         var holder = libraries.FirstOrDefault(l => l.Locations.Any(loc => AdminRules.SamePath(loc, root)));

@@ -20,11 +20,19 @@ public sealed class PlaceholderPathsTests
     [InlineData("/data/Movies2/x.strm", false)]
     [InlineData("/data/Other/x.strm", false)]
     [InlineData("/data/Shows/A/S1.strm", true)]
+    [InlineData("/data/Music/Artist B/Album Two", true)]
+    [InlineData("/data/Audiobooks/Author X/Book Y/01.strm", true)]
     [InlineData("", false)]
     [InlineData(null, false)]
     public void IsPlaceholder_MatchesInsideConfiguredRoots(string? path, bool expected)
     {
-        var cfg = new JellyShareSettings { MoviesPlaceholderPath = "/data/Movies", ShowsPlaceholderPath = "/data/Shows/" };
+        var cfg = new JellyShareSettings
+        {
+            MoviesPlaceholderPath = "/data/Movies",
+            ShowsPlaceholderPath = "/data/Shows/",
+            MusicPlaceholderPath = "/data/Music",
+            AudiobooksPlaceholderPath = "/data/Audiobooks",
+        };
         PlaceholderPaths.IsPlaceholder(path, cfg).ShouldBe(expected);
     }
 

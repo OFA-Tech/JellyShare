@@ -208,41 +208,185 @@
         });
     }
 
-    // ---- libraries ----
+    // ---- media types ----
 
-    function libraryChecks(prefix, selected) {
-        var box = el('div', {});
-        var libs = (status && status.libraries) || [];
-        var any = false;
-        libs.forEach(function (l) {
-            if (l.collectionType !== 'movies' && l.collectionType !== 'tvshows') {
-                return;
-            }
-            any = true;
-            box.appendChild(el('label', { class: 'js-check' }, [
-                el('input', { type: 'checkbox', 'data-lib': l.id, checked: selected.indexOf(l.id) >= 0 }),
-                l.name
-            ]));
-        });
-        if (!any) {
-            box.appendChild(el('span', { class: 'js-muted', text: 'No movie or show libraries found.' }));
-        }
-        return box;
+    var TYPES = [
+        ['Movies', 'Movies'],
+        ['Shows', 'Shows'],
+        ['Music', 'Music'],
+        ['Audiobooks', 'Audiobooks & podcasts'],
+        ['Ebooks', 'Ebooks'],
+        ['Collections', 'Collections'],
+        ['LiveTv', 'Live TV']
+    ];
+    var ALL_TYPES = TYPES.map(function (t) {
+        return t[0];
+    });
+    var SHARE_TYPES_ERROR = 'Pick at least one media type to share.';
+    var RECEIVE_TYPES_ERROR = 'Pick at least one media type to receive.';
+
+    function supportedTypes() {
+        return (status && status.supportedTypes) || ['Movies', 'Shows'];
     }
 
-    function checkedLibs(box) {
-        return Array.prototype.map.call(box.querySelectorAll('input[data-lib]:checked'), function (i) {
-            return i.getAttribute('data-lib');
+    // One tick per media type. Types this version cannot handle yet are always disabled.
+    function typePicker() {
+        var supported = supportedTypes();
+        var inputs = {};
+        var node = el('div', { class: 'js-types' }, TYPES.map(function (t) {
+            var input = el('input', { type: 'checkbox', 'data-type': t[0] });
+            inputs[t[0]] = input;
+            return el('label', { class: 'js-check' }, [
+                input,
+                t[1],
+                supported.indexOf(t[0]) >= 0 ? null : el('span', { class: 'js-muted', text: '(coming later)' })
+            ]);
+        }));
+        return {
+            node: node,
+            set: function (types, editable) {
+                ALL_TYPES.forEach(function (k) {
+                    inputs[k].checked = types.indexOf(k) >= 0;
+                    inputs[k].disabled = !editable || supported.indexOf(k) < 0;
+                });
+            },
+            types: function () {
+                return ALL_TYPES.filter(function (k) {
+                    return inputs[k].checked;
+                });
+            }
+        };
+    }
+
+    function supportedOnly(types) {
+        var supported = supportedTypes();
+        return types.filter(function (k) {
+            return supported.indexOf(k) >= 0;
         });
+    }
+
+    // A select (everything / a list) with the ticks of the list; the ticks are locked while "everything" is chosen.
+    // `list` remembers the last list so switching back and forth does not lose it. A stored list is shown as it is
+    // (even empty), so nothing is widened; only a choice starting on "everything" prefills the list with all types.
+    // `changed` tells whether the admin touched the choice: saving anything else must not rewrite it.
+    function typeChoice(labelText, allText, listText, startAll, stored, shownWhenAll) {
+        var list = supportedOnly(stored);
+        if (startAll && !list.length) {
+            list = supportedTypes().slice();
+        }
+        var dirty = false;
+        var picker = typePicker();
+        picker.node.addEventListener('change', function () {
+            dirty = true;
+        });
+        var select = el('select', {}, [el('option', { value: 'all', text: allText }), el('option', { value: 'list', text: listText })]);
+        select.value = startAll ? 'all' : 'list';
+        var apply = function () {
+            if (select.value === 'all') {
+                picker.set(shownWhenAll, false);
+            } else {
+                picker.set(list, true);
+            }
+        };
+        var current = select.value;
+        select.addEventListener('change', function () {
+            dirty = true;
+            if (current === 'list') {
+                list = picker.types();
+            }
+            current = select.value;
+            apply();
+        });
+        apply();
+        return {
+            node: el('div', { class: 'js-row' }, [field(labelText, select), picker.node]),
+            changed: function () {
+                return dirty;
+            },
+            isAll: function () {
+                return select.value === 'all';
+            },
+            types: function () {
+                return select.value === 'list' ? picker.types() : list;
+            }
+        };
+    }
+
+    function defaultShownTypes() {
+        var d = status && status.defaultSharing;
+        return d && !d.all ? d.types : ALL_TYPES;
+    }
+
+    function shareTypes(startAll, stored) {
+        return typeChoice('Media types', 'Use the default', 'Custom', startAll, stored, defaultShownTypes());
+    }
+
+    function receiveTypes(startAll, stored) {
+        return typeChoice('Receive', 'Everything they share', 'Only:', startAll, stored, ALL_TYPES);
     }
 
     // ---- share tab ----
 
-    function renderNewLibs() {
-        var holder = $('js-new-libs');
-        var keep = checkedLibs(holder);
+    var newShareTypes = null;
+    var newPeerTypes = null;
+
+    function renderDefaultSharing() {
+        var holder = $('js-default-sharing');
         clear(holder);
-        holder.appendChild(libraryChecks('new', keep));
+        var d = (status && status.defaultSharing) || { all: true, types: ALL_TYPES };
+        var picker = typePicker();
+        var all = el('input', { type: 'checkbox', checked: d.all });
+        var list = supportedOnly(d.types);
+        if (d.all && !list.length) {
+            list = supportedTypes().slice();
+        }
+        var apply = function () {
+            if (all.checked) {
+                picker.set(ALL_TYPES, false);
+            } else {
+                picker.set(list, true);
+            }
+        };
+        all.addEventListener('change', function () {
+            if (all.checked) {
+                list = picker.types();
+            }
+            apply();
+        });
+        apply();
+        var save = btn('Save', 'primary', function () {
+            var types = all.checked ? [] : picker.types();
+            if (!all.checked && !types.length) {
+                return showMessage('error', SHARE_TYPES_ERROR);
+            }
+            busy(save, api('PUT', 'sharing/default', { all: all.checked, types: types })).then(function () {
+                showMessage('ok', 'Default sharing saved.');
+                return refresh();
+            }).catch(fail);
+        });
+        holder.appendChild(el('div', { class: 'js-row' }, [
+            el('label', { class: 'js-check' }, [all, 'All media types']),
+            picker.node
+        ]));
+        holder.appendChild(el('p', {}, [save]));
+    }
+
+    function renderNewTypes() {
+        var holder = $('js-new-types');
+        clear(holder);
+        newShareTypes = newShareTypes
+            ? shareTypes(newShareTypes.isAll(), newShareTypes.types())
+            : shareTypes(true, []);
+        holder.appendChild(newShareTypes.node);
+    }
+
+    function renderNewPeerTypes() {
+        var holder = $('js-peer-types');
+        clear(holder);
+        newPeerTypes = newPeerTypes
+            ? receiveTypes(newPeerTypes.isAll(), newPeerTypes.types())
+            : receiveTypes(true, []);
+        holder.appendChild(newPeerTypes.node);
     }
 
     function renderShares() {
@@ -258,7 +402,7 @@
             var streams = el('input', { type: 'number', value: String(s.maxStreams), min: '1', max: '100' });
             var mbps = el('input', { type: 'number', value: mbpsText(s.maxBitrate), min: '0.1', step: '0.1', placeholder: 'no limit' });
             var enabled = el('input', { type: 'checkbox', checked: s.enabled });
-            var libs = el('div', {}, [libraryChecks(s.id, s.libraryIds || [])]);
+            var types = shareTypes(s.useDefaultTypes, s.types || []);
             var active = el('span', { 'data-active': s.id, text: String(s.activeStreams) });
             var save = btn('Save', 'primary', function () {
                 var count = streamsFrom(streams.value);
@@ -269,13 +413,23 @@
                 if (isNaN(bps)) {
                     return showMessage('error', BITRATE_ERROR);
                 }
-                busy(save, api('PUT', 'shares/' + encodeURIComponent(s.id), {
+                var body = {
                     name: name.value,
-                    libraryIds: checkedLibs(libs),
                     maxStreams: count,
                     maxBitrate: bps,
                     enabled: enabled.checked
-                })).then(function () {
+                };
+                // Untouched types are left out, so a share saved before media types existed keeps resolving as before.
+                if (types.changed()) {
+                    body.useDefaultTypes = types.isAll();
+                    if (!types.isAll()) {
+                        body.types = types.types();
+                        if (!body.types.length) {
+                            return showMessage('error', SHARE_TYPES_ERROR);
+                        }
+                    }
+                }
+                busy(save, api('PUT', 'shares/' + encodeURIComponent(s.id), body)).then(function () {
                     showMessage('ok', 'Saved "' + name.value.trim() + '".');
                     return refresh();
                 }).catch(fail);
@@ -296,7 +450,7 @@
                     field('Max bitrate (Mbps)', mbps),
                     el('label', { class: 'js-check' }, [enabled, 'Enabled'])
                 ]),
-                field('Libraries', libs),
+                types.node,
                 el('p', {}, [
                     el('span', { class: 'js-muted' }, ['Streams playing now: ', active, ' of ' + s.maxStreams + '  ']),
                     save, ' ', revoke
@@ -315,17 +469,25 @@
         if (isNaN(bps)) {
             return showMessage('error', BITRATE_ERROR);
         }
-        busy(button, api('POST', 'shares', {
+        var body = {
             name: $('js-new-name').value,
-            libraryIds: checkedLibs($('js-new-libs')),
             maxStreams: count,
-            maxBitrate: bps
-        })).then(function (created) {
+            maxBitrate: bps,
+            useDefaultTypes: newShareTypes.isAll()
+        };
+        if (!newShareTypes.isAll()) {
+            body.types = newShareTypes.types();
+            if (!body.types.length) {
+                return showMessage('error', SHARE_TYPES_ERROR);
+            }
+        }
+        busy(button, api('POST', 'shares', body)).then(function (created) {
             $('js-created-name').textContent = created.name;
             $('js-created-token').value = created.token;
             $('js-created').classList.remove('js-hidden');
             $('js-new-name').value = '';
             $('js-new-mbps').value = '';
+            newShareTypes = null;
             hideMessage();
             return refresh();
         }).catch(fail);
@@ -360,21 +522,31 @@
 
     // ---- receive tab ----
 
+    var LIBRARY_KINDS = { Movies: 'movies', Shows: 'tvshows', Music: 'music', Audiobooks: 'books' };
+
+    function typeLabel(type) {
+        var t = TYPES.filter(function (x) {
+            return x[0] === type;
+        })[0];
+        return t ? t[1] : type;
+    }
+
     function attachControl(type, root) {
+        var label = typeLabel(type);
         var box = el('div', { class: 'js-card' }, [
-            el('h4', { text: type + ' placeholder folder' }),
+            el('h4', { text: label + ' placeholder folder' }),
             el('p', {}, [el('code', { text: root.path })])
         ]);
         if (root.attached) {
             box.appendChild(el('p', { text: 'Added to the library "' + root.libraryName + '".' }));
             return box;
         }
-        var kind = type === 'Movies' ? 'movies' : 'tvshows';
+        var kind = LIBRARY_KINDS[type];
         var libs = ((status && status.libraries) || []).filter(function (l) {
             return l.collectionType === kind;
         });
         if (!libs.length) {
-            box.appendChild(el('p', { class: 'js-muted', text: 'Create a ' + type + ' library in Dashboard > Libraries first, then come back here.' }));
+            box.appendChild(el('p', { class: 'js-muted', text: 'Create a ' + label + ' library in Dashboard > Libraries first, then come back here.' }));
             return box;
         }
         var select = el('select', {}, libs.map(function (l) {
@@ -382,7 +554,7 @@
         }));
         var button = btn('Add to library', 'primary', function () {
             busy(button, api('POST', 'libraries/attach', { libraryId: select.value, type: type })).then(function () {
-                showMessage('ok', 'Added the ' + type + ' folder. Jellyfin is scanning the library now.');
+                showMessage('ok', 'Added the ' + label + ' folder. Jellyfin is scanning the library now.');
                 return refresh();
             }).catch(fail);
         });
@@ -403,6 +575,13 @@
         }
         holder.appendChild(attachControl('Movies', status.movies));
         holder.appendChild(attachControl('Shows', status.shows));
+        holder.appendChild(attachControl('Music', status.music));
+        holder.appendChild(attachControl('Audiobooks', status.audiobooks));
+        var skipped = (status.lastSync && status.lastSync.skippedTypesWithoutFolder) || [];
+        if (skipped.length) {
+            holder.appendChild(el('div', { class: 'js-msg warn', text: 'The last sync skipped ' +
+                skipped.map(typeLabel).join(', ') + ' from peers: set up the folder first (add it to a library above).' }));
+        }
         var warning = $('js-grouping-warning');
         if (status.shows.attached && status.shows.automaticSeriesGrouping === false) {
             warning.textContent = 'The library "' + status.shows.libraryName + '" has "Automatically merge series that are spread across multiple folders" turned off. ' +
@@ -480,6 +659,7 @@
             var action = account ? limitActionSelect(limitActionName(p)) : null;
             var enabled = el('input', { type: 'checkbox', checked: p.enabled });
             var result = el('span', { class: 'js-muted' });
+            var accept = receiveTypes(p.acceptAllTypes, p.acceptTypes || []);
             var st = peerStatusText(p);
             var move = function (delta) {
                 var next = ids.slice();
@@ -503,6 +683,15 @@
             });
             var submit = function (button, okText) {
                 var body = { name: name.value, baseUrl: url.value, enabled: enabled.checked };
+                if (accept.changed()) {
+                    body.acceptAllTypes = accept.isAll();
+                    if (!accept.isAll()) {
+                        body.acceptTypes = accept.types();
+                        if (!body.acceptTypes.length) {
+                            return showMessage('error', RECEIVE_TYPES_ERROR);
+                        }
+                    }
+                }
                 if (account) {
                     var count = accountStreamsFrom(streams.value);
                     if (isNaN(count)) {
@@ -563,6 +752,7 @@
                     account ? field('When the limit is reached', action) : null,
                     el('label', { class: 'js-check', title: 'Turning a peer off removes its placeholders at the next sync.' }, [enabled, 'Enabled'])
                 ]),
+                accept.node,
                 account ? el('div', { class: 'js-muted', text: 'Jellyfin account \u00B7 ' + p.username + ' \u00B7 ' + streamsText(p.maxStreams) }) : null,
                 el('div', { class: 'js-muted', text: 'Disabling a peer removes its placeholders at the next sync (they come back when you enable it again).' }),
                 el('div', { class: st.cls, text: st.text }),
@@ -585,7 +775,13 @@
 
     function addPeer() {
         var button = $('js-peer-add');
-        var body = { name: $('js-peer-name').value, baseUrl: $('js-peer-url').value, enabled: true };
+        var body = { name: $('js-peer-name').value, baseUrl: $('js-peer-url').value, enabled: true, acceptAllTypes: newPeerTypes.isAll() };
+        if (!newPeerTypes.isAll()) {
+            body.acceptTypes = newPeerTypes.types();
+            if (!body.acceptTypes.length) {
+                return showMessage('error', RECEIVE_TYPES_ERROR);
+            }
+        }
         if (newPeerIsAccount()) {
             var count = accountStreamsFrom($('js-peer-max-streams').value);
             if (isNaN(count)) {
@@ -606,6 +802,7 @@
             $('js-peer-url').value = '';
             $('js-peer-username').value = '';
             $('js-peer-test-result').textContent = '';
+            newPeerTypes = null;
             showMessage('ok', 'Peer added. Press "Sync now" to fetch its titles.');
             return refresh();
         }).catch(fail);
@@ -674,11 +871,13 @@
 
     function render() {
         $('js-server').textContent = status.serverName ? 'This server: ' + status.serverName + '.' : '';
-        renderNewLibs();
+        renderDefaultSharing();
+        renderNewTypes();
         renderShares();
         renderSetup();
         renderReport();
         renderPeers();
+        renderNewPeerTypes();
     }
 
     function refresh() {

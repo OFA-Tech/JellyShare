@@ -2,6 +2,7 @@ using JellyShare.Application.Features.Catalog;
 using JellyShare.Domain.Interfaces.Catalog;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Messaging;
+using JellyShare.Domain.Models.Configuration;
 using JellyShare.Domain.Models.Federation;
 using JellyShare.Domain.Models.Requests.Federation;
 using JellyShare.Domain.Results;
@@ -42,7 +43,7 @@ public sealed class GetCatalogQueryHandler : IQueryHandler<GetCatalogQuery, Cata
             return Task.FromResult(Result.Failure<CatalogResult>(Unauthorized));
         }
 
-        var plan = _catalog.Plan(share);
+        var plan = _catalog.Plan(share, MediaTypes.ParseOrLegacy(request.Types));
         var etag = "\"" + plan.Etag + "\"";
         var result = IfNoneMatchContains(request.IfNoneMatch, etag)
             ? new CatalogResult(etag, null)

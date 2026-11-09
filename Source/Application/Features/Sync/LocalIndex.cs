@@ -92,6 +92,14 @@ public sealed class LocalIndex : ILocalIndex
     /// <returns>The keys; empty when the item has no usable provider ids.</returns>
     internal static IReadOnlyList<string> KeysFor(LocalMedia media) => MediaKey.For(ToItem(media));
 
+    // Tracks and audiobook files also carry their album/book key: the owner having any of it keeps the friend's copy out.
+    private static IReadOnlyList<string> IndexKeysFor(LocalMedia media)
+    {
+        var item = ToItem(media);
+        var keys = MediaKey.For(item);
+        return keys.Count > 0 && TitleKey.ForAudio(item) is { } title ? [.. keys, title] : keys;
+    }
+
     /// <inheritdoc />
     public Task<LocalIndexResult> BuildAsync(CancellationToken ct) => BuildCoreAsync(null, null, ct);
 
@@ -122,6 +130,7 @@ public sealed class LocalIndex : ILocalIndex
         var snapshot = ReadLibrary(scope);
 
         var candidates = new List<(LocalMedia Media, IReadOnlyList<string> Keys)>();
+        var artistNames = new List<string?>();
         foreach (var media in snapshot.Media)
         {
             if (string.IsNullOrWhiteSpace(media.Path)
@@ -131,7 +140,10 @@ public sealed class LocalIndex : ILocalIndex
                 continue;
             }
 
-            var keys = KeysFor(media);
+            artistNames.Add(media.AlbumArtist);
+            artistNames.AddRange(media.Artists ?? []);
+
+            var keys = IndexKeysFor(media);
             if (keys.Count > 0 && (onlyKeys is null || keys.Any(onlyKeys.Contains)))
             {
                 candidates.Add((media, keys));
@@ -165,8 +177,12 @@ public sealed class LocalIndex : ILocalIndex
             Volatile.Write(ref stop, 1);
         }
 
-        var movies = new HashSet<string>(StringComparer.Ordinal);
-        var episodes = new HashSet<string>(StringComparer.Ordinal);
+        var byType = new Dictionary<MediaType, ISet<string>>();
+        foreach (var type in MediaTypes.All)
+        {
+            byType[type] = new HashSet<string>(StringComparer.Ordinal);
+        }
+
         int unverified = 0, missing = 0;
         for (var i = 0; i < candidates.Count; i++)
         {
@@ -182,11 +198,16 @@ public sealed class LocalIndex : ILocalIndex
                 unverified++;
             }
 
-            var target = string.Equals(candidates[i].Media.Type, "Movie", StringComparison.Ordinal) ? movies : episodes;
-            target.UnionWith(candidates[i].Keys);
+            if (MediaTypes.Of(candidates[i].Media.Type) is { } type)
+            {
+                byType[type].UnionWith(candidates[i].Keys);
+            }
         }
 
-        return new LocalIndexResult(movies, episodes, BuildSeries(snapshot.Series, cfg), unverified, missing);
+        return new LocalIndexResult(byType, BuildSeries(snapshot.Series, cfg), unverified, missing)
+        {
+            Artists = OwnerArtists.Build(artistNames),
+        };
     }
 
 
@@ -231,7 +252,7 @@ public sealed class LocalIndex : ILocalIndex
         => new(
             string.Empty,
             m.Type,
-            string.Empty,
+            m.Name ?? string.Empty,
             null,
             Copy(m.ProviderIds) ?? new Dictionary<string, string>(),
             null,
@@ -242,7 +263,13 @@ public sealed class LocalIndex : ILocalIndex
             null,
             _emptyMedia,
             [],
-            default);
+            default,
+            Album: m.Album,
+            AlbumArtist: m.AlbumArtist,
+            Artists: m.Artists?.ToArray(),
+            DiscNumber: m.DiscNumber,
+            TrackNumber: m.TrackNumber,
+            FolderPath: m.FolderPath);
 
     private static Dictionary<string, string>? Copy(IReadOnlyDictionary<string, string>? ids)
         => ids is null ? null : new Dictionary<string, string>(ids);

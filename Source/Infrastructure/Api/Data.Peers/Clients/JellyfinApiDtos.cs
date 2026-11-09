@@ -40,6 +40,14 @@ internal sealed record JfItemsPage(List<JfItem?>? Items, int TotalRecordCount);
 /// <param name="ImageTags">The image types with their tags.</param>
 /// <param name="BackdropImageTags">The backdrop image tags.</param>
 /// <param name="DateCreated">When the item was added.</param>
+/// <param name="Album">The album of a track (or the book of an audiobook file).</param>
+/// <param name="AlbumId">The album item id of a track.</param>
+/// <param name="AlbumArtist">The album artist as one text.</param>
+/// <param name="AlbumArtists">The album artists.</param>
+/// <param name="Artists">The track artists.</param>
+/// <param name="ParentId">The parent folder id.</param>
+/// <param name="AlbumPrimaryImageTag">The tag of the album's Primary image, when it has one.</param>
+/// <param name="ParentPrimaryImageItemId">The nearest parent that has a Primary image.</param>
 internal sealed record JfItem(
     string? Id,
     string? Type,
@@ -56,7 +64,20 @@ internal sealed record JfItem(
     List<JfMediaSource?>? MediaSources,
     Dictionary<string, string?>? ImageTags,
     List<string?>? BackdropImageTags,
-    DateTime? DateCreated);
+    DateTime? DateCreated,
+    string? Album = null,
+    string? AlbumId = null,
+    string? AlbumArtist = null,
+    List<JfNamedItem?>? AlbumArtists = null,
+    List<string?>? Artists = null,
+    string? ParentId = null,
+    string? AlbumPrimaryImageTag = null,
+    string? ParentPrimaryImageItemId = null);
+
+/// <summary>A name with its item id, as in <c>AlbumArtists</c>.</summary>
+/// <param name="Name">The name.</param>
+/// <param name="Id">The item id.</param>
+internal sealed record JfNamedItem(string? Name, string? Id);
 
 /// <summary>The fields of a Jellyfin media source this plugin reads.</summary>
 /// <param name="Protocol">The source protocol; only <c>File</c> sources are shared.</param>

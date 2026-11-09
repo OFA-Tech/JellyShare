@@ -1,4 +1,5 @@
 using System.Text;
+using JellyShare.Domain.Enums;
 using JellyShare.Domain.Models.Configuration;
 
 namespace JellyShare.Application.Features.Placeholders;
@@ -31,7 +32,26 @@ public static class PlaceholderPaths
 
         var normalized = Normalize(path);
         return IsInside(normalized, Normalize(cfg.MoviesPlaceholderPath))
-            || IsInside(normalized, Normalize(cfg.ShowsPlaceholderPath));
+            || IsInside(normalized, Normalize(cfg.ShowsPlaceholderPath))
+            || IsInside(normalized, Normalize(cfg.MusicPlaceholderPath))
+            || IsInside(normalized, Normalize(cfg.AudiobooksPlaceholderPath));
+    }
+
+    /// <summary>Gets the placeholder root of a media type.</summary>
+    /// <param name="cfg">The plugin configuration.</param>
+    /// <param name="type">The media type.</param>
+    /// <returns>The configured root; empty for a type without one.</returns>
+    public static string RootOf(JellyShareSettings cfg, MediaType type)
+    {
+        ArgumentNullException.ThrowIfNull(cfg);
+        return type switch
+        {
+            MediaType.Movies => cfg.MoviesPlaceholderPath,
+            MediaType.Shows => cfg.ShowsPlaceholderPath,
+            MediaType.Music => cfg.MusicPlaceholderPath,
+            MediaType.Audiobooks => cfg.AudiobooksPlaceholderPath,
+            _ => string.Empty,
+        };
     }
 
     private static bool IsInside(string path, string root)

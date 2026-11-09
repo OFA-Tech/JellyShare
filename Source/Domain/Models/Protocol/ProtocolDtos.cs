@@ -100,6 +100,13 @@ public sealed record MediaInfo(
 /// <param name="ImageTypes">Image types available on the item.</param>
 /// <param name="DateModified">Last modification time.</param>
 /// <param name="SeriesId">The item id of the series on the providing server, used to fetch series artwork.</param>
+/// <param name="Album">The album name of a track.</param>
+/// <param name="AlbumArtist">The album artist of a track.</param>
+/// <param name="Artists">The track's artists.</param>
+/// <param name="DiscNumber">The disc number of a track.</param>
+/// <param name="TrackNumber">The track number on its disc.</param>
+/// <param name="AlbumId">The item id of the album (or audiobook folder) on the providing server, for artwork and the title key.</param>
+/// <param name="FolderPath">For audiobooks, the book's folder names below the library root (for example <c>Author X/Book Y</c>); never an absolute path.</param>
 public sealed record CatalogItem(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("type")] string Type,
@@ -115,4 +122,11 @@ public sealed record CatalogItem(
     [property: JsonPropertyName("media")] MediaInfo Media,
     [property: JsonPropertyName("imageTypes")] string[] ImageTypes,
     [property: JsonPropertyName("dateModified")] DateTime DateModified,
-    [property: JsonPropertyName("seriesId")] string? SeriesId = null);
+    [property: JsonPropertyName("seriesId")] string? SeriesId = null,
+    [property: JsonPropertyName("album")] string? Album = null,
+    [property: JsonPropertyName("albumArtist")] string? AlbumArtist = null,
+    [property: JsonPropertyName("artists")] string[]? Artists = null,
+    [property: JsonPropertyName("discNumber")] int? DiscNumber = null,
+    [property: JsonPropertyName("trackNumber")] int? TrackNumber = null,
+    [property: JsonPropertyName("albumId")] string? AlbumId = null,
+    [property: JsonPropertyName("folderPath")] string? FolderPath = null);

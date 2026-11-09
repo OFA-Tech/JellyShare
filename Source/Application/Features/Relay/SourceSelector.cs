@@ -23,7 +23,7 @@ public static class SourceSelector
     }
 
     /// <summary>
-    /// Orders the sources: only enabled, configured peers. Peers whose last sync failed
+    /// Orders the sources: only enabled, configured peers that still accept the title's media type. Peers whose last sync failed
     /// (<see cref="PeerState.FailingSinceUtc"/> set) are kept but tried after the healthy ones, since a short outage
     /// may already be over. Within each group by <see cref="RemotePeer.Priority"/> ascending, then peer name
     /// (ordinal, ignoring case), then peer id.
@@ -48,7 +48,7 @@ public static class SourceSelector
             .Where(s => s.Item is not null)
             .Select(s => byId.TryGetValue(s.PeerId, out var peer) ? new RelaySource(peer, s.Item) : null)
             .OfType<RelaySource>()
-            .Where(s => s.Peer.Enabled)
+            .Where(s => s.Peer.Enabled && MediaTypes.IsRequested(s.Peer, s.Item.Type))
             .OrderBy(s => IsFailing(states, s.Peer.Id))
             .ThenBy(s => s.Peer.Priority)
             .ThenBy(s => s.Peer.Name ?? string.Empty, StringComparer.OrdinalIgnoreCase)

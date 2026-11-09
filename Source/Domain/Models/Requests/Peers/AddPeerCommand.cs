@@ -14,6 +14,8 @@ namespace JellyShare.Domain.Models.Requests.Peers;
 /// <param name="Password">The password (account peers); used once to sign in and never stored.</param>
 /// <param name="MaxStreams">The concurrent playback limit (account peers); <c>null</c> means 1.</param>
 /// <param name="LimitAction">What happens at the limit (account peers); <c>null</c> means refuse.</param>
+/// <param name="AcceptAllTypes">Accept every media type from the peer; <c>null</c> means yes.</param>
+/// <param name="AcceptTypes">The media types to accept when <paramref name="AcceptAllTypes"/> is <c>false</c> (at least one).</param>
 public sealed record AddPeerCommand(
     string? Name,
     string? BaseUrl,
@@ -23,9 +25,11 @@ public sealed record AddPeerCommand(
     string? Username = null,
     string? Password = null,
     int? MaxStreams = null,
-    StreamLimitAction? LimitAction = null) : ICommand<PeerView>
+    StreamLimitAction? LimitAction = null,
+    bool? AcceptAllTypes = null,
+    List<MediaType>? AcceptTypes = null) : ICommand<PeerView>
 {
     /// <inheritdoc />
     public override string ToString()
-        => $"AddPeerCommand {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction} }}";
+        => $"AddPeerCommand {{ Name = {Name}, BaseUrl = {BaseUrl}, Token = ***, Enabled = {Enabled}, Kind = {Kind}, Username = {Username}, Secret = ***, MaxStreams = {MaxStreams}, LimitAction = {LimitAction}, AcceptAllTypes = {AcceptAllTypes} }}";
 }

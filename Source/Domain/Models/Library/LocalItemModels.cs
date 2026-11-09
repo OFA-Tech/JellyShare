@@ -24,4 +24,5 @@ public sealed record LocalItem(Guid Id, string Type, string? Path, Guid? SeriesI
 /// <param name="Path">The file path, if any.</param>
 /// <param name="Bitrate">The total bitrate in bits per second, when known.</param>
 /// <param name="RunTimeTicks">The runtime in ticks, when known.</param>
-public sealed record StreamInfo(string Type, string Name, string? Path, long? Bitrate, long? RunTimeTicks = null);
+/// <param name="TitleId">For audio, the album (tracks) or book folder (audiobooks) id: the key that counts one title as one stream.</param>
+public sealed record StreamInfo(string Type, string Name, string? Path, long? Bitrate, long? RunTimeTicks = null, Guid? TitleId = null);

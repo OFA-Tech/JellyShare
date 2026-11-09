@@ -1,9 +1,10 @@
 # JellyShare
 
-A Jellyfin 12 plugin that lets several Jellyfin servers share movies and shows with each other. A provider server
-shares some of its libraries with a token; a consumer server pulls the provider's catalog, writes small `.strm`/`.nfo`
-placeholders for the titles it does not already own, and plays them through a local relay that streams from the
-provider. Titles you already own are never duplicated, and your own media folders are never touched.
+A Jellyfin 12 plugin that lets several Jellyfin servers share movies, shows, music and audiobooks (podcasts included)
+with each other. A provider server shares some media types with a token; a consumer server pulls the provider's
+catalog, writes small `.strm` placeholders (plus `.nfo` files for movies and shows) for the titles it does not already
+own, and plays them through a local relay that streams from the provider. Titles you already own are never duplicated,
+and your own media folders are never touched.
 
 The code follows the OFA-TECH WebApi template layout (Domain, Application, infrastructure modules, presentation), so
 an update to a new Jellyfin version only touches one project: `Source/Infrastructure/Platform/Jellyfin`.
@@ -39,8 +40,9 @@ watch them is the **consumer**. For a two-way exchange, each side does both part
 
 On the **provider** (**Dashboard → Plugins → JellyShare → Share with peers**):
 
-1. Give the invitation a name (who it is for), choose which of your libraries it shares, the max streams at once
-   and, optionally, a max bitrate. See [Stream limits and the bitrate cap](#stream-limits-and-the-bitrate-cap).
+1. Give the invitation a name (who it is for), choose which media types it shares (**Use the default** or
+   **Custom**, see [Sharing and receiving by media type](#sharing-and-receiving-by-media-type)), the max streams at
+   once and, optionally, a max bitrate. See [Stream limits and the bitrate cap](#stream-limits-and-the-bitrate-cap).
 2. **Create invitation.** The token is shown **once**, on this screen only; copy it now. The server keeps only a hash,
    so a lost token means creating a new invitation (and removing the old one).
 3. Send the friend your server address (the one they can reach from outside, including your reverse-proxy path if you
@@ -48,10 +50,10 @@ On the **provider** (**Dashboard → Plugins → JellyShare → Share with peers
 
 On the **consumer** (**Dashboard → Plugins → JellyShare → Receive from peers**):
 
-1. Follow **Setup**: JellyShare keeps the peers' titles in two folders of its own (movies, shows). For each one pick
-   your existing Movies or Shows library and press **Add to library**; Jellyfin then scans that library once. Do
-   this before the first sync. If you ever attach a placeholder folder by hand, attach it **with a library refresh**;
-   without one Jellyfin never notices later changes in it.
+1. Follow **Setup**: JellyShare keeps the peers' titles in folders of its own, one per media type (movies, shows,
+   music, audiobooks). For each type you want, pick your existing library of that kind and press **Add to library**;
+   Jellyfin then scans that library once. Do this before the first sync. If you ever attach a placeholder folder by
+   hand, attach it **with a library refresh**; without one Jellyfin never notices later changes in it.
 2. **Add a peer:** name, server address, token. Press **Test connection** first; it must report success.
 3. **Add peer**, then **Sync now**. The sync runs in the background (the page shows "Syncing..." and you can leave
    it); posters and backdrops are fetched after the placeholders are written. About a minute later the provider's titles that you do not already have appear
@@ -68,6 +70,39 @@ Things to know:
   **Dashboard → Scheduled Tasks → JellyShare: sync peers** (the plugin's `SyncIntervalHours` setting only sets the
   default trigger when the task is first registered). If your own file for a title disappears (deleted, or the drive is offline),
   the peer's copy takes over within a minute or two, and goes away again when your file is back.
+
+## Sharing and receiving by media type
+
+The media types are **Movies**, **Shows**, **Music** and **Audiobooks & podcasts**. **Ebooks**, **Collections** and
+**Live TV** are listed on the admin page as "coming later" (their ticks are disabled); nothing is shared or received
+for them yet.
+
+Sharing (**Share with peers**):
+
+- **Default sharing** sets the media types an invitation offers when it uses **Use the default** (all types at first).
+  Changing the default changes every invitation that uses it.
+- Each invitation is either **Use the default** or **Custom** with its own ticks. A type covers all your libraries of
+  that kind (Music = every music library), not single libraries.
+- Friends who sign in with a Jellyfin user you made for them ([Account peers](#account-peers)) see whatever that
+  user's **Library access** allows; the ticks only apply to invitations.
+
+Receiving (**Receive from peers**, per peer): **Everything they share** (default), or **Only:** the types you tick.
+Unticking a type removes that peer's placeholders of that type at the next sync; its other types and other peers'
+titles stay.
+
+Music and audiobooks:
+
+1. In **Setup**, add the Music placeholder folder to a **Music** library and the Audiobooks folder to a **Books**
+   library (**Add to library**). The folders only count when they are a folder of a library of that kind; otherwise the
+   sync skips the type and the admin page says "set up the folder first" (the folder's existing placeholders are kept).
+2. Sync. A peer's albums show up under their artist (`Artist/Album/01 Title`), audiobooks under their author and book
+   folders, with a `folder.jpg` when the peer has cover art. JellyShare writes the track details (title, artists,
+   album artist, album, track and disc number) into your library after the scan and locks the title, so a rescan or
+   restart keeps them.
+3. Podcasts: put them in a Books library like audiobooks; they are shared as **Audiobooks & podcasts**.
+
+Tracks and audiobooks play through the same relay as videos; the relay address never reaches the client. Playback is
+verified in Jellyfin Web; other clients are untested.
 
 ## Account peers
 
@@ -164,6 +199,24 @@ to yours through the same placeholders; your own copy still wins, and the Peers 
   those edits alone. It remembers what it wrote (`placeholder-ledger.json` in the plugin data folder) and only rewrites
   a file when the peer's data for it changed, and only deletes files it wrote itself (plus the whole folder when a
   title goes away).
+- **Music: partial albums are not merged.** Jellyfin makes one album per folder, so a friend's tracks can't join an
+  album you own part of. A friend's album is therefore skipped completely when you own any track of it (by MusicBrainz
+  id, or by artist + album + title ignoring case and punctuation). Albums you don't have at all join your existing
+  artist when the artist name matches yours ignoring case, accents, spaces and punctuation; names that still differ
+  ("The Beatles" vs "Beatles") stay separate artists.
+- **Audio is never transcoded or capped by the provider.** A share's max bitrate applies to video only; music and
+  audiobooks are always sent as the original file.
+- **An album counts as one stream** (an audiobook: the book), on the provider's share limit and on an account peer's
+  limit, so playing an album track after track never hits the limit; a second album or book does.
+- **Audiobooks and podcasts are grouped per folder, so a partial folder is skipped.** Like albums, a friend's book or
+  podcast folder is skipped completely when you own any file of it (a partial folder would show up twice). So once you
+  own one episode of a podcast, the friend's newer episodes of it do not appear either.
+- **Account peers' audiobooks:** the friend's server is asked for each book's folder names on every catalog fetch
+  (one extra request per book folder). When that lookup fails for a book, the book is listed without its folder (a
+  warning is logged) instead of failing the whole catalog. A peer's folder path is cut to its first 6 folders.
+- **Audio playback relies on Jellyfin internals** (a media source provider plus a filter on Jellyfin's audio stream
+  routes, see `docs/spike-results.md`, "Audio playback spike"). A Jellyfin update can break it; JellyShare checks at
+  startup that the routes and parameters it hooks still exist and logs a warning when they don't.
 - **Placeholder folders must be JellyShare's own:** a sync refuses to run (the admin page shows the error) when a
   placeholder folder is, contains or is inside one of your library folders, or when it already contains files but no
   `.jellyshare` marker.
@@ -196,11 +249,13 @@ to yours through the same placeholders; your own copy still wins, and the Peers 
 
 ## Uninstall
 
-1. In each library that has a JellyShare placeholder folder (Movies, Shows), remove that folder from the library
-   (Dashboard → Libraries → Manage library → Folders) and let the library scan, so the placeholder items disappear.
+1. In each library that has a JellyShare placeholder folder (Movies, Shows, Music, Audiobooks), remove that folder from
+   the library (Dashboard → Libraries → Manage library → Folders) and let the library scan, so the placeholder items
+   disappear.
 2. **Dashboard → Plugins → JellyShare → Uninstall**, then restart Jellyfin.
-3. Delete the two placeholder folders (the ones shown in the plugin's Setup section; by default `placeholders/Movies` and
-   `placeholders/Shows` in the plugin's data folder) if they are still on disk. Your own media folders are never touched.
+3. Delete the placeholder folders (the ones shown in the plugin's Setup section; by default `placeholders/Movies`,
+   `placeholders/Shows`, `placeholders/Music` and `placeholders/Audiobooks` in the plugin's data folder) if they are
+   still on disk. Your own media folders are never touched.
 
 ## Structure
 

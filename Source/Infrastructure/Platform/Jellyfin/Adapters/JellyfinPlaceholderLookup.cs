@@ -2,9 +2,11 @@ using JellyShare.Application.Features.Relay;
 using JellyShare.Domain.Interfaces.Configuration;
 using JellyShare.Domain.Interfaces.Relay;
 using JellyShare.Domain.Interfaces.Sync;
+using JellyShare.Domain.Keys;
 using MediaBrowser.Common.Net;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Devices;
+using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using Microsoft.Extensions.Logging;
 
@@ -55,12 +57,17 @@ internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     public PlaceholderMedia? Find(Guid itemId)
     {
         var item = _library.GetItemById(itemId);
-        if (item is null || !item.IsShortcut || !RelayUrl.TryGetKey(item.ShortcutPath, _relayBase.Current, out var key))
+        if (item is null || !RelayUrl.TryGetKey(ShortcutUrl(item), _relayBase.Current, out var key))
         {
             return null;
         }
 
-        return new PlaceholderMedia(key, item.TotalBitrate is > 0 ? item.TotalBitrate : CatalogBitrate(key));
+        var entry = _index.Find(key);
+        return new PlaceholderMedia(
+            key,
+            item.TotalBitrate is > 0 ? item.TotalBitrate : CatalogBitrate(entry),
+            entry is null ? null : TitleKey.For(entry),
+            entry is { Sources: [var first, ..] } ? first.Item : null);
     }
 
     /// <inheritdoc />
@@ -68,6 +75,31 @@ internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
     {
         ArgumentNullException.ThrowIfNull(caller);
         return Task.FromResult(new CallerLimits(RemoteLimit(caller), StoredProfileBitrate(caller.DeviceId)));
+    }
+
+    // Multi-file audiobook folders are resolved without IsShortcut and Jellyfin sets ShortcutPath only on a remote
+    // probe, so a .strm without one is read (docs/spike-results.md, audio playback spike).
+    private string? ShortcutUrl(BaseItem item)
+    {
+        if (item.IsShortcut && !string.IsNullOrWhiteSpace(item.ShortcutPath))
+        {
+            return item.ShortcutPath;
+        }
+
+        if (string.IsNullOrEmpty(item.Path) || !item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            return File.ReadLines(item.Path).Select(l => l.Trim()).FirstOrDefault(l => l.Length > 0);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _logger.LogDebug(ex, "JellyShare: placeholder file unreadable");
+            return null;
+        }
     }
 
     private int? StoredProfileBitrate(string? deviceId)
@@ -105,9 +137,8 @@ internal sealed class JellyfinPlaceholderLookup : IPlaceholderLookup
         }
     }
 
-    private int? CatalogBitrate(string key)
+    private int? CatalogBitrate(MergedEntry? entry)
     {
-        var entry = _index.Find(key);
         if (entry is null)
         {
             return null;

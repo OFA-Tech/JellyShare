@@ -1,3 +1,5 @@
+using JellyShare.Domain.Enums;
+
 namespace JellyShare.Domain.Models.Sync;
 
 /// <summary>Outcome of a sync run.</summary>
@@ -35,6 +37,9 @@ public sealed record SyncReport(
 
     /// <summary>Gets local files that are missing (their titles may get placeholders).</summary>
     public int MissingLocalFiles { get; init; }
+
+    /// <summary>Gets the media types peers offered that got no placeholders because their placeholder folder is not set.</summary>
+    public IReadOnlyList<MediaType> SkippedTypesWithoutFolder { get; init; } = [];
 
     /// <summary>Gets when the run finished.</summary>
     public DateTimeOffset FinishedUtc { get; init; }

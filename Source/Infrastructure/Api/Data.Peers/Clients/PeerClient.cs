@@ -171,10 +171,18 @@ public sealed class PeerClient : IPeerClient
     public async Task<PeerFetchResult> FetchCatalogAsync(RemotePeer peer, string? etag, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(peer);
-        var uri = BuildUri(peer.BaseUrl, "JellyShare/v1/catalog");
+        var requested = MediaTypes.Requested(peer);
+        var uri = BuildUri(peer.BaseUrl, "JellyShare/v1/catalog" + (requested.Count == 0 ? string.Empty : "?types=" + MediaTypes.Format(requested)));
         if (uri is null)
         {
             return Fail("invalid base url");
+        }
+
+        if (requested.Count == 0)
+        {
+            // Nothing this version can receive is accepted from the peer: an empty catalog, and no request (an empty
+            // types value would mean movies and shows to the provider).
+            return new PeerFetchResult(true, false, new CatalogResponse(ProtocolInfo.Version, string.Empty, string.Empty, []), null);
         }
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -219,7 +227,7 @@ public sealed class PeerClient : IPeerClient
                     return Fail("incompatible protocol " + Shorten(catalog.ProtocolVersion));
                 }
 
-                return new PeerFetchResult(true, false, Sanitize(catalog), null);
+                return new PeerFetchResult(true, false, Sanitize(catalog, peer), null);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -362,12 +370,14 @@ public sealed class PeerClient : IPeerClient
 
     private static PeerFetchResult Fail(string error) => new(false, false, null, error);
 
-    private static CatalogResponse Sanitize(CatalogResponse catalog)
+    private static CatalogResponse Sanitize(CatalogResponse catalog, RemotePeer peer)
     {
+        // A provider from before media types sends everything it shares: keep only what this peer is accepted for.
         var items = (catalog.Items ?? [])
             .Where(i => i is not null
                 && !string.IsNullOrWhiteSpace(i.Id)
-                && (i.Type == "Movie" || i.Type == "Episode"))
+                && i.Type is not null
+                && MediaTypes.IsRequested(peer, i.Type))
             .Select(i => i with
             {
                 Name = i.Name ?? string.Empty,

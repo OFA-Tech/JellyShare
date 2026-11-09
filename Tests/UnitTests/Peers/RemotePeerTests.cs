@@ -17,6 +17,8 @@ public sealed class RemotePeerTests
         peer.LimitAction.ShouldBe(StreamLimitAction.Refuse);
         peer.Username.ShouldBe(string.Empty);
         peer.AccountUserId.ShouldBe(string.Empty);
+        peer.AcceptAllTypes.ShouldBeTrue();
+        peer.AcceptTypes.ShouldBeEmpty();
     }
 
     [Fact]
@@ -35,6 +37,8 @@ public sealed class RemotePeerTests
             AccountUserId = "uid",
             MaxStreams = 3,
             LimitAction = StreamLimitAction.StopOldest,
+            AcceptAllTypes = false,
+            AcceptTypes = new List<MediaType> { MediaType.Music },
         };
 
         var copy = peer.Copy();
